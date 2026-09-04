@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Added a manual, permission-minimal macOS Chrome MV3 probe for the controlled loopback fixture; it tests same-tab move/focus/restore primitives only and always reports Host fence unavailable and Handoff inactive.
 - Added a read-only macOS Security.framework launcher/helper identity verifier foundation with fixed non-authorizing output, exact Team/signing-ID/CDHash/designated-requirement checks, and thin Mach-O enforcement; release pins remain deliberately unconfigured, so production reports `INACTIVE` and no Credential path is activated.
 - Tightened fixture-only Handoff receipt admission so Host Profile and complete same-tab scope bindings, strict hash forms, and receipt/lease timing must all match before a user lease can activate; no production Host verifier is connected yet.
 - Upgraded HostProfile to v5 with exact lowercase 20-byte Security.framework CDHash fields for one architecture-specific launcher/helper artifact, distinct from 64-hex SHA-256 evidence and trust-root digests; Credential activation remains hard-rejected without the native verifier.

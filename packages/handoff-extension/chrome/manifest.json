@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Oxrail Same-Tab Evidence Probe",
+  "version": "0.1.0",
+  "version_name": "0.1.0-alpha.0 evidence-only",
+  "description": "Explicit, non-authorizing probe for Chrome same-tab move/focus/restore primitives.",
+  "incognito": "not_allowed",
+  "permissions": ["activeTab"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Run Oxrail same-tab fixture probe"
+  }
+}

@@ -25,6 +25,40 @@
 
 不把 Codex Hooks 的结论外推到 ChatGPT Web；本轮只声明实际 inventory、HostProfile 和 trace 证明的 surface/build/route。
 
+## 手动 Chrome same-tab 原语 probe
+
+仓库包含一个独立的、非授权 MV3 probe，用于在 macOS 的受控 fixture 中检查 Chrome 是否会移动、聚焦并恢复**同一个现有 tab 对象**。它不是安装验证、Host Handoff verifier 或真实任务测试，不能签发 Host receipt，也不会把 Handoff/Credential protection 变成 `ACTIVE`。
+
+在固定 commit 的源码 checkout 中运行：
+
+```bash
+pnpm build
+pnpm fixture:serve
+```
+
+然后由用户在用于实验的 Chrome profile 中人工执行：
+
+1. 打开 `chrome://extensions`，启用 Developer mode，选择 Load unpacked，并加载固定 checkout 的 `dist/handoff-control`。不得用策略或脚本静默安装。
+2. 在扩展卡片中打开 service-worker inspector；它只用于接收下面的去敏单行 JSON。
+3. 打开 `http://127.0.0.1:4173/`，或 harness 返回的、只含一个 64 位小写十六进制 `reset` 参数的 URL。不要在真实账号、日常 profile 或其它页面运行。
+4. 在该 fixture tab 处于活动状态时，人工点击 Oxrail 扩展按钮一次。按钮是唯一入口；网页、Agent 和外部进程都不能传入 tab ID 或触发 probe。
+5. 在 service-worker inspector 中等待以 `OXRAIL_SAME_TAB_PROBE` 开头的单行 JSON；没有该行即视为未取得结果。扩展不会在其它页面保留 badge/title 状态。只同步该去敏结果和 `dist/handoff-control/build-evidence.json`，不同步浏览器页面、tab/window ID 或截图。
+
+成功结果仍必须包含：
+
+```text
+authority = FIXTURE_ONLY_NON_AUTHORIZING
+chromeTabObjectContinuity = PASSED
+fixtureUrlStable = PASSED
+documentBinding = UNKNOWN
+hostNativeActionFence = UNAVAILABLE
+hostTabRouteBinding = UNKNOWN
+handoff = INACTIVE
+capabilityEffect = NONE
+```
+
+该 probe 只有一次性 `activeTab` 权限，没有 host permissions、content script、storage、native messaging、Cookie、history、clipboard、capture 或 debugger 权限。它只证明运行该扩展的 Chrome profile 中存在 window/tab 原语；它不能证明该 tab 属于当前 Computer Use route、Host 已暂停 Agent 路径、原任务能自动 continuation，或满足 `REQ-HO-017`/`GATE-G9`。
+
 ## 固定实验设计
 
 ### 变体、pair 与三阶段成本
