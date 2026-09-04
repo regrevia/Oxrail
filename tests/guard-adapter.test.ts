@@ -130,7 +130,7 @@ function profile(): HostProfile {
       policy: "plugin",
       trustState: "active",
       definitionHash: hash("b"),
-      concurrentConflictProbe: "unknown",
+      concurrentConflictProbe: "passed",
     },
     nativeCapabilities: {
       outputTokenLimit: "unknown",
@@ -201,7 +201,7 @@ function profile(): HostProfile {
     },
     derived: {
       mode: "MICRO_ACTION_GUARD",
-      safety: "INACTIVE",
+      safety: "ACTIVE",
       handoff: "INACTIVE",
       credentialProtection: "INACTIVE",
       allowedClaims: ["fixture guard"],
@@ -368,12 +368,15 @@ describe("host Guard adapter", () => {
   });
 
   it.each([
-    ["USER_LEASE_ACTIVE", "NATIVE"],
-    ["HANDOFF_VERIFYING", "NATIVE"],
-    ["RUNNING", "HUMAN"],
+    ["USER_LEASE_ACTIVE", "NATIVE", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["HANDOFF_VERIFYING", "NATIVE", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["RUNNING", "HUMAN", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["HANDOFF_PREPARING", "NATIVE", "OXRAIL_VERIFICATION_INCONCLUSIVE"],
+    ["RESTORING_TAB", "NONE", "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"],
+    ["RESUMING", "NONE", "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"],
   ] as const)(
     "denies an exact browser tool before decoding while phase=%s and owner=%s",
-    (phase, pointerOwner) => {
+    (phase, pointerOwner, reasonCode) => {
       const state = {
         ...createBrowserTaskState({
           sessionId: "session-lease",
@@ -401,7 +404,7 @@ describe("host Guard adapter", () => {
         mode: "ACTIVE",
         decision: {
           disposition: "BLOCK_BEFORE_EXECUTION",
-          reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
+          reasonCode,
         },
         output: {
           hookSpecificOutput: {
@@ -414,7 +417,7 @@ describe("host Guard adapter", () => {
     },
   );
 
-  it("bypasses before lease denial unless profile and state scope are trusted", () => {
+  it("does not enforce a seeded lease after profile activation drifts", () => {
     const activeProfile = profile();
     const state = {
       ...createBrowserTaskState({
@@ -495,6 +498,36 @@ describe("host Guard adapter", () => {
           toolUseId: "call-unrelated",
           toolInput: {},
         },
+      }),
+    ).toEqual({
+      mode: "BYPASSED",
+      output: {},
+      reasonCode: "OXRAIL_HOST_ROUTE_UNPROVEN",
+    });
+  });
+
+  it("does not enforce when the profile reports Safety inactive", () => {
+    const inactiveSafety = structuredClone(profile());
+    inactiveSafety.derived.safety = "INACTIVE";
+    const state = createBrowserTaskState({
+      sessionId: "session-safety-inactive",
+      taskId: "task-safety-inactive",
+      hostProfileId: inactiveSafety.profileId,
+      mode: "MICRO_ACTION_GUARD",
+    });
+
+    expect(
+      runGuardPreToolUse({
+        ...registryBinding(),
+        ...stateScope(state),
+        call: {
+          toolName: "fixture.native.browser",
+          toolUseId: "call-safety-inactive",
+          toolInput: { action: "click", axis: "primary" },
+        },
+        profile: inactiveSafety,
+        registry,
+        state,
       }),
     ).toEqual({
       mode: "BYPASSED",

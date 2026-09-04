@@ -5,18 +5,9 @@ var __export = (target, all) => {
 };
 
 // packages/host-openai/src/hook.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
-import path4 from "node:path";
-
-// packages/host-openai/src/matcher.ts
-function classifyTool(profile, toolName) {
-  return profile.route.canonicalToolMatchers.includes(toolName) ? "BROWSER" : "UNRELATED";
-}
-
-// packages/host-openai/src/profile.ts
-import { createHash as createHash2, randomUUID } from "node:crypto";
-import path2 from "node:path";
+import path7 from "node:path";
 
 // packages/protocol/src/digest.ts
 import { createHash } from "node:crypto";
@@ -68,6 +59,9 @@ function canonicalize(value, redact, key = "", seen = /* @__PURE__ */ new WeakSe
 }
 function deterministicDigest(domain2, value) {
   return hash(domain2, JSON.stringify(canonicalize(value, false)));
+}
+function redactedDeterministicDigest(domain2, value) {
+  return hash(domain2, JSON.stringify(canonicalize(value, true)));
 }
 
 // node_modules/.pnpm/zod@4.1.5/node_modules/zod/v4/classic/external.js
@@ -801,10 +795,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path5) {
-  if (!path5)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path5.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1163,11 +1157,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path5, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path5);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -1335,7 +1329,7 @@ function treeifyError(error43, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error44, path5 = []) => {
+  const processError = (error44, path8 = []) => {
     var _a, _b;
     for (const issue2 of error44.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -1345,7 +1339,7 @@ function treeifyError(error43, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1377,8 +1371,8 @@ function treeifyError(error43, _mapper) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path5) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -12995,12 +12989,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
     ["test_results", manifest.test_results.length],
     ["reviewers", manifest.reviewers.length]
   ];
-  for (const [path5, size] of requiredCollections) {
+  for (const [path8, size] of requiredCollections) {
     if (size === 0) {
       context.addIssue({
         code: "custom",
-        path: [path5],
-        message: `ACCEPTED evidence requires ${path5}`
+        path: [path8],
+        message: `ACCEPTED evidence requires ${path8}`
       });
     }
   }
@@ -13143,9 +13137,157 @@ var EvidenceTraceSchema = external_exports.strictObject({
 });
 
 // packages/core/src/policy.ts
+var pass = (reasonCode) => ({
+  disposition: "PASS_THROUGH_ORIGINAL",
+  reasonCode,
+  recoverable: true
+});
+function actionIdentity(action) {
+  return redactedDeterministicDigest("oxrail-action-identity-v1", {
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    targetSignature: action.target ? redactedDeterministicDigest("oxrail-target-signature-v1", action.target) : void 0,
+    inputSignature: action.inputDigest
+  });
+}
+function actionDigestIdentity(action) {
+  return redactedDeterministicDigest("oxrail-action-identity-v1", {
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    targetSignature: action.targetSignature,
+    inputSignature: action.inputSignature
+  });
+}
+function createActionDigest(action, decision, timestamp = Date.now()) {
+  const decisionKind = decision.disposition === "PASS_THROUGH_ORIGINAL" ? "ALLOW" : decision.disposition === "SEMANTIC_HINT_ONLY" ? "REWRITE" : decision.disposition === "REQUEST_HUMAN_HANDOFF" ? "HANDOFF" : "DENY";
+  return {
+    toolUseId: action.toolUseId,
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    ...action.target ? {
+      targetSignature: redactedDeterministicDigest(
+        "oxrail-target-signature-v1",
+        action.target
+      ),
+      sourceRevision: action.target.sourceRevision
+    } : {},
+    ...action.inputDigest ? { inputSignature: action.inputDigest } : {},
+    decision: decisionKind,
+    reasonCode: decision.reasonCode,
+    timestamp
+  };
+}
+function targetIsStale(context) {
+  const { action, state, currentTargetFingerprint } = context;
+  if (action.revision !== void 0 && action.revision !== state.revision)
+    return true;
+  if (!action.target) return false;
+  if (action.target.sourceRevision !== state.revision) return true;
+  if (action.target.documentBinding !== void 0 && state.documentBinding !== void 0 && action.target.documentBinding !== state.documentBinding) {
+    return true;
+  }
+  return currentTargetFingerprint !== void 0 && action.target.fingerprint !== void 0 && currentTargetFingerprint !== action.target.fingerprint;
+}
+function repeatsWithoutProgress(action, state) {
+  if (!state.lastAction || state.noProgressCount < 2 || action.granularity === "NONE")
+    return false;
+  return actionIdentity(action) === actionDigestIdentity(state.lastAction);
+}
+function browserOwnershipDecision(state) {
+  if (state.phase === "USER_LEASE_ACTIVE" || state.phase === "HANDOFF_VERIFYING" || state.pointerOwner === "HUMAN") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
+      recoverable: true
+    };
+  }
+  if (state.phase === "RESUMING" || state.phase === "RESTORING_TAB" || state.pointerOwner === "NONE") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
+      recoverable: true
+    };
+  }
+  if (state.phase === "HANDOFF_PREPARING") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+      recoverable: true
+    };
+  }
+  return void 0;
+}
+function evaluateAction(context) {
+  const { action, state } = context;
+  const ownershipDecision = browserOwnershipDecision(state);
+  if (ownershipDecision) return ownershipDecision;
+  const freshAndCovered = context.routeCovered !== false && state.hostProfileStatus === "VALID";
+  if (!freshAndCovered || state.mode === "ADVISORY_ONLY" || state.mode === "UNSUPPORTED") {
+    return pass(
+      !freshAndCovered ? state.hostProfileStatus === "VALID" ? "OXRAIL_HOST_ROUTE_UNPROVEN" : "OXRAIL_HOST_PROFILE_STALE" : "OXRAIL_HOST_ROUTE_UNPROVEN"
+    );
+  }
+  if (state.currentOrigin !== void 0 && action.origin !== void 0 && action.origin !== state.currentOrigin) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+      recoverable: true
+    };
+  }
+  if (context.requiresHumanBoundary) {
+    return context.handoffAvailable ? {
+      disposition: "REQUEST_HUMAN_HANDOFF",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: true
+    } : {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: false
+    };
+  }
+  if (targetIsStale(context) && action.impact !== "read") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_STALE_TARGET",
+      recoverable: true
+    };
+  }
+  if (action.impact === "high-impact") {
+    if (context.hostApprovalAvailable) {
+      return {
+        disposition: "REQUEST_HOST_APPROVAL",
+        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+        recoverable: true
+      };
+    }
+    if (context.handoffAvailable) {
+      return {
+        disposition: "REQUEST_HUMAN_HANDOFF",
+        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+        recoverable: true
+      };
+    }
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: false
+    };
+  }
+  if (repeatsWithoutProgress(action, state)) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+      recoverable: true
+    };
+  }
+  return pass("OXRAIL_NORMAL_ACTION_PASSTHROUGH");
+}
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
-  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || !profile.evidence.validUntilHostChange) {
+  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || profile.hooks.concurrentConflictProbe !== "passed" || !profile.evidence.validUntilHostChange) {
     return "UNSUPPORTED";
   }
   if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
@@ -13177,37 +13319,1125 @@ function deriveHostMode(profile) {
   return "TRANSACTION_GUARD";
 }
 
+// packages/core/src/safe-state.ts
+import { createHash as createHash2 } from "node:crypto";
+var sanitizedId = /^oxrail-id:[a-f0-9]{64}$/;
+function digestId(domain2, value) {
+  return `oxrail-id:${createHash2("sha256").update(domain2).update("\0").update(value).digest("hex")}`;
+}
+var canonicalId = (domain2, value) => sanitizedId.test(value) ? value : digestId(domain2, value);
+var persistentDocumentBinding = (value) => digestId("oxrail-persisted-document-v1", value);
+var persistentToolUseId = (value) => digestId("oxrail-persisted-tool-use-v1", value);
+var canonicalPersistentDocumentBinding = (value) => canonicalId("oxrail-persisted-document-v1", value);
+var canonicalPersistentToolUseId = (value) => canonicalId("oxrail-persisted-tool-use-v1", value);
+var canonicalPersistentHandoffId = (value) => canonicalId("oxrail-persisted-handoff-v1", value);
+function canonicalOrigin(value) {
+  if (!value) return void 0;
+  try {
+    const url2 = new URL(value);
+    return ["http:", "https:"].includes(url2.protocol) ? url2.origin : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function sanitizeBrowserTaskStateForPersistence(value) {
+  const parsed = BrowserTaskStateSchema.safeParse(value);
+  if (!parsed.success) throw new TypeError("invalid BrowserTaskState");
+  const state = parsed.data;
+  const currentOrigin = canonicalOrigin(state.currentOrigin);
+  const lastObservation = state.lastObservation ? {
+    source: state.lastObservation.source,
+    tier: state.lastObservation.tier,
+    stateHash: state.lastObservation.stateHash,
+    ...state.lastObservation.documentBinding ? {
+      documentBinding: canonicalPersistentDocumentBinding(
+        state.lastObservation.documentBinding
+      )
+    } : {},
+    revision: state.lastObservation.revision,
+    ...state.lastObservation.relevantRegionHash ? { relevantRegionHash: state.lastObservation.relevantRegionHash } : {},
+    ...state.lastObservation.actionableHash ? { actionableHash: state.lastObservation.actionableHash } : {},
+    ...state.lastObservation.payloadTokenEstimate !== void 0 ? {
+      payloadTokenEstimate: state.lastObservation.payloadTokenEstimate
+    } : {},
+    ...state.lastObservation.screenshotFrameCorrelationId ? {
+      screenshotFrameCorrelationId: canonicalId(
+        "oxrail-screenshot-frame-v1",
+        state.lastObservation.screenshotFrameCorrelationId
+      )
+    } : {},
+    ...state.lastObservation.viewportBinding ? {
+      viewportBinding: canonicalId(
+        "oxrail-viewport-binding-v1",
+        state.lastObservation.viewportBinding
+      )
+    } : {}
+  } : void 0;
+  const lastAction = state.lastAction ? {
+    ...state.lastAction,
+    toolUseId: canonicalPersistentToolUseId(state.lastAction.toolUseId)
+  } : void 0;
+  const {
+    activeHandoffId: _activeHandoffId,
+    currentOrigin: _currentOrigin,
+    currentUrlKey: _currentUrlKey,
+    documentBinding: _documentBinding,
+    lastAction: _lastAction,
+    lastObservation: _lastObservation,
+    pendingNativeActionIds: _pendingNativeActionIds,
+    turnId: _turnId,
+    ...contentFreeState
+  } = state;
+  return BrowserTaskStateSchema.parse({
+    ...contentFreeState,
+    ...state.turnId ? { turnId: canonicalId("oxrail-persisted-turn-v1", state.turnId) } : {},
+    goalSummary: "browser task",
+    ...currentOrigin ? { currentOrigin } : {},
+    ...state.documentBinding ? {
+      documentBinding: canonicalPersistentDocumentBinding(
+        state.documentBinding
+      )
+    } : {},
+    lastObservation,
+    lastAction,
+    ...state.activeHandoffId ? {
+      activeHandoffId: canonicalPersistentHandoffId(state.activeHandoffId)
+    } : {},
+    pendingNativeActionIds: state.pendingNativeActionIds.map(
+      canonicalPersistentToolUseId
+    )
+  });
+}
+
+// packages/core/src/state.ts
+function createBrowserTaskState(input) {
+  return BrowserTaskStateSchema.parse({
+    schemaVersion: 3,
+    sessionId: input.sessionId,
+    taskId: input.taskId,
+    goalSummary: "browser task",
+    hostProfileId: input.hostProfileId,
+    hostProfileStatus: "VALID",
+    mode: input.mode,
+    phase: "RUNNING",
+    revision: 0,
+    noProgressCount: 0,
+    recoveryLevel: 0,
+    recoveryTransitions: 0,
+    authState: "UNKNOWN",
+    leaseEpoch: 0,
+    pointerOwner: "NATIVE",
+    targetCacheEpoch: 0,
+    pendingNativeActionIds: [],
+    stateVersion: 0
+  });
+}
+function stageToolDecision(state, action, decision) {
+  const toolUseId = persistentToolUseId(action.toolUseId);
+  const executed = decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
+  const pendingNativeActionIds = [
+    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId))
+  ];
+  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
+    pendingNativeActionIds.push(toolUseId);
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    lastAction: {
+      ...createActionDigest(action, decision),
+      toolUseId
+    },
+    pendingNativeActionIds,
+    stateVersion: state.stateVersion + 1
+  });
+}
+function completePendingTool(state, toolUseId) {
+  const persistentId = persistentToolUseId(toolUseId);
+  if (!state.pendingNativeActionIds.some(
+    (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId
+  )) {
+    return state;
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    pendingNativeActionIds: state.pendingNativeActionIds.map(canonicalPersistentToolUseId).filter((pendingId) => pendingId !== persistentId),
+    stateVersion: state.stateVersion + 1
+  });
+}
+
 // packages/core/src/store.ts
+import { createHash as createHash3, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
+import path from "node:path";
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+var LOCK_STALE_MS = 3e4;
+var MAX_LOCK_BYTES = 512;
+var errorMessages = {
+  CONFLICT: "BrowserTaskState version conflict",
+  CORRUPT: "BrowserTaskState is corrupt",
+  INVALID_STATE: "BrowserTaskState is invalid",
+  TOO_LARGE: "BrowserTaskState exceeds the local size limit",
+  UNAVAILABLE: "BrowserTaskState storage is unavailable"
+};
+var BrowserTaskStateStoreError = class extends Error {
+  constructor(code) {
+    super(errorMessages[code]);
+    this.code = code;
+    this.name = "BrowserTaskStateStoreError";
+  }
+};
+var digestName = (domain2, value) => createHash3("sha256").update(domain2).update("\0").update(value).digest("hex");
+function assertScope(scope) {
+  if (!scope.sessionId || !scope.taskId) {
+    throw new BrowserTaskStateStoreError("INVALID_STATE");
+  }
+}
+var taskDirectory = (root, scope) => path.join(
+  root,
+  digestName("oxrail-session-state-v1", scope.sessionId),
+  digestName("oxrail-browser-task-state-v1", scope.taskId)
+);
+var statePath = (root, scope) => path.join(taskDirectory(root, scope), "browser-task-state.json");
+var errorCode = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+function protectedReadFlags() {
+  if (process.platform === "win32" || !constants.O_NOFOLLOW || !constants.O_NONBLOCK) {
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  }
+  return constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+}
+async function readBoundedPrivateFile(filename, maximumBytes, overflowCode) {
+  let handle;
+  try {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0 || maximumBytes > MAX_BROWSER_TASK_STATE_BYTES) {
+      throw new BrowserTaskStateStoreError("UNAVAILABLE");
+    }
+    handle = await open(filename, protectedReadFlags());
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isFile() || (metadata.mode & 0o077n) !== 0n) {
+      throw new BrowserTaskStateStoreError("UNAVAILABLE");
+    }
+    if (metadata.size > BigInt(maximumBytes)) {
+      throw new BrowserTaskStateStoreError(overflowCode);
+    }
+    const contents = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < contents.byteLength) {
+      const { bytesRead } = await handle.read(
+        contents,
+        length,
+        contents.byteLength - length,
+        length
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maximumBytes) {
+      throw new BrowserTaskStateStoreError(overflowCode);
+    }
+    return { contents: contents.subarray(0, length), metadata };
+  } catch (error43) {
+    if (errorCode(error43) === "ENOENT" || error43 instanceof BrowserTaskStateStoreError) {
+      throw error43;
+    }
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  } finally {
+    await handle?.close().catch(() => void 0);
+  }
+}
+async function readLock(lockPath) {
+  try {
+    const { contents, metadata } = await readBoundedPrivateFile(
+      lockPath,
+      MAX_LOCK_BYTES,
+      "UNAVAILABLE"
+    );
+    const value = JSON.parse(contents.toString("utf8"));
+    if (!value || typeof value !== "object") return void 0;
+    const lock = value;
+    if (lock.schemaVersion !== 1 || !Number.isSafeInteger(lock.createdAt) || lock.createdAt < 0 || !Number.isSafeInteger(lock.pid) || lock.pid <= 0 || typeof lock.nonce !== "string" || !/^[a-f0-9-]{36}$/.test(lock.nonce)) {
+      return void 0;
+    }
+    return {
+      createdAt: lock.createdAt,
+      device: metadata.dev,
+      inode: metadata.ino,
+      modifiedAt: Number(metadata.mtimeMs),
+      nonce: lock.nonce,
+      pid: lock.pid
+    };
+  } catch (error43) {
+    if (error43 instanceof BrowserTaskStateStoreError) throw error43;
+    return void 0;
+  }
+}
+function processIsDead(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error43) {
+    return errorCode(error43) === "ESRCH";
+  }
+}
+var sameLock = (left, right) => left.createdAt === right.createdAt && left.device === right.device && left.inode === right.inode && left.modifiedAt === right.modifiedAt && left.nonce === right.nonce && left.pid === right.pid;
+async function recoverStaleLock(lockPath, now) {
+  const stale = await readLock(lockPath);
+  if (!stale || now - Math.max(stale.createdAt, stale.modifiedAt) < LOCK_STALE_MS || !processIsDead(stale.pid)) {
+    return false;
+  }
+  const claimPath = `${lockPath}.recovered-${stale.nonce}`;
+  try {
+    await link(lockPath, claimPath);
+  } catch {
+    return false;
+  }
+  const claimed = await readLock(claimPath);
+  const current = await readLock(lockPath);
+  if (!claimed || !current || !sameLock(stale, claimed) || !sameLock(claimed, current) || !processIsDead(current.pid)) {
+    await unlink(claimPath).catch(() => void 0);
+    return false;
+  }
+  try {
+    await unlink(lockPath);
+    return true;
+  } catch {
+    await unlink(claimPath).catch(() => void 0);
+    return false;
+  }
+}
+async function tryCreateLock(lockPath) {
+  const nonce = randomUUID();
+  const createdAt = Date.now();
+  const temporary = `${lockPath}.${nonce}.tmp`;
+  let handle;
+  try {
+    handle = await open(temporary, "wx", 384);
+    await handle.writeFile(
+      `${JSON.stringify({ schemaVersion: 1, pid: process.pid, createdAt, nonce })}
+`,
+      "utf8"
+    );
+    await handle.sync();
+    const metadata = await handle.stat({ bigint: true });
+    await handle.close();
+    handle = void 0;
+    await link(temporary, lockPath);
+    return {
+      createdAt,
+      device: metadata.dev,
+      inode: metadata.ino,
+      modifiedAt: Number(metadata.mtimeMs),
+      nonce,
+      pid: process.pid
+    };
+  } catch (error43) {
+    if (errorCode(error43) === "EEXIST") return void 0;
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  } finally {
+    await handle?.close();
+    await unlink(temporary).catch(() => void 0);
+  }
+}
+async function acquireLock(lockPath) {
+  protectedReadFlags();
+  const acquired = await tryCreateLock(lockPath);
+  if (acquired) return acquired;
+  if (!await recoverStaleLock(lockPath, Date.now())) {
+    throw new BrowserTaskStateStoreError("CONFLICT");
+  }
+  const recovered = await tryCreateLock(lockPath);
+  if (!recovered) throw new BrowserTaskStateStoreError("CONFLICT");
+  return recovered;
+}
+async function releaseLock(lockPath, ownership) {
+  const current = await readLock(lockPath).catch(() => void 0);
+  if (!current || !sameLock(current, ownership)) return;
+  await unlink(lockPath).catch(() => void 0);
+}
+async function readStateFile(filename, scope) {
+  try {
+    const { contents } = await readBoundedPrivateFile(
+      filename,
+      MAX_BROWSER_TASK_STATE_BYTES,
+      "TOO_LARGE"
+    );
+    let value;
+    try {
+      value = JSON.parse(contents.toString("utf8"));
+    } catch {
+      throw new BrowserTaskStateStoreError("CORRUPT");
+    }
+    const parsed = BrowserTaskStateSchema.safeParse(value);
+    if (!parsed.success || parsed.data.sessionId !== scope.sessionId || parsed.data.taskId !== scope.taskId) {
+      throw new BrowserTaskStateStoreError("CORRUPT");
+    }
+    return parsed.data;
+  } catch (error43) {
+    if (errorCode(error43) === "ENOENT") return void 0;
+    if (error43 instanceof BrowserTaskStateStoreError) throw error43;
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  }
+}
+async function makePrivateDirectory(directory) {
+  try {
+    await mkdir(directory, { recursive: true, mode: 448 });
+    await chmod(directory, 448);
+  } catch {
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  }
+}
+async function syncDirectory(directory) {
+  let handle;
+  try {
+    handle = await open(directory, "r");
+    await handle.sync();
+  } catch (error43) {
+    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode(error43) ?? "")) {
+      throw error43;
+    }
+  } finally {
+    await handle?.close();
+  }
+}
+async function persistState(directory, destination, state) {
+  const parsed = BrowserTaskStateSchema.safeParse(state);
+  if (!parsed.success) throw new BrowserTaskStateStoreError("INVALID_STATE");
+  const contents = `${JSON.stringify(
+    sanitizeBrowserTaskStateForPersistence(parsed.data)
+  )}
+`;
+  if (Buffer.byteLength(contents) > MAX_BROWSER_TASK_STATE_BYTES) {
+    throw new BrowserTaskStateStoreError("TOO_LARGE");
+  }
+  const temporary = path.join(directory, `.${randomUUID()}.tmp`);
+  let handle;
+  let committed = false;
+  try {
+    handle = await open(temporary, "wx", 384);
+    await handle.writeFile(contents, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    await rename(temporary, destination);
+    committed = true;
+    await chmod(destination, 384);
+    await syncDirectory(directory);
+  } catch (error43) {
+    await handle?.close();
+    await unlink(temporary).catch(() => void 0);
+    if (committed) return;
+    if (error43 instanceof BrowserTaskStateStoreError) throw error43;
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  }
+}
+async function transitionBrowserTaskState(root, scope, transition) {
+  assertScope(scope);
+  const directory = taskDirectory(root, scope);
+  await makePrivateDirectory(root);
+  await makePrivateDirectory(path.dirname(directory));
+  await makePrivateDirectory(directory);
+  const destination = statePath(root, scope);
+  const ownership = await acquireLock(
+    path.join(directory, ".browser-task-state.lock")
+  );
+  try {
+    const current = await readStateFile(destination, scope);
+    const result = await transition(current);
+    if (result.state) {
+      if (result.state.sessionId !== scope.sessionId || result.state.taskId !== scope.taskId || current && result.state.stateVersion !== current.stateVersion + 1) {
+        throw new BrowserTaskStateStoreError("INVALID_STATE");
+      }
+      await persistState(directory, destination, result.state);
+    }
+    return result.value;
+  } finally {
+    await releaseLock(
+      path.join(directory, ".browser-task-state.lock"),
+      ownership
+    );
+  }
+}
 
 // packages/core/src/tool-call.ts
-var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
+import { createHash as createHash4, createHmac, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
+import { constants as constants2 } from "node:fs";
+import {
+  chmod as chmod2,
+  link as link2,
+  lstat,
+  mkdir as mkdir2,
+  open as open2,
+  readdir,
+  rename as rename2,
+  unlink as unlink2
+} from "node:fs/promises";
+import path2 from "node:path";
+var MAX_TOOL_CALL_MARKER_BYTES = 1024;
+var MAX_ID_LENGTH = 4096;
+var REQUEST_DIGEST_KEY_BYTES = 32;
+var REQUEST_DIGEST_KEY_FILE = ".request-digest-key";
+var DIGEST = /^[a-f0-9]{64}$/;
+var errorCode2 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+function digest(domain2, ...values) {
+  const hash6 = createHash4("sha256").update(domain2);
+  for (const value of values) {
+    hash6.update("\0").update(String(Buffer.byteLength(value))).update(":").update(value);
+  }
+  return hash6.digest("hex");
+}
+var validId = (value) => typeof value === "string" && value.length > 0 && value.length <= MAX_ID_LENGTH;
+var validScope = (scope) => Boolean(scope) && validId(scope.sessionId) && validId(scope.taskId);
+var toolDigestFor = (input) => digest("oxrail-tool-call-v2", input.sessionId, input.taskId, input.toolUseId);
+var journalDirectory = (root, scope) => path2.join(
+  root,
+  digest("oxrail-tool-call-session-v2", scope.sessionId),
+  digest("oxrail-tool-call-task-v2", scope.taskId),
+  "tool-calls"
+);
+var markerPath = (directory, toolDigest) => path2.join(directory, `${toolDigest}.json`);
+var receiptPath = (directory, toolDigest) => path2.join(directory, `${toolDigest}.post`);
+var decisionLeavesNativeActionPending = (decision) => decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
+function parseMarker(value, expectedToolDigest) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const marker = value;
+  const decision = PolicyDecisionSchema.safeParse(marker.decision);
+  if (Object.keys(value).sort().join(",") !== "bindingDigest,decision,requestDigest,schemaVersion,status,toolDigest" || marker.schemaVersion !== 1 || marker.toolDigest !== expectedToolDigest || !DIGEST.test(marker.bindingDigest ?? "") || !DIGEST.test(marker.requestDigest ?? "") || marker.status !== "PENDING" && marker.status !== "COMPLETE" || !decision.success || marker.status === "PENDING" && !decisionLeavesNativeActionPending(decision.data)) {
+    return;
+  }
+  return {
+    bindingDigest: marker.bindingDigest,
+    decision: decision.data,
+    requestDigest: marker.requestDigest,
+    schemaVersion: 1,
+    status: marker.status,
+    toolDigest: marker.toolDigest
+  };
+}
+async function readBounded(filename) {
+  let handle;
+  try {
+    handle = await open2(
+      filename,
+      constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK
+    );
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > MAX_TOOL_CALL_MARKER_BYTES || (metadata.mode & 63) !== 0) {
+      throw new Error("invalid marker metadata");
+    }
+    const contents = Buffer.alloc(MAX_TOOL_CALL_MARKER_BYTES + 1);
+    let length = 0;
+    while (length < contents.byteLength) {
+      const { bytesRead } = await handle.read(
+        contents,
+        length,
+        contents.byteLength - length,
+        length
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > MAX_TOOL_CALL_MARKER_BYTES) {
+      throw new Error("marker exceeds local limit");
+    }
+    return contents.subarray(0, length);
+  } finally {
+    await handle?.close();
+  }
+}
+async function readMarker(filename, expectedToolDigest) {
+  try {
+    const value = JSON.parse(
+      (await readBounded(filename)).toString("utf8")
+    );
+    const marker = parseMarker(value, expectedToolDigest);
+    return marker ? { kind: "VALID", marker } : { kind: "INVALID" };
+  } catch (error43) {
+    return { kind: errorCode2(error43) === "ENOENT" ? "MISSING" : "INVALID" };
+  }
+}
+async function privateDirectory(directory) {
+  await mkdir2(directory, { recursive: true, mode: 448 });
+  const metadata = await lstat(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error("journal path is not a directory");
+  }
+  await chmod2(directory, 448);
+}
+async function ensureJournalDirectory(root, scope) {
+  const directory = journalDirectory(root, scope);
+  await privateDirectory(root);
+  await privateDirectory(path2.dirname(path2.dirname(directory)));
+  await privateDirectory(path2.dirname(directory));
+  await privateDirectory(directory);
+  return directory;
+}
+async function loadRequestDigestKey(filename) {
+  const key = await readBounded(filename);
+  if (key.byteLength !== REQUEST_DIGEST_KEY_BYTES) {
+    throw new Error("invalid request digest key");
+  }
+  return key;
+}
+async function requestDigestKey(root) {
+  await privateDirectory(root);
+  const destination = path2.join(root, REQUEST_DIGEST_KEY_FILE);
+  try {
+    return await loadRequestDigestKey(destination);
+  } catch (error43) {
+    if (errorCode2(error43) !== "ENOENT") throw error43;
+  }
+  const candidate = randomBytes(REQUEST_DIGEST_KEY_BYTES);
+  const temporary = path2.join(root, `.${randomUUID2()}.key.tmp`);
+  let handle;
+  try {
+    handle = await open2(temporary, "wx", 384);
+    await handle.writeFile(candidate);
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    try {
+      await link2(temporary, destination);
+      await syncDirectory2(root);
+      return candidate;
+    } catch (error43) {
+      if (errorCode2(error43) !== "EEXIST") throw error43;
+      return await loadRequestDigestKey(destination);
+    }
+  } finally {
+    await handle?.close();
+    await unlink2(temporary).catch(() => void 0);
+  }
+}
+async function protectToolCallRequestDigest(root, unkeyedDigest) {
+  try {
+    if (!DIGEST.test(unkeyedDigest)) return;
+    return createHmac("sha256", await requestDigestKey(root)).update("oxrail-tool-call-request-v1\0").update(unkeyedDigest).digest("hex");
+  } catch {
+    return;
+  }
+}
+async function syncDirectory2(directory) {
+  let handle;
+  try {
+    handle = await open2(directory, "r");
+    await handle.sync();
+  } catch (error43) {
+    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode2(error43) ?? "")) {
+      throw error43;
+    }
+  } finally {
+    await handle?.close();
+  }
+}
+function serializeMarker(marker) {
+  const contents = `${JSON.stringify(marker)}
+`;
+  if (Buffer.byteLength(contents) > MAX_TOOL_CALL_MARKER_BYTES) {
+    throw new Error("marker exceeds local limit");
+  }
+  return contents;
+}
+async function createMarker(directory, destination, marker) {
+  const temporary = path2.join(
+    directory,
+    `.${marker.toolDigest}.${randomUUID2()}.tmp`
+  );
+  let handle;
+  let committed = false;
+  try {
+    handle = await open2(temporary, "wx", 384);
+    await handle.writeFile(serializeMarker(marker), "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    try {
+      await link2(temporary, destination);
+      committed = true;
+    } catch (error43) {
+      if (errorCode2(error43) === "EEXIST") return "EXISTS";
+      throw error43;
+    }
+    await syncDirectory2(directory);
+    return "CREATED";
+  } catch (error43) {
+    if (committed) return "CREATED";
+    throw error43;
+  } finally {
+    await handle?.close();
+    await unlink2(temporary).catch(() => void 0);
+  }
+}
+async function replaceMarker(directory, destination, marker) {
+  const temporary = path2.join(
+    directory,
+    `.${marker.toolDigest}.${randomUUID2()}.tmp`
+  );
+  let handle;
+  let committed = false;
+  try {
+    handle = await open2(temporary, "wx", 384);
+    await handle.writeFile(serializeMarker(marker), "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    await rename2(temporary, destination);
+    committed = true;
+    await syncDirectory2(directory);
+  } catch (error43) {
+    if (!committed) throw error43;
+  } finally {
+    await handle?.close();
+    await unlink2(temporary).catch(() => void 0);
+  }
+}
+var sameBinding = (marker, input) => marker.bindingDigest === input.bindingDigest && marker.requestDigest === input.requestDigest;
+var sameCompletion = (receipt, marker) => receipt.status === "COMPLETE" && receipt.bindingDigest === marker.bindingDigest && receipt.requestDigest === marker.requestDigest && receipt.decision.disposition === marker.decision.disposition && receipt.decision.reasonCode === marker.decision.reasonCode && receipt.decision.recoverable === marker.decision.recoverable;
+async function recordToolCallPre(root, input) {
+  try {
+    if (!validScope(input) || !validId(input.toolUseId) || !DIGEST.test(input.bindingDigest) || !DIGEST.test(input.requestDigest)) {
+      return { kind: "UNAVAILABLE" };
+    }
+    const decision = PolicyDecisionSchema.safeParse(input.decision);
+    if (!decision.success) return { kind: "UNAVAILABLE" };
+    const directory = await ensureJournalDirectory(root, input);
+    const toolDigest = toolDigestFor(input);
+    const marker = {
+      bindingDigest: input.bindingDigest,
+      decision: decision.data,
+      requestDigest: input.requestDigest,
+      schemaVersion: 1,
+      status: decisionLeavesNativeActionPending(decision.data) ? "PENDING" : "COMPLETE",
+      toolDigest
+    };
+    const destination = markerPath(directory, toolDigest);
+    if (await createMarker(directory, destination, marker) === "CREATED") {
+      return {
+        decision: marker.decision,
+        journalStatus: marker.status,
+        kind: "RECORDED"
+      };
+    }
+    const existing = await readMarker(destination, toolDigest);
+    if (existing.kind !== "VALID") return { kind: "UNAVAILABLE" };
+    if (!sameBinding(existing.marker, input)) return { kind: "MISMATCH" };
+    return {
+      decision: existing.marker.decision,
+      journalStatus: existing.marker.status,
+      kind: "REPLAY"
+    };
+  } catch {
+    return { kind: "UNAVAILABLE" };
+  }
+}
+async function completeToolCallPost(root, input) {
+  try {
+    if (!validScope(input) || !validId(input.toolUseId)) return "OUT_OF_ORDER";
+    const directory = journalDirectory(root, input);
+    const toolDigest = toolDigestFor(input);
+    const destination = markerPath(directory, toolDigest);
+    const current = await readMarker(destination, toolDigest);
+    if (current.kind === "MISSING") return "OUT_OF_ORDER";
+    if (current.kind !== "VALID") return "UNAVAILABLE";
+    const pending = decisionLeavesNativeActionPending(current.marker.decision);
+    if (!pending) return "OUT_OF_ORDER";
+    const receipt = receiptPath(directory, toolDigest);
+    if (current.marker.status === "COMPLETE") {
+      const recorded = await readMarker(receipt, toolDigest);
+      return recorded.kind === "VALID" && sameCompletion(recorded.marker, current.marker) ? "DUPLICATE" : "UNAVAILABLE";
+    }
+    const completed = {
+      ...current.marker,
+      status: "COMPLETE"
+    };
+    const claim = await createMarker(directory, receipt, completed);
+    if (claim === "EXISTS") {
+      const recorded = await readMarker(receipt, toolDigest);
+      if (recorded.kind !== "VALID" || !sameCompletion(recorded.marker, current.marker)) {
+        return "UNAVAILABLE";
+      }
+    }
+    await replaceMarker(directory, destination, completed);
+    return claim === "CREATED" ? "COMPLETED" : "DUPLICATE";
+  } catch {
+    return "UNAVAILABLE";
+  }
+}
+
+// packages/host-openai/src/matcher.ts
+function classifyTool(profile, toolName) {
+  return profile.route.canonicalToolMatchers.includes(toolName) ? "BROWSER" : "UNRELATED";
+}
+
+// packages/host-openai/src/guard.ts
+var hash4 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
+var magicPropertySegments = /* @__PURE__ */ new Set([
+  "__proto__",
+  "prototype",
+  "constructor"
+]);
+var fieldPath = external_exports.array(external_exports.string().min(1).max(128)).min(1).max(8).refine(
+  (segments) => segments.every((segment) => !magicPropertySegments.has(segment)),
+  "magic property segments are not allowed"
+);
+var sensitiveIdentityTokens = /* @__PURE__ */ new Set([
+  "authorization",
+  "card",
+  "clipboard",
+  "cookie",
+  "credential",
+  "cvc",
+  "cvv",
+  "input",
+  "key",
+  "keys",
+  "otp",
+  "passcode",
+  "passwd",
+  "password",
+  "pin",
+  "pwd",
+  "secret",
+  "text",
+  "token",
+  "value"
+]);
+var sensitiveIdentityCompounds = [
+  "apikey",
+  "cardnumber",
+  "clientsecret",
+  "privatekey",
+  "recoverycode"
+];
+var sensitiveIdentitySegment = (segment) => {
+  const words = segment.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const compact = words.join("");
+  return words.some((word) => sensitiveIdentityTokens.has(word)) || sensitiveIdentityCompounds.some((word) => compact.includes(word));
+};
+var identityFieldPath = fieldPath.refine(
+  (segments) => segments.every((segment) => !sensitiveIdentitySegment(segment)),
+  "sensitive fields cannot participate in input identity"
+);
+var identityValue = external_exports.union([
+  external_exports.string().max(256),
+  external_exports.number().finite(),
+  external_exports.boolean(),
+  external_exports.null()
+]);
+var exactToolName2 = external_exports.string().min(1).max(256).regex(/^[A-Za-z0-9_.:/-]+$/);
+var actionIdentifier = external_exports.string().regex(/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/);
+var impact = external_exports.enum(["read", "reversible", "high-impact"]);
+var registryBinding = external_exports.strictObject({
+  expectedRegistryHash: hash4,
+  expectedInputSchemaHash: hash4
+});
+var REGISTRY_DIGEST_DOMAIN = "oxrail-host-tool-schema-registry-v1";
+var enforceableModes = /* @__PURE__ */ new Set([
+  "MICRO_ACTION_GUARD",
+  "TRANSACTION_GUARD",
+  "FULL_INTERPOSE"
+]);
+var policyTargetFingerprint = (value) => redactedDeterministicDigest("oxrail-host-target-fingerprint-v1", value);
+var profileAllowsEnforcement = (profile) => profile.setup.lifecycle === "VERIFIED" && profile.setup.optimization === "ACTIVE" && profile.derived.safety === "ACTIVE" && profile.hooks.trustState === "active" && profile.hooks.concurrentConflictProbe === "passed" && profile.evidence.validUntilHostChange && enforceableModes.has(profile.derived.mode);
+var ToolContractSchema = external_exports.strictObject({
+  toolName: exactToolName2,
+  inputSchemaHash: hash4,
+  route: ToolRouteSchema,
+  granularity: ActionControlSchema,
+  actionTypePath: fieldPath,
+  originPath: fieldPath.optional(),
+  revisionPath: fieldPath.optional(),
+  targetPath: fieldPath.optional(),
+  identityPaths: external_exports.array(identityFieldPath).min(1).max(16),
+  impactByAction: external_exports.record(actionIdentifier, impact),
+  defaultImpact: external_exports.literal("high-impact")
+});
+var ToolSchemaRegistrySchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  profileId: external_exports.string().min(1).max(128),
+  definitionHash: hash4,
+  matcherEvidenceHash: hash4,
+  tools: external_exports.array(ToolContractSchema).min(1).max(32)
+}).superRefine((registry2, context) => {
+  if (new Set(registry2.tools.map((tool) => tool.toolName)).size !== registry2.tools.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["tools"],
+      message: "tool contracts must be unique"
+    });
+  }
+});
+var toolSchemaRegistryHash = (registry2) => deterministicDigest(REGISTRY_DIGEST_DOMAIN, registry2);
+var unsupported = (detail) => ({
+  kind: "UNSUPPORTED",
+  detail,
+  reasonCode: "OXRAIL_HOST_ROUTE_UNPROVEN"
+});
+var blockMalformedHighImpact = (detail) => ({
+  kind: "BLOCK_HIGH_IMPACT",
+  detail,
+  reasonCode: "OXRAIL_HUMAN_BOUNDARY"
+});
+function valueAt(value, segments) {
+  try {
+    let current = value;
+    for (const segment of segments) {
+      if (!current || typeof current !== "object" || !Object.prototype.hasOwnProperty.call(current, segment)) {
+        return void 0;
+      }
+      current = current[segment];
+    }
+    return current;
+  } catch {
+    return void 0;
+  }
+}
+function canonicalOrigin2(value) {
+  if (value === void 0) return void 0;
+  if (typeof value !== "string") return void 0;
+  try {
+    const parsed = new URL(value);
+    return parsed.origin === value ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function decodeBrowserAction(profile, registryValue, call, bindingValue) {
+  if (classifyTool(profile, call.toolName) === "UNRELATED") {
+    return { kind: "UNRELATED" };
+  }
+  if (!profileAllowsEnforcement(profile)) {
+    return unsupported("the active Host Profile does not permit enforcement");
+  }
+  const parsedRegistry = ToolSchemaRegistrySchema.safeParse(registryValue);
+  if (!parsedRegistry.success) return unsupported("tool registry is invalid");
+  const registry2 = parsedRegistry.data;
+  const parsedBinding = registryBinding.safeParse(bindingValue);
+  if (!parsedBinding.success) {
+    return unsupported("tool registry or input schema is not pinned");
+  }
+  const binding = parsedBinding.data;
+  if (toolSchemaRegistryHash(registry2) !== binding.expectedRegistryHash.toLowerCase()) {
+    return unsupported("tool registry content does not match its pinned hash");
+  }
+  if (registry2.profileId !== profile.profileId || registry2.definitionHash !== profile.hooks.definitionHash || registry2.matcherEvidenceHash !== profile.route.matcherEvidenceHash) {
+    return unsupported("tool registry does not match the active Host Profile");
+  }
+  const contract = registry2.tools.find(
+    (tool) => tool.toolName === call.toolName
+  );
+  if (!contract) return unsupported("browser tool has no schema contract");
+  if (contract.inputSchemaHash.toLowerCase() !== binding.expectedInputSchemaHash.toLowerCase()) {
+    return unsupported(
+      "browser tool input schema does not match its pinned hash"
+    );
+  }
+  if (contract.route !== profile.route.toolRoute || contract.granularity !== profile.action.control) {
+    return unsupported("tool contract route or granularity drifted");
+  }
+  const parsedActionType = actionIdentifier.safeParse(
+    valueAt(call.toolInput, contract.actionTypePath)
+  );
+  if (!parsedActionType.success) {
+    return blockMalformedHighImpact(
+      "tool input does not match the action type contract"
+    );
+  }
+  const actionType = parsedActionType.data;
+  if (!Object.prototype.hasOwnProperty.call(contract.impactByAction, actionType)) {
+    return blockMalformedHighImpact(
+      "tool input contains an action type absent from the trusted contract"
+    );
+  }
+  const actionImpact = contract.impactByAction[actionType];
+  const malformedAction = (detail) => actionImpact === "high-impact" ? blockMalformedHighImpact(detail) : unsupported(detail);
+  const revision = contract.revisionPath ? valueAt(call.toolInput, contract.revisionPath) : void 0;
+  if (contract.revisionPath && revision === void 0) {
+    return malformedAction("tool input is missing the declared revision field");
+  }
+  if (revision !== void 0 && (!Number.isSafeInteger(revision) || revision < 0)) {
+    return malformedAction("tool input does not match the revision contract");
+  }
+  const originValue = contract.originPath ? valueAt(call.toolInput, contract.originPath) : void 0;
+  if (contract.originPath && originValue === void 0) {
+    return malformedAction("tool input is missing the declared origin field");
+  }
+  const origin = canonicalOrigin2(originValue);
+  if (originValue !== void 0 && origin === void 0) {
+    return malformedAction("tool input does not contain a canonical origin");
+  }
+  const targetValue = contract.targetPath ? valueAt(call.toolInput, contract.targetPath) : void 0;
+  if (contract.targetPath && targetValue === void 0) {
+    return malformedAction("tool input is missing the declared target field");
+  }
+  const parsedTarget = targetValue === void 0 ? void 0 : TargetDescriptorSchema.safeParse(targetValue);
+  if (parsedTarget && !parsedTarget.success) {
+    return malformedAction("tool input does not match the target contract");
+  }
+  const target = parsedTarget?.success ? {
+    source: parsedTarget.data.source,
+    sourceRevision: parsedTarget.data.sourceRevision,
+    ...parsedTarget.data.documentBinding ? {
+      documentBinding: persistentDocumentBinding(
+        parsedTarget.data.documentBinding
+      )
+    } : {},
+    ...parsedTarget.data.fingerprint ? {
+      fingerprint: policyTargetFingerprint(
+        parsedTarget.data.fingerprint
+      )
+    } : {},
+    confidence: parsedTarget.data.confidence,
+    risk: []
+  } : void 0;
+  const identity = [];
+  for (const segments of contract.identityPaths) {
+    const value = identityValue.safeParse(valueAt(call.toolInput, segments));
+    if (!value.success) {
+      return malformedAction(
+        "tool input has an invalid declared identity field"
+      );
+    }
+    identity.push([segments, value.data]);
+  }
+  let inputDigest;
+  try {
+    inputDigest = redactedDeterministicDigest(
+      "oxrail-host-tool-input-identity-v1",
+      identity
+    );
+  } catch {
+    return malformedAction("tool input identity is not safe JSON");
+  }
+  const candidate = ActionEnvelopeSchema.safeParse({
+    toolUseId: call.toolUseId,
+    route: contract.route,
+    granularity: contract.granularity,
+    actionType,
+    ...target ? { target } : {},
+    inputDigest,
+    ...origin ? { origin } : {},
+    ...revision !== void 0 ? { revision } : {},
+    impact: actionImpact
+  });
+  return candidate.success ? {
+    kind: "ACTION",
+    action: candidate.data,
+    inputSchemaHash: contract.inputSchemaHash
+  } : malformedAction("tool input could not be normalized safely");
+}
+function buildPreToolUseOutput(decision) {
+  if (decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY") {
+    return {};
+  }
+  const explanation = decision.disposition === "REQUEST_HOST_APPROVAL" ? "This action requires host-native approval; Oxrail cannot create approval proactively." : decision.disposition === "REQUEST_HUMAN_HANDOFF" ? "This action requires an available, verified human Handoff." : "Oxrail blocked this browser action before execution.";
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `${decision.reasonCode}: ${explanation}`
+    }
+  };
+}
+function activeSafetyDeny(reasonCode) {
+  const decision = {
+    disposition: "BLOCK_BEFORE_EXECUTION",
+    reasonCode,
+    recoverable: reasonCode === "OXRAIL_USER_LEASE_ACTIVE"
+  };
+  return {
+    mode: "ACTIVE",
+    decision,
+    output: buildPreToolUseOutput(decision)
+  };
+}
+function runGuardPreToolUse(input) {
+  const browserTool = classifyTool(input.profile, input.call.toolName) === "BROWSER";
+  const stateScopeValid = input.state.sessionId === input.sessionId && input.state.taskId === input.taskId;
+  const enforcementContextValid = browserTool && profileAllowsEnforcement(input.profile) && input.state.hostProfileId === input.profile.profileId && input.state.hostProfileStatus === "VALID" && input.state.mode === input.profile.derived.mode && stateScopeValid;
+  if (!enforcementContextValid) {
+    return {
+      mode: "BYPASSED",
+      output: {},
+      reasonCode: "OXRAIL_HOST_ROUTE_UNPROVEN"
+    };
+  }
+  const ownershipDecision = browserOwnershipDecision(input.state);
+  if (ownershipDecision) {
+    return {
+      mode: "ACTIVE",
+      decision: ownershipDecision,
+      output: buildPreToolUseOutput(ownershipDecision)
+    };
+  }
+  const decoded = decodeBrowserAction(
+    input.profile,
+    input.registry,
+    input.call,
+    {
+      expectedInputSchemaHash: input.expectedInputSchemaHash,
+      expectedRegistryHash: input.expectedRegistryHash
+    }
+  );
+  if (decoded.kind === "BLOCK_HIGH_IMPACT") {
+    return activeSafetyDeny(decoded.reasonCode);
+  }
+  if (decoded.kind !== "ACTION") {
+    return {
+      mode: "BYPASSED",
+      output: {},
+      reasonCode: "OXRAIL_HOST_ROUTE_UNPROVEN"
+    };
+  }
+  const decision = evaluateAction({
+    action: decoded.action,
+    state: input.state,
+    routeCovered: true,
+    ...input.currentTargetFingerprint !== void 0 ? {
+      currentTargetFingerprint: policyTargetFingerprint(
+        input.currentTargetFingerprint
+      )
+    } : {},
+    ...input.handoffAvailable !== void 0 ? { handoffAvailable: input.handoffAvailable } : {},
+    ...input.hostApprovalAvailable !== void 0 ? { hostApprovalAvailable: input.hostApprovalAvailable } : {},
+    ...input.requiresHumanBoundary !== void 0 ? { requiresHumanBoundary: input.requiresHumanBoundary } : {}
+  });
+  return {
+    mode: "ACTIVE",
+    action: decoded.action,
+    decision,
+    output: buildPreToolUseOutput(decision)
+  };
+}
+
+// packages/host-openai/src/profile.ts
+import { createHash as createHash5, randomUUID as randomUUID3 } from "node:crypto";
+import path4 from "node:path";
 
 // packages/host-openai/src/bounded-file.ts
-import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open } from "node:fs/promises";
-import path from "node:path";
+import { constants as constants3 } from "node:fs";
+import { chmod as chmod3, lstat as lstat2, mkdir as mkdir3, open as open3 } from "node:fs/promises";
+import path3 from "node:path";
 function relativePath(root, filename) {
-  const relative = path.relative(path.resolve(root), path.resolve(filename));
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  const relative = path3.relative(path3.resolve(root), path3.resolve(filename));
+  if (relative === ".." || relative.startsWith(`..${path3.sep}`) || path3.isAbsolute(relative)) {
     throw new Error("path escapes its local root");
   }
   return relative;
 }
 async function rejectSymlinkPath(root, filename) {
   const relative = relativePath(root, filename);
-  let current = path.resolve(root);
-  for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
-    if (segment) current = path.join(current, segment);
-    const stats = await lstat(current);
+  let current = path3.resolve(root);
+  for (const segment of ["", ...relative.split(path3.sep).filter(Boolean)]) {
+    if (segment) current = path3.join(current, segment);
+    const stats = await lstat2(current);
     if (stats.isSymbolicLink())
       throw new Error("symbolic links are not allowed");
-    if (current !== path.resolve(filename) && !stats.isDirectory()) {
+    if (current !== path3.resolve(filename) && !stats.isDirectory()) {
       throw new Error("path ancestor is not a directory");
     }
   }
 }
-async function readBoundedRegularFile(filename, maximumBytes, root = path.dirname(filename)) {
+async function readBoundedRegularFile(filename, maximumBytes, root = path3.dirname(filename)) {
   if (process.platform === "win32") {
     throw new Error("bounded no-follow reads are unsupported on Windows");
   }
@@ -13215,9 +14445,9 @@ async function readBoundedRegularFile(filename, maximumBytes, root = path.dirnam
     throw new TypeError("maximumBytes must be a non-negative safe integer");
   }
   await rejectSymlinkPath(root, filename);
-  const handle = await open(
+  const handle = await open3(
     filename,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    constants3.O_RDONLY | constants3.O_NOFOLLOW | constants3.O_NONBLOCK
   );
   try {
     const stats = await handle.stat();
@@ -13249,8 +14479,8 @@ var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
 var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
 var CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR = "credential activation denied: independent macOS attestation verifier unavailable";
 var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
-var sha256 = (value) => createHash2("sha256").update(value).digest("hex");
-var profileDirectory = (pluginData, profileId) => path2.join(pluginData, HOSTS_DIRECTORY, profileId);
+var sha256 = (value) => createHash5("sha256").update(value).digest("hex");
+var profileDirectory = (pluginData, profileId) => path4.join(pluginData, HOSTS_DIRECTORY, profileId);
 function validateHostProfile(value, constraints = {}) {
   if (value && typeof value === "object" && value.schemaVersion === 3) {
     return {
@@ -13323,11 +14553,11 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   try {
     if (explicitProfilePath) {
       profilePath = explicitProfilePath;
-      profileId = path2.basename(path2.dirname(profilePath));
+      profileId = path4.basename(path4.dirname(profilePath));
     } else {
       const active = JSON.parse(
         (await readBoundedRegularFile(
-          path2.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
+          path4.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
           16384,
           pluginData
         )).toString("utf8")
@@ -13336,7 +14566,7 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
         throw new Error("invalid active profile selection");
       }
       profileId = active.profileId;
-      profilePath = path2.join(
+      profilePath = path4.join(
         profileDirectory(pluginData, profileId),
         HOST_PROFILE_FILENAME
       );
@@ -13352,11 +14582,11 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   try {
     if (!safeProfileId(profileId))
       throw new Error("unsafe host profile identifier");
-    const readRoot = explicitProfilePath ? path2.dirname(profilePath) : pluginData;
+    const readRoot = explicitProfilePath ? path4.dirname(profilePath) : pluginData;
     const [rawProfile, rawManifest] = await Promise.all([
       readBoundedRegularFile(profilePath, 1048576, readRoot),
       readBoundedRegularFile(
-        path2.join(path2.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        path4.join(path4.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
         16384,
         readRoot
       )
@@ -13378,11 +14608,241 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   }
 }
 
+// packages/host-openai/src/registry-bundle.ts
+import { createHash as createHash6 } from "node:crypto";
+import path5 from "node:path";
+var TOOL_SCHEMA_REGISTRY_FILENAME = "tool-schema-registry.json";
+var hash5 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
+var safeProfileId2 = external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+var browserToolPin = external_exports.strictObject({
+  canonicalToolName: external_exports.string().min(1).max(256).regex(/^[A-Za-z0-9_.:/-]+$/),
+  inputSchemaHash: hash5,
+  registryManifestBinding: hash5
+});
+var canonicalToolNames = external_exports.array(browserToolPin.shape.canonicalToolName).min(1).max(32).refine(
+  (names) => new Set(names).size === names.length,
+  "canonical browser tool names must be unique"
+);
+var browserToolPins = external_exports.array(browserToolPin).min(1).max(32).refine(
+  (pins) => new Set(pins.map((pin) => pin.canonicalToolName)).size === pins.length,
+  "canonical browser tool pins must be unique"
+);
+var externalPins = external_exports.strictObject({
+  toolSchemaRegistryHash: hash5,
+  toolSchemaRegistryEvidenceId: external_exports.string().min(1).max(256),
+  browserTools: browserToolPins
+});
+var activeProfileBinding = externalPins.extend({
+  profileId: safeProfileId2,
+  definitionHash: hash5,
+  matcherEvidenceHash: hash5,
+  canonicalToolMatchers: canonicalToolNames
+});
+var storedProfileBinding = external_exports.object({
+  profileId: safeProfileId2,
+  hooks: external_exports.object({ definitionHash: hash5 }),
+  route: external_exports.object({
+    canonicalToolMatchers: canonicalToolNames,
+    matcherEvidenceHash: hash5,
+    toolSchemaRegistryHash: hash5,
+    toolSchemaRegistryEvidenceId: external_exports.string().min(1).max(256),
+    browserTools: browserToolPins
+  })
+});
+var bundleManifest = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  profileId: safeProfileId2,
+  profileSha256: hash5,
+  guard: external_exports.strictObject({
+    toolSchemaRegistryFileSha256: hash5,
+    toolSchemaRegistryHash: hash5,
+    toolSchemaRegistryEvidenceId: external_exports.string().min(1).max(256),
+    browserTools: browserToolPins
+  })
+});
+var bypassed = (error43) => ({
+  status: "BYPASSED",
+  errors: [error43]
+});
+var sameHash = (left, right) => left.toLowerCase() === right.toLowerCase();
+var pinMap = (pins) => new Map(pins.map((pin) => [pin.canonicalToolName, pin]));
+var sameNames = (left, right) => left.length === right.length && left.every((name) => right.includes(name));
+var samePins = (left, right) => {
+  const rightByName = pinMap(right);
+  return left.length === rightByName.size && left.every((pin) => {
+    const other = rightByName.get(pin.canonicalToolName);
+    return !!other && sameHash(pin.inputSchemaHash, other.inputSchemaHash) && sameHash(pin.registryManifestBinding, other.registryManifestBinding);
+  });
+};
+async function loadToolSchemaRegistryBundle(pluginData, profile) {
+  let active;
+  try {
+    active = activeProfileBinding.parse({
+      profileId: profile.profileId,
+      definitionHash: profile.hooks.definitionHash,
+      matcherEvidenceHash: profile.route.matcherEvidenceHash,
+      canonicalToolMatchers: profile.route.canonicalToolMatchers,
+      toolSchemaRegistryHash: profile.route.toolSchemaRegistryHash,
+      toolSchemaRegistryEvidenceId: profile.route.toolSchemaRegistryEvidenceId,
+      browserTools: profile.route.browserTools
+    });
+  } catch {
+    return bypassed("Host Profile has no complete external tool registry pins");
+  }
+  const directory = path5.join(pluginData, HOSTS_DIRECTORY, active.profileId);
+  let rawProfile;
+  let rawRegistry;
+  let rawManifest;
+  try {
+    [rawProfile, rawRegistry, rawManifest] = await Promise.all([
+      readBoundedRegularFile(
+        path5.join(directory, HOST_PROFILE_FILENAME),
+        1048576,
+        pluginData
+      ),
+      readBoundedRegularFile(
+        path5.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
+        1048576,
+        pluginData
+      ),
+      readBoundedRegularFile(
+        path5.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+        16384,
+        pluginData
+      )
+    ]);
+  } catch {
+    return bypassed(
+      "tool schema registry bundle is missing, unreadable, or exceeds local limits"
+    );
+  }
+  let manifestValue;
+  try {
+    manifestValue = JSON.parse(rawManifest.toString("utf8"));
+  } catch {
+    return bypassed("tool schema registry manifest is invalid");
+  }
+  const parsedManifest = bundleManifest.safeParse(manifestValue);
+  if (!parsedManifest.success)
+    return bypassed("tool schema registry manifest is invalid");
+  const manifest = parsedManifest.data;
+  const profileFileHash = createHash6("sha256").update(rawProfile).digest("hex");
+  if (!sameHash(profileFileHash, manifest.profileSha256)) {
+    return bypassed("Host Profile file hash does not match its manifest");
+  }
+  const fileHash = createHash6("sha256").update(rawRegistry).digest("hex");
+  if (!sameHash(fileHash, manifest.guard.toolSchemaRegistryFileSha256)) {
+    return bypassed(
+      "tool schema registry file hash does not match its manifest"
+    );
+  }
+  let storedProfileValue;
+  try {
+    storedProfileValue = JSON.parse(rawProfile.toString("utf8"));
+  } catch {
+    return bypassed("stored Host Profile binding is invalid");
+  }
+  const parsedStoredProfile = storedProfileBinding.safeParse(storedProfileValue);
+  if (!parsedStoredProfile.success)
+    return bypassed("stored Host Profile binding is invalid");
+  const stored = parsedStoredProfile.data;
+  if (stored.profileId !== active.profileId || !sameHash(stored.hooks.definitionHash, active.definitionHash) || !sameHash(stored.route.matcherEvidenceHash, active.matcherEvidenceHash) || !sameHash(
+    stored.route.toolSchemaRegistryHash,
+    active.toolSchemaRegistryHash
+  ) || stored.route.toolSchemaRegistryEvidenceId !== active.toolSchemaRegistryEvidenceId || !sameNames(
+    stored.route.canonicalToolMatchers,
+    active.canonicalToolMatchers
+  ) || !samePins(stored.route.browserTools, active.browserTools)) {
+    return bypassed("stored Host Profile does not match the active profile");
+  }
+  if (manifest.profileId !== active.profileId || !sameHash(
+    manifest.guard.toolSchemaRegistryHash,
+    active.toolSchemaRegistryHash
+  ) || manifest.guard.toolSchemaRegistryEvidenceId !== active.toolSchemaRegistryEvidenceId) {
+    return bypassed(
+      "tool schema registry manifest does not match Host evidence pins"
+    );
+  }
+  const profilePins = pinMap(active.browserTools);
+  const manifestPins = pinMap(manifest.guard.browserTools);
+  if (profilePins.size !== manifestPins.size || [...profilePins].some(([name, pin]) => {
+    const manifestPin = manifestPins.get(name);
+    return !manifestPin || !sameHash(pin.inputSchemaHash, manifestPin.inputSchemaHash) || !sameHash(
+      pin.registryManifestBinding,
+      manifestPin.registryManifestBinding
+    );
+  })) {
+    return bypassed("canonical browser tool pins do not match the manifest");
+  }
+  if (active.browserTools.some(
+    (pin) => !sameHash(
+      pin.registryManifestBinding,
+      toolRegistryManifestBinding({
+        profileId: active.profileId,
+        definitionHash: active.definitionHash,
+        matcherEvidenceHash: active.matcherEvidenceHash,
+        toolSchemaRegistryHash: active.toolSchemaRegistryHash,
+        toolSchemaRegistryEvidenceId: active.toolSchemaRegistryEvidenceId,
+        canonicalToolName: pin.canonicalToolName,
+        inputSchemaHash: pin.inputSchemaHash
+      })
+    )
+  )) {
+    return bypassed(
+      "canonical browser tool registry manifest binding is invalid"
+    );
+  }
+  let registryValue;
+  try {
+    registryValue = JSON.parse(rawRegistry.toString("utf8"));
+  } catch {
+    return bypassed("tool schema registry is invalid");
+  }
+  const parsedRegistry = ToolSchemaRegistrySchema.safeParse(registryValue);
+  if (!parsedRegistry.success)
+    return bypassed("tool schema registry is invalid");
+  const registry2 = parsedRegistry.data;
+  if (!sameHash(toolSchemaRegistryHash(registry2), active.toolSchemaRegistryHash)) {
+    return bypassed(
+      "tool schema registry canonical hash does not match its external pin"
+    );
+  }
+  if (registry2.profileId !== active.profileId || !sameHash(registry2.definitionHash, active.definitionHash) || !sameHash(registry2.matcherEvidenceHash, active.matcherEvidenceHash)) {
+    return bypassed(
+      "tool schema registry does not match the active Host Profile"
+    );
+  }
+  const contracts = new Map(
+    registry2.tools.map((contract) => [contract.toolName, contract])
+  );
+  if (contracts.size !== profilePins.size || contracts.size !== active.canonicalToolMatchers.length || active.canonicalToolMatchers.some((toolName) => !contracts.has(toolName)) || [...contracts].some(([toolName, contract]) => {
+    const pin = profilePins.get(toolName);
+    return !pin || !sameHash(contract.inputSchemaHash, pin.inputSchemaHash);
+  })) {
+    return bypassed(
+      "canonical browser tool registry coverage or schema pin drifted"
+    );
+  }
+  return {
+    status: "VALID",
+    registry: registry2,
+    bindings: Object.fromEntries(
+      [...profilePins].map(([toolName, pin]) => [
+        toolName,
+        {
+          expectedInputSchemaHash: pin.inputSchemaHash.toLowerCase(),
+          expectedRegistryHash: active.toolSchemaRegistryHash.toLowerCase()
+        }
+      ])
+    )
+  };
+}
+
 // packages/host-openai/src/state.ts
-import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir2, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { createHash as createHash7, randomUUID as randomUUID4 } from "node:crypto";
+import { mkdir as mkdir4, readFile, readdir as readdir2, rename as rename3, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import path3 from "node:path";
+import path6 from "node:path";
 var HOOK_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
@@ -13390,9 +14850,9 @@ var HOOK_EVENTS = [
   "PermissionRequest",
   "PostToolUse"
 ];
-var oxrailDataDirectory = (home = homedir()) => path3.join(home, ".oxrail");
-var digestSessionId = (sessionId) => createHash3("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
-var digestToolUseId = (toolUseId) => createHash3("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
+var oxrailDataDirectory = (home = homedir()) => path6.join(home, ".oxrail");
+var digestSessionId = (sessionId) => createHash7("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
+var digestToolUseId = (toolUseId) => createHash7("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
   SessionStart: "session-start.json",
   UserPromptSubmit: "user-prompt-submit.json",
@@ -13400,9 +14860,9 @@ var markerNames = {
   PermissionRequest: "permission-request.json",
   PostToolUse: "post-tool-use.json"
 };
-var stateDirectory = (pluginData) => path3.join(pluginData, "setup-verification");
-var browserRouteDirectory = (pluginData) => path3.join(stateDirectory(pluginData), "browser-route");
-var markerPath = (pluginData, event, browserHook) => path3.join(
+var stateDirectory = (pluginData) => path6.join(pluginData, "setup-verification");
+var browserRouteDirectory = (pluginData) => path6.join(stateDirectory(pluginData), "browser-route");
+var markerPath2 = (pluginData, event, browserHook) => path6.join(
   stateDirectory(pluginData),
   `${browserHook ? "browser-" : ""}${markerNames[event]}`
 );
@@ -13414,8 +14874,8 @@ function isBrowserRouteObservation(value) {
 }
 async function recordBrowserHookPhase(pluginData, phase, observation, now = Date.now()) {
   const directory = browserRouteDirectory(pluginData);
-  await mkdir2(directory, { recursive: true, mode: 448 });
-  const destination = path3.join(
+  await mkdir4(directory, { recursive: true, mode: 448 });
+  const destination = path6.join(
     directory,
     `${observation.toolUseDigest.slice(0, 2)}.json`
   );
@@ -13435,21 +14895,21 @@ async function recordBrowserHookPhase(pluginData, phase, observation, now = Date
     ...phase === "PreToolUse" ? { preObservedAt: previous?.preObservedAt ?? observedAt } : { postObservedAt: previous?.postObservedAt ?? observedAt },
     schemaVersion: 1
   };
-  const temporary = path3.join(
+  const temporary = path6.join(
     directory,
-    `.${observation.toolUseDigest}.${randomUUID2()}`
+    `.${observation.toolUseDigest}.${randomUUID4()}`
   );
   await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
-  await rename(temporary, destination);
+  await rename3(temporary, destination);
 }
 async function recordHookMarker(pluginData, marker, now = Date.now()) {
   const directory = stateDirectory(pluginData);
-  await mkdir2(directory, { recursive: true, mode: 448 });
-  const destination = markerPath(pluginData, marker.event, marker.browserHook);
-  const temporary = path3.join(
+  await mkdir4(directory, { recursive: true, mode: 448 });
+  const destination = markerPath2(pluginData, marker.event, marker.browserHook);
+  const temporary = path6.join(
     directory,
-    `.${path3.basename(destination)}.${randomUUID2()}`
+    `.${path6.basename(destination)}.${randomUUID4()}`
   );
   const value = {
     ...marker,
@@ -13459,15 +14919,21 @@ async function recordHookMarker(pluginData, marker, now = Date.now()) {
   };
   await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
-  await rename(temporary, destination);
+  await rename3(temporary, destination);
 }
 
 // packages/host-openai/src/hook.ts
 var isHookInput = (value) => {
   if (!value || typeof value !== "object") return false;
   const input = value;
-  return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string") && (input.tool_name === void 0 || typeof input.tool_name === "string") && (input.tool_use_id === void 0 || typeof input.tool_use_id === "string");
+  return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string" && input.session_id.length <= 4096) && (input.tool_name === void 0 || typeof input.tool_name === "string" && input.tool_name.length <= 256) && (input.tool_use_id === void 0 || typeof input.tool_use_id === "string" && input.tool_use_id.length <= 4096) && (input.turn_id === void 0 || typeof input.turn_id === "string" && input.turn_id.length <= 4096);
 };
+var hookRuntimeStateDirectory = (pluginData) => path7.join(pluginData, "runtime-state");
+function hookBrowserTaskScope(sessionId) {
+  const sessionDigest = digestSessionId(sessionId);
+  const taskDigest = createHash8("sha256").update("oxrail-hook-browser-task-v1\0").update(sessionDigest).digest("hex");
+  return { sessionId: sessionDigest, taskId: taskDigest };
+}
 async function hookDefinitionHash(pluginRoot) {
   const filenames = [
     ".codex-plugin/plugin.json",
@@ -13476,16 +14942,102 @@ async function hookDefinitionHash(pluginRoot) {
     "dist/hooks/post-tool.mjs"
   ];
   const files = await Promise.all(
-    filenames.map((filename) => readFile2(path4.join(pluginRoot, filename)))
+    filenames.map((filename) => readFile2(path7.join(pluginRoot, filename)))
   );
-  const digest = createHash4("sha256").update("oxrail-hook-definition-v2\0");
+  const digest2 = createHash8("sha256").update("oxrail-hook-definition-v2\0");
   for (const [index, filename] of filenames.entries()) {
-    digest.update(filename).update("\0").update(String(files[index].length)).update("\0").update(files[index]);
+    digest2.update(filename).update("\0").update(String(files[index].length)).update("\0").update(files[index]);
   }
-  return digest.digest("hex");
+  return digest2.digest("hex");
 }
 var bypassMessage = "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. Oxrail credential protection: INACTIVE.";
 var bypassOutput = () => ({ systemMessage: bypassMessage });
+var decisionOutput = (decision) => buildPreToolUseOutput(decision);
+var inconclusiveOutput = () => decisionOutput({
+  disposition: "BLOCK_BEFORE_EXECUTION",
+  reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+  recoverable: true
+});
+var toolCallRequestDigest = (toolName, action, decision) => deterministicDigest(
+  "oxrail-hook-tool-call-request-v1",
+  action ? {
+    actionIdentity: actionIdentity(action),
+    impact: action.impact,
+    origin: action.origin,
+    revision: action.revision,
+    toolName
+  } : {
+    disposition: decision.disposition,
+    reasonCode: decision.reasonCode,
+    toolName
+  }
+);
+var toolCallBindingDigest = (profile, toolName, binding) => deterministicDigest("oxrail-hook-tool-call-binding-v1", {
+  definitionHash: profile.hooks.definitionHash,
+  inputSchemaHash: binding.expectedInputSchemaHash,
+  matcherEvidenceHash: profile.route.matcherEvidenceHash,
+  profileId: profile.profileId,
+  registryHash: binding.expectedRegistryHash,
+  toolName
+});
+function ownershipOutput(state, scope) {
+  if (state.sessionId !== scope.sessionId || state.taskId !== scope.taskId) {
+    return void 0;
+  }
+  const decision = browserOwnershipDecision(state);
+  return decision ? decisionOutput(decision) : void 0;
+}
+function alignStateToProfile(saved, scope, profile) {
+  if (saved.hostProfileId === profile.profileId && saved.hostProfileStatus === "VALID" && saved.mode === profile.derived.mode) {
+    return saved;
+  }
+  if (saved.phase !== "RUNNING" || saved.pointerOwner !== "NATIVE" || saved.pendingNativeActionIds.length > 0) {
+    return void 0;
+  }
+  const fresh = createBrowserTaskState({
+    ...scope,
+    hostProfileId: profile.profileId,
+    mode: profile.derived.mode
+  });
+  return {
+    ...fresh,
+    leaseEpoch: saved.leaseEpoch,
+    revision: saved.revision + 1,
+    stateVersion: saved.stateVersion,
+    targetCacheEpoch: saved.targetCacheEpoch + 1
+  };
+}
+var STATE_TRANSITION_ATTEMPTS = 10;
+var waitForStateRetry = (attempt) => new Promise(
+  (resolve) => setTimeout(resolve, Math.min(2 ** attempt, 8))
+);
+async function transitionWithRetry(runtimeRoot, scope, transition) {
+  for (let attempt = 0; attempt < STATE_TRANSITION_ATTEMPTS; attempt += 1) {
+    try {
+      return await transitionBrowserTaskState(runtimeRoot, scope, transition);
+    } catch (error43) {
+      if (!(error43 instanceof BrowserTaskStateStoreError) || error43.code !== "CONFLICT" || attempt === STATE_TRANSITION_ATTEMPTS - 1) {
+        throw error43;
+      }
+      await waitForStateRetry(attempt);
+    }
+  }
+  throw new BrowserTaskStateStoreError("CONFLICT");
+}
+async function completePostTool(runtimeRoot, scope, toolUseId) {
+  const journal = await completeToolCallPost(runtimeRoot, {
+    ...scope,
+    toolUseId
+  });
+  if (journal === "OUT_OF_ORDER") return "NOT_FOUND";
+  if (journal === "UNAVAILABLE") return "UNAVAILABLE";
+  await transitionWithRetry(runtimeRoot, scope, (state) => {
+    if (!state) return { value: {} };
+    const completed = completePendingTool(state, toolUseId);
+    return completed.stateVersion === state.stateVersion ? { value: {} } : { state: completed, value: {} };
+  });
+  return "COMPLETED";
+}
 async function handleHookEvent(value, environment) {
   if (!isHookInput(value)) return {};
   const now = environment.now?.() ?? Date.now();
@@ -13495,7 +15047,7 @@ async function handleHookEvent(value, environment) {
     definitionHash
   });
   const profileId = profileResult.profile?.profileId ?? null;
-  await recordHookMarker(
+  const hookMarkerRecorded = await recordHookMarker(
     environment.pluginData,
     {
       browserHook: false,
@@ -13506,6 +15058,9 @@ async function handleHookEvent(value, environment) {
       synthetic: false
     },
     now
+  ).then(
+    () => true,
+    () => false
   );
   if (value.hook_event_name === "SessionStart")
     return profileResult.valid ? {} : bypassOutput();
@@ -13513,26 +15068,143 @@ async function handleHookEvent(value, environment) {
   const browserPath = Boolean(
     toolEvent && value.tool_name && profileResult.profile && classifyTool(profileResult.profile, value.tool_name) === "BROWSER"
   );
+  const browserMarkerRecorded = profileResult.valid && profileResult.profile && toolEvent && browserPath && profileResult.profile.setup.lifecycle !== "INSTALLED" && value.tool_use_id && sessionDigest ? await recordBrowserHookPhase(
+    environment.pluginData,
+    toolEvent,
+    {
+      definitionHash,
+      profileId: profileResult.profile.profileId,
+      sessionDigest,
+      synthetic: false,
+      toolUseDigest: digestToolUseId(value.tool_use_id)
+    },
+    now
+  ).then(
+    () => true,
+    () => false
+  ) : true;
+  if (toolEvent === "PostToolUse" && value.session_id && value.tool_use_id) {
+    const completion = await completePostTool(
+      hookRuntimeStateDirectory(environment.pluginData),
+      hookBrowserTaskScope(value.session_id),
+      value.tool_use_id
+    ).catch(() => "UNAVAILABLE");
+    if (completion === "COMPLETED") return {};
+    if (completion === "UNAVAILABLE") return bypassOutput();
+  }
   if (!profileResult.valid || !profileResult.profile)
     return browserPath ? bypassOutput() : {};
   if (!toolEvent || !value.tool_name || !browserPath) return {};
-  if (profileResult.profile.setup.lifecycle === "INSTALLED")
-    return bypassOutput();
-  if (profileResult.profile.setup.lifecycle === "CONFIGURED" && value.tool_use_id && sessionDigest) {
-    await recordBrowserHookPhase(
-      environment.pluginData,
-      toolEvent,
-      {
-        definitionHash,
-        profileId: profileResult.profile.profileId,
-        sessionDigest,
-        synthetic: false,
-        toolUseDigest: digestToolUseId(value.tool_use_id)
-      },
-      now
-    );
+  const profile = profileResult.profile;
+  if (profile.setup.lifecycle === "CONFIGURED") {
+    return hookMarkerRecorded && browserMarkerRecorded ? {} : bypassOutput();
   }
-  return {};
+  if (profile.setup.lifecycle !== "VERIFIED") return bypassOutput();
+  if (!value.session_id || !value.tool_use_id) {
+    return bypassOutput();
+  }
+  let guardActivationVerified = false;
+  if (environment.verifyGuardActivation) {
+    try {
+      guardActivationVerified = await environment.verifyGuardActivation(profile);
+    } catch {
+    }
+  }
+  if (!guardActivationVerified) return bypassOutput();
+  const scope = hookBrowserTaskScope(value.session_id);
+  const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+  if (toolEvent === "PostToolUse") {
+    return bypassOutput();
+  }
+  const bundle = await loadToolSchemaRegistryBundle(
+    environment.pluginData,
+    profile
+  );
+  let blockingOutput;
+  try {
+    return await transitionWithRetry(runtimeRoot, scope, async (saved) => {
+      let state = saved ?? createBrowserTaskState({
+        ...scope,
+        hostProfileId: profile.profileId,
+        mode: profile.derived.mode
+      });
+      const ownership = ownershipOutput(state, scope);
+      if (ownership) return { value: ownership };
+      if (saved) {
+        const aligned = alignStateToProfile(saved, scope, profile);
+        if (!aligned) return { value: bypassOutput() };
+        state = aligned;
+      }
+      const binding = bundle.status === "VALID" ? bundle.bindings[value.tool_name] : void 0;
+      if (!guardActivationVerified || bundle.status !== "VALID" || !binding) {
+        return { value: bypassOutput() };
+      }
+      const guarded = runGuardPreToolUse({
+        ...binding,
+        call: {
+          toolInput: value.tool_input,
+          toolName: value.tool_name,
+          toolUseId: value.tool_use_id
+        },
+        handoffAvailable: profile.handoff.activation === "ACTIVE",
+        hostApprovalAvailable: profile.nativeCapabilities.nativeApprovalFlow === "passed",
+        profile,
+        registry: bundle.registry,
+        ...scope,
+        state
+      });
+      if (guarded.mode !== "ACTIVE") return { value: bypassOutput() };
+      const blocking = ![
+        "PASS_THROUGH_ORIGINAL",
+        "SEMANTIC_HINT_ONLY"
+      ].includes(guarded.decision.disposition);
+      if (blocking) blockingOutput = guarded.output;
+      const requestDigest = await protectToolCallRequestDigest(
+        runtimeRoot,
+        toolCallRequestDigest(
+          value.tool_name,
+          guarded.action,
+          guarded.decision
+        )
+      );
+      if (!requestDigest) {
+        return { value: blocking ? guarded.output : bypassOutput() };
+      }
+      const claim = await recordToolCallPre(runtimeRoot, {
+        ...scope,
+        bindingDigest: toolCallBindingDigest(
+          profile,
+          value.tool_name,
+          binding
+        ),
+        decision: guarded.decision,
+        requestDigest,
+        toolUseId: value.tool_use_id
+      });
+      if (claim.kind === "MISMATCH") {
+        return { value: inconclusiveOutput() };
+      }
+      if (claim.kind === "UNAVAILABLE") {
+        return { value: blocking ? guarded.output : bypassOutput() };
+      }
+      if (claim.kind === "REPLAY") {
+        const replayBlocks = ![
+          "PASS_THROUGH_ORIGINAL",
+          "SEMANTIC_HINT_ONLY"
+        ].includes(claim.decision.disposition);
+        return {
+          value: replayBlocks ? decisionOutput(claim.decision) : inconclusiveOutput()
+        };
+      }
+      if (!guarded.action) return { value: guarded.output };
+      return {
+        state: stageToolDecision(state, guarded.action, claim.decision),
+        value: guarded.output
+      };
+    });
+  } catch {
+    return blockingOutput ?? bypassOutput();
+  }
 }
 async function readStdin(maximumBytes = 1048576) {
   const chunks = [];
@@ -13551,7 +15223,7 @@ async function runHookCli(environment = process.env) {
     const pluginRoot = environment.PLUGIN_ROOT;
     if (!pluginRoot) throw new Error("missing plugin environment");
     const output = await handleHookEvent(await readStdin(), {
-      pluginData: oxrailDataDirectory(),
+      pluginData: environment.PLUGIN_DATA ?? environment.CLAUDE_PLUGIN_DATA ?? oxrailDataDirectory(),
       pluginRoot
     });
     process.stdout.write(`${JSON.stringify(output)}

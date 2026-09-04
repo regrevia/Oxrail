@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
@@ -39,6 +40,11 @@ export interface BrowserTaskScope {
   taskId: string;
 }
 
+export interface BrowserTaskStateTransition<Result> {
+  state?: BrowserTaskState;
+  value: Result;
+}
+
 const digestName = (domain: string, value: string) =>
   createHash("sha256").update(domain).update("\0").update(value).digest("hex");
 
@@ -63,6 +69,70 @@ const errorCode = (error: unknown): string | undefined =>
     ? String(error.code)
     : undefined;
 
+function protectedReadFlags(): number {
+  if (
+    process.platform === "win32" ||
+    !constants.O_NOFOLLOW ||
+    !constants.O_NONBLOCK
+  ) {
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  }
+  return constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+}
+
+/** @internal Exported for direct boundary tests. */
+export async function readBoundedPrivateFile(
+  filename: string,
+  maximumBytes: number,
+  overflowCode: "TOO_LARGE" | "UNAVAILABLE",
+) {
+  let handle;
+  try {
+    if (
+      !Number.isSafeInteger(maximumBytes) ||
+      maximumBytes < 0 ||
+      maximumBytes > MAX_BROWSER_TASK_STATE_BYTES
+    ) {
+      throw new BrowserTaskStateStoreError("UNAVAILABLE");
+    }
+    handle = await open(filename, protectedReadFlags());
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isFile() || (metadata.mode & 0o077n) !== 0n) {
+      throw new BrowserTaskStateStoreError("UNAVAILABLE");
+    }
+    if (metadata.size > BigInt(maximumBytes)) {
+      throw new BrowserTaskStateStoreError(overflowCode);
+    }
+
+    const contents = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < contents.byteLength) {
+      const { bytesRead } = await handle.read(
+        contents,
+        length,
+        contents.byteLength - length,
+        length,
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maximumBytes) {
+      throw new BrowserTaskStateStoreError(overflowCode);
+    }
+    return { contents: contents.subarray(0, length), metadata };
+  } catch (error) {
+    if (
+      errorCode(error) === "ENOENT" ||
+      error instanceof BrowserTaskStateStoreError
+    ) {
+      throw error;
+    }
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
 interface LockSnapshot {
   createdAt: number;
   device: bigint;
@@ -73,13 +143,12 @@ interface LockSnapshot {
 }
 
 async function readLock(lockPath: string): Promise<LockSnapshot | undefined> {
-  let handle;
   try {
-    handle = await open(lockPath, "r");
-    const metadata = await handle.stat({ bigint: true });
-    if (metadata.size > BigInt(MAX_LOCK_BYTES)) return undefined;
-    const contents = await handle.readFile();
-    if (contents.byteLength > MAX_LOCK_BYTES) return undefined;
+    const { contents, metadata } = await readBoundedPrivateFile(
+      lockPath,
+      MAX_LOCK_BYTES,
+      "UNAVAILABLE",
+    );
     const value: unknown = JSON.parse(contents.toString("utf8"));
     if (!value || typeof value !== "object") return undefined;
     const lock = value as Partial<{
@@ -107,10 +176,9 @@ async function readLock(lockPath: string): Promise<LockSnapshot | undefined> {
       nonce: lock.nonce,
       pid: lock.pid!,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof BrowserTaskStateStoreError) throw error;
     return undefined;
-  } finally {
-    await handle?.close();
   }
 }
 
@@ -208,6 +276,7 @@ async function tryCreateLock(
 }
 
 async function acquireLock(lockPath: string): Promise<LockSnapshot> {
+  protectedReadFlags();
   const acquired = await tryCreateLock(lockPath);
   if (acquired) return acquired;
   if (!(await recoverStaleLock(lockPath, Date.now()))) {
@@ -222,7 +291,7 @@ async function releaseLock(
   lockPath: string,
   ownership: LockSnapshot,
 ): Promise<void> {
-  const current = await readLock(lockPath);
+  const current = await readLock(lockPath).catch(() => undefined);
   if (!current || !sameLock(current, ownership)) return;
   await unlink(lockPath).catch(() => undefined);
 }
@@ -231,16 +300,12 @@ async function readStateFile(
   filename: string,
   scope: BrowserTaskScope,
 ): Promise<BrowserTaskState | undefined> {
-  let handle;
   try {
-    handle = await open(filename, "r");
-    if ((await handle.stat()).size > MAX_BROWSER_TASK_STATE_BYTES) {
-      throw new BrowserTaskStateStoreError("TOO_LARGE");
-    }
-    const contents = await handle.readFile();
-    if (contents.byteLength > MAX_BROWSER_TASK_STATE_BYTES) {
-      throw new BrowserTaskStateStoreError("TOO_LARGE");
-    }
+    const { contents } = await readBoundedPrivateFile(
+      filename,
+      MAX_BROWSER_TASK_STATE_BYTES,
+      "TOO_LARGE",
+    );
     let value: unknown;
     try {
       value = JSON.parse(contents.toString("utf8"));
@@ -260,8 +325,6 @@ async function readStateFile(
     if (errorCode(error) === "ENOENT") return undefined;
     if (error instanceof BrowserTaskStateStoreError) throw error;
     throw new BrowserTaskStateStoreError("UNAVAILABLE");
-  } finally {
-    await handle?.close();
   }
 }
 
@@ -298,6 +361,83 @@ export async function readBrowserTaskState(
   return readStateFile(statePath(root, scope), scope);
 }
 
+async function persistState(
+  directory: string,
+  destination: string,
+  state: BrowserTaskState,
+): Promise<void> {
+  const parsed = BrowserTaskStateSchema.safeParse(state);
+  if (!parsed.success) throw new BrowserTaskStateStoreError("INVALID_STATE");
+  const contents = `${JSON.stringify(
+    sanitizeBrowserTaskStateForPersistence(parsed.data),
+  )}\n`;
+  if (Buffer.byteLength(contents) > MAX_BROWSER_TASK_STATE_BYTES) {
+    throw new BrowserTaskStateStoreError("TOO_LARGE");
+  }
+  const temporary = path.join(directory, `.${randomUUID()}.tmp`);
+  let handle;
+  let committed = false;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(contents, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporary, destination);
+    committed = true;
+    await chmod(destination, 0o600);
+    await syncDirectory(directory);
+  } catch (error) {
+    await handle?.close();
+    await unlink(temporary).catch(() => undefined);
+    // Rename is the visible commit point; do not report a committed decision as failed.
+    if (committed) return;
+    if (error instanceof BrowserTaskStateStoreError) throw error;
+    throw new BrowserTaskStateStoreError("UNAVAILABLE");
+  }
+}
+
+/** Runs one state decision while holding the per-task lock. */
+export async function transitionBrowserTaskState<Result>(
+  root: string,
+  scope: BrowserTaskScope,
+  transition: (
+    state: BrowserTaskState | undefined,
+  ) =>
+    | BrowserTaskStateTransition<Result>
+    | Promise<BrowserTaskStateTransition<Result>>,
+): Promise<Result> {
+  assertScope(scope);
+  const directory = taskDirectory(root, scope);
+  await makePrivateDirectory(root);
+  await makePrivateDirectory(path.dirname(directory));
+  await makePrivateDirectory(directory);
+  const destination = statePath(root, scope);
+  const ownership = await acquireLock(
+    path.join(directory, ".browser-task-state.lock"),
+  );
+  try {
+    const current = await readStateFile(destination, scope);
+    const result = await transition(current);
+    if (result.state) {
+      if (
+        result.state.sessionId !== scope.sessionId ||
+        result.state.taskId !== scope.taskId ||
+        (current && result.state.stateVersion !== current.stateVersion + 1)
+      ) {
+        throw new BrowserTaskStateStoreError("INVALID_STATE");
+      }
+      await persistState(directory, destination, result.state);
+    }
+    return result.value;
+  } finally {
+    await releaseLock(
+      path.join(directory, ".browser-task-state.lock"),
+      ownership,
+    );
+  }
+}
+
 export async function writeBrowserTaskState(
   root: string,
   state: BrowserTaskState,
@@ -311,50 +451,19 @@ export async function writeBrowserTaskState(
   ) {
     throw new BrowserTaskStateStoreError("INVALID_STATE");
   }
-  const scope = { sessionId: state.sessionId, taskId: state.taskId };
-  assertScope(scope);
-  const sanitized = sanitizeBrowserTaskStateForPersistence(parsed.data);
-  const contents = `${JSON.stringify(sanitized)}\n`;
-  if (Buffer.byteLength(contents) > MAX_BROWSER_TASK_STATE_BYTES) {
-    throw new BrowserTaskStateStoreError("TOO_LARGE");
-  }
-
-  const directory = taskDirectory(root, scope);
-  await makePrivateDirectory(root);
-  await makePrivateDirectory(path.dirname(directory));
-  await makePrivateDirectory(directory);
-  const destination = statePath(root, scope);
-  const lockPath = path.join(directory, ".browser-task-state.lock");
-  const ownership = await acquireLock(lockPath);
-  const temporary = path.join(directory, `.${randomUUID()}.tmp`);
-  try {
-    const current = await readStateFile(destination, scope);
+  const scope = {
+    sessionId: parsed.data.sessionId,
+    taskId: parsed.data.taskId,
+  };
+  await transitionBrowserTaskState(root, scope, (current) => {
     if (
       expectedStateVersion === null
-        ? current !== undefined || state.stateVersion !== 0
+        ? current !== undefined || parsed.data.stateVersion !== 0
         : current?.stateVersion !== expectedStateVersion ||
-          state.stateVersion !== expectedStateVersion + 1
+          parsed.data.stateVersion !== expectedStateVersion + 1
     ) {
       throw new BrowserTaskStateStoreError("CONFLICT");
     }
-
-    let handle;
-    try {
-      handle = await open(temporary, "wx", 0o600);
-      await handle.writeFile(contents, "utf8");
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      await rename(temporary, destination);
-      await chmod(destination, 0o600);
-      await syncDirectory(directory);
-    } catch (error) {
-      await handle?.close();
-      await unlink(temporary).catch(() => undefined);
-      if (error instanceof BrowserTaskStateStoreError) throw error;
-      throw new BrowserTaskStateStoreError("UNAVAILABLE");
-    }
-  } finally {
-    await releaseLock(lockPath, ownership);
-  }
+    return { state: parsed.data, value: undefined };
+  });
 }

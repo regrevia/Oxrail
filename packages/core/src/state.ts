@@ -13,7 +13,12 @@ import {
   actionIdentity,
   createActionDigest,
 } from "./policy.js";
-import { persistentToolUseId } from "./safe-state.js";
+import {
+  canonicalPersistentHandoffId,
+  canonicalPersistentToolUseId,
+  persistentHandoffId,
+  persistentToolUseId,
+} from "./safe-state.js";
 
 export class StateVersionConflictError extends Error {
   constructor(expected: number, actual: number) {
@@ -73,7 +78,7 @@ export function stageToolDecision(
     decision.disposition === "PASS_THROUGH_ORIGINAL" ||
     decision.disposition === "SEMANTIC_HINT_ONLY";
   const pendingNativeActionIds = [
-    ...new Set(state.pendingNativeActionIds.map(persistentToolUseId)),
+    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId)),
   ];
   if (executed && !pendingNativeActionIds.includes(toolUseId)) {
     pendingNativeActionIds.push(toolUseId);
@@ -96,7 +101,7 @@ export function completePendingTool(
   const persistentId = persistentToolUseId(toolUseId);
   if (
     !state.pendingNativeActionIds.some(
-      (pendingId) => persistentToolUseId(pendingId) === persistentId,
+      (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId,
     )
   ) {
     return state;
@@ -104,7 +109,7 @@ export function completePendingTool(
   return BrowserTaskStateSchema.parse({
     ...state,
     pendingNativeActionIds: state.pendingNativeActionIds
-      .map(persistentToolUseId)
+      .map(canonicalPersistentToolUseId)
       .filter((pendingId) => pendingId !== persistentId),
     stateVersion: state.stateVersion + 1,
   });
@@ -145,7 +150,10 @@ export function recordActionOutcome(
   }
   return BrowserTaskStateSchema.parse({
     ...state,
-    lastAction: createActionDigest(action, decision, outcome.timestamp),
+    lastAction: {
+      ...createActionDigest(action, decision, outcome.timestamp),
+      toolUseId: persistentToolUseId(action.toolUseId),
+    },
     noProgressCount: outcome.meaningfulProgress
       ? 0
       : sameAsLast
@@ -173,6 +181,9 @@ export function activateUserLease(
   expectedStateVersion = state.stateVersion,
 ): BrowserTaskState {
   assertVersion(state, expectedStateVersion);
+  if (state.pendingNativeActionIds.length > 0) {
+    throw new Error("User lease cannot start while native actions are pending");
+  }
   if (state.pointerOwner !== "NATIVE" || state.phase !== "RUNNING") {
     throw new Error(
       "User lease can only start while Native owns a running task",
@@ -181,7 +192,7 @@ export function activateUserLease(
   return BrowserTaskStateSchema.parse({
     ...state,
     phase: "USER_LEASE_ACTIVE",
-    activeHandoffId: handoffId,
+    activeHandoffId: persistentHandoffId(handoffId),
     leaseEpoch: state.leaseEpoch + 1,
     pointerOwner: "HUMAN",
     stateVersion: state.stateVersion + 1,
@@ -195,7 +206,9 @@ export function beginResume(
 ): BrowserTaskState {
   if (
     state.phase !== "USER_LEASE_ACTIVE" ||
-    state.activeHandoffId !== handoffId ||
+    !state.activeHandoffId ||
+    canonicalPersistentHandoffId(state.activeHandoffId) !==
+      persistentHandoffId(handoffId) ||
     state.leaseEpoch !== leaseEpoch
   ) {
     throw new Error("Only the active handoff and lease epoch may begin resume");
@@ -223,7 +236,9 @@ export function finishResume(
 ): BrowserTaskState {
   if (
     state.phase !== "RESUMING" ||
-    state.activeHandoffId !== handoffId ||
+    !state.activeHandoffId ||
+    canonicalPersistentHandoffId(state.activeHandoffId) !==
+      persistentHandoffId(handoffId) ||
     state.leaseEpoch !== leaseEpoch
   ) {
     throw new Error(

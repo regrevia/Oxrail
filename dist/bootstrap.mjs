@@ -13140,15 +13140,10 @@ import { createHash as createHash3 } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path4 from "node:path";
 
-// packages/host-openai/src/profile.ts
-import { createHash as createHash2, randomUUID } from "node:crypto";
-import { open as open2, rename, unlink } from "node:fs/promises";
-import path2 from "node:path";
-
 // packages/core/src/policy.ts
 function deriveHostMode(profile2) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
-  if (profile2.setup.lifecycle === "INSTALLED" || profile2.hooks.trustState !== "active" || profile2.hooks.policy === "disabled" || profile2.hooks.policy === "managed-only" || !profile2.evidence.validUntilHostChange) {
+  if (profile2.setup.lifecycle === "INSTALLED" || profile2.hooks.trustState !== "active" || profile2.hooks.policy === "disabled" || profile2.hooks.policy === "managed-only" || profile2.hooks.concurrentConflictProbe !== "passed" || !profile2.evidence.validUntilHostChange) {
     return "UNSUPPORTED";
   }
   if (profile2.setup.lifecycle !== "VERIFIED" || profile2.setup.optimization !== "ACTIVE") {
@@ -13183,8 +13178,101 @@ function deriveHostMode(profile2) {
 // packages/core/src/store.ts
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
-// packages/core/src/tool-call.ts
-var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
+// packages/host-openai/src/guard.ts
+var hash4 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
+var magicPropertySegments = /* @__PURE__ */ new Set([
+  "__proto__",
+  "prototype",
+  "constructor"
+]);
+var fieldPath = external_exports.array(external_exports.string().min(1).max(128)).min(1).max(8).refine(
+  (segments) => segments.every((segment) => !magicPropertySegments.has(segment)),
+  "magic property segments are not allowed"
+);
+var sensitiveIdentityTokens = /* @__PURE__ */ new Set([
+  "authorization",
+  "card",
+  "clipboard",
+  "cookie",
+  "credential",
+  "cvc",
+  "cvv",
+  "input",
+  "key",
+  "keys",
+  "otp",
+  "passcode",
+  "passwd",
+  "password",
+  "pin",
+  "pwd",
+  "secret",
+  "text",
+  "token",
+  "value"
+]);
+var sensitiveIdentityCompounds = [
+  "apikey",
+  "cardnumber",
+  "clientsecret",
+  "privatekey",
+  "recoverycode"
+];
+var sensitiveIdentitySegment = (segment) => {
+  const words = segment.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const compact = words.join("");
+  return words.some((word) => sensitiveIdentityTokens.has(word)) || sensitiveIdentityCompounds.some((word) => compact.includes(word));
+};
+var identityFieldPath = fieldPath.refine(
+  (segments) => segments.every((segment) => !sensitiveIdentitySegment(segment)),
+  "sensitive fields cannot participate in input identity"
+);
+var identityValue = external_exports.union([
+  external_exports.string().max(256),
+  external_exports.number().finite(),
+  external_exports.boolean(),
+  external_exports.null()
+]);
+var exactToolName2 = external_exports.string().min(1).max(256).regex(/^[A-Za-z0-9_.:/-]+$/);
+var actionIdentifier = external_exports.string().regex(/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/);
+var impact = external_exports.enum(["read", "reversible", "high-impact"]);
+var registryBinding = external_exports.strictObject({
+  expectedRegistryHash: hash4,
+  expectedInputSchemaHash: hash4
+});
+var ToolContractSchema = external_exports.strictObject({
+  toolName: exactToolName2,
+  inputSchemaHash: hash4,
+  route: ToolRouteSchema,
+  granularity: ActionControlSchema,
+  actionTypePath: fieldPath,
+  originPath: fieldPath.optional(),
+  revisionPath: fieldPath.optional(),
+  targetPath: fieldPath.optional(),
+  identityPaths: external_exports.array(identityFieldPath).min(1).max(16),
+  impactByAction: external_exports.record(actionIdentifier, impact),
+  defaultImpact: external_exports.literal("high-impact")
+});
+var ToolSchemaRegistrySchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  profileId: external_exports.string().min(1).max(128),
+  definitionHash: hash4,
+  matcherEvidenceHash: hash4,
+  tools: external_exports.array(ToolContractSchema).min(1).max(32)
+}).superRefine((registry2, context) => {
+  if (new Set(registry2.tools.map((tool) => tool.toolName)).size !== registry2.tools.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["tools"],
+      message: "tool contracts must be unique"
+    });
+  }
+});
+
+// packages/host-openai/src/profile.ts
+import { createHash as createHash2, randomUUID } from "node:crypto";
+import { open as open2, rename, unlink } from "node:fs/promises";
+import path2 from "node:path";
 
 // packages/host-openai/src/bounded-file.ts
 import { constants } from "node:fs";
@@ -13404,6 +13492,56 @@ async function writeHostProfile(pluginData2, input) {
   return profile2;
 }
 
+// packages/host-openai/src/registry-bundle.ts
+var hash5 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
+var safeProfileId2 = external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+var browserToolPin = external_exports.strictObject({
+  canonicalToolName: external_exports.string().min(1).max(256).regex(/^[A-Za-z0-9_.:/-]+$/),
+  inputSchemaHash: hash5,
+  registryManifestBinding: hash5
+});
+var canonicalToolNames = external_exports.array(browserToolPin.shape.canonicalToolName).min(1).max(32).refine(
+  (names) => new Set(names).size === names.length,
+  "canonical browser tool names must be unique"
+);
+var browserToolPins = external_exports.array(browserToolPin).min(1).max(32).refine(
+  (pins) => new Set(pins.map((pin) => pin.canonicalToolName)).size === pins.length,
+  "canonical browser tool pins must be unique"
+);
+var externalPins = external_exports.strictObject({
+  toolSchemaRegistryHash: hash5,
+  toolSchemaRegistryEvidenceId: external_exports.string().min(1).max(256),
+  browserTools: browserToolPins
+});
+var activeProfileBinding = externalPins.extend({
+  profileId: safeProfileId2,
+  definitionHash: hash5,
+  matcherEvidenceHash: hash5,
+  canonicalToolMatchers: canonicalToolNames
+});
+var storedProfileBinding = external_exports.object({
+  profileId: safeProfileId2,
+  hooks: external_exports.object({ definitionHash: hash5 }),
+  route: external_exports.object({
+    canonicalToolMatchers: canonicalToolNames,
+    matcherEvidenceHash: hash5,
+    toolSchemaRegistryHash: hash5,
+    toolSchemaRegistryEvidenceId: external_exports.string().min(1).max(256),
+    browserTools: browserToolPins
+  })
+});
+var bundleManifest = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  profileId: safeProfileId2,
+  profileSha256: hash5,
+  guard: external_exports.strictObject({
+    toolSchemaRegistryFileSha256: hash5,
+    toolSchemaRegistryHash: hash5,
+    toolSchemaRegistryEvidenceId: external_exports.string().min(1).max(256),
+    browserTools: browserToolPins
+  })
+});
+
 // packages/host-openai/src/state.ts
 import { homedir } from "node:os";
 import path3 from "node:path";
@@ -13428,7 +13566,7 @@ async function hookDefinitionHash(pluginRoot2) {
 }
 
 // packages/host-openai/src/bootstrap.ts
-var exactToolName2 = external_exports.string().min(1).max(256).regex(
+var exactToolName3 = external_exports.string().min(1).max(256).regex(
   /^[A-Za-z0-9_.:/-]+$/,
   "expected an exact tool name, not a matcher expression"
 );
@@ -13460,7 +13598,7 @@ var HostInventorySchema = external_exports.strictObject({
     "specialized",
     "opaque"
   ]),
-  browserToolNames: external_exports.array(exactToolName2).min(1).max(32)
+  browserToolNames: external_exports.array(exactToolName3).min(1).max(32)
 }).superRefine((inventory, context) => {
   if (new Set(inventory.browserToolNames).size !== inventory.browserToolNames.length) {
     context.addIssue({

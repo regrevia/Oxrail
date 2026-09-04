@@ -8,13 +8,15 @@ import {
 const sanitizedId = /^oxrail-id:[a-f0-9]{64}$/;
 
 function digestId(domain: string, value: string): string {
-  if (sanitizedId.test(value)) return value;
   return `oxrail-id:${createHash("sha256")
     .update(domain)
     .update("\0")
     .update(value)
     .digest("hex")}`;
 }
+
+const canonicalId = (domain: string, value: string): string =>
+  sanitizedId.test(value) ? value : digestId(domain, value);
 
 export const persistentDocumentBinding = (value: string): string =>
   digestId("oxrail-persisted-document-v1", value);
@@ -24,6 +26,15 @@ export const persistentToolUseId = (value: string): string =>
 
 export const persistentHandoffId = (value: string): string =>
   digestId("oxrail-persisted-handoff-v1", value);
+
+export const canonicalPersistentDocumentBinding = (value: string): string =>
+  canonicalId("oxrail-persisted-document-v1", value);
+
+export const canonicalPersistentToolUseId = (value: string): string =>
+  canonicalId("oxrail-persisted-tool-use-v1", value);
+
+export const canonicalPersistentHandoffId = (value: string): string =>
+  canonicalId("oxrail-persisted-handoff-v1", value);
 
 function canonicalOrigin(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -53,7 +64,7 @@ export function sanitizeBrowserTaskStateForPersistence(
         stateHash: state.lastObservation.stateHash,
         ...(state.lastObservation.documentBinding
           ? {
-              documentBinding: persistentDocumentBinding(
+              documentBinding: canonicalPersistentDocumentBinding(
                 state.lastObservation.documentBinding,
               ),
             }
@@ -72,7 +83,7 @@ export function sanitizeBrowserTaskStateForPersistence(
           : {}),
         ...(state.lastObservation.screenshotFrameCorrelationId
           ? {
-              screenshotFrameCorrelationId: digestId(
+              screenshotFrameCorrelationId: canonicalId(
                 "oxrail-screenshot-frame-v1",
                 state.lastObservation.screenshotFrameCorrelationId,
               ),
@@ -80,7 +91,7 @@ export function sanitizeBrowserTaskStateForPersistence(
           : {}),
         ...(state.lastObservation.viewportBinding
           ? {
-              viewportBinding: digestId(
+              viewportBinding: canonicalId(
                 "oxrail-viewport-binding-v1",
                 state.lastObservation.viewportBinding,
               ),
@@ -91,7 +102,7 @@ export function sanitizeBrowserTaskStateForPersistence(
   const lastAction = state.lastAction
     ? {
         ...state.lastAction,
-        toolUseId: persistentToolUseId(state.lastAction.toolUseId),
+        toolUseId: canonicalPersistentToolUseId(state.lastAction.toolUseId),
       }
     : undefined;
   const {
@@ -109,23 +120,26 @@ export function sanitizeBrowserTaskStateForPersistence(
   return BrowserTaskStateSchema.parse({
     ...contentFreeState,
     ...(state.turnId
-      ? { turnId: digestId("oxrail-persisted-turn-v1", state.turnId) }
+      ? { turnId: canonicalId("oxrail-persisted-turn-v1", state.turnId) }
       : {}),
     goalSummary: "browser task",
     ...(currentOrigin ? { currentOrigin } : {}),
     ...(state.documentBinding
       ? {
-          documentBinding: persistentDocumentBinding(state.documentBinding),
+          documentBinding: canonicalPersistentDocumentBinding(
+            state.documentBinding,
+          ),
         }
       : {}),
     lastObservation,
     lastAction,
     ...(state.activeHandoffId
       ? {
-          activeHandoffId: persistentHandoffId(state.activeHandoffId),
+          activeHandoffId: canonicalPersistentHandoffId(state.activeHandoffId),
         }
       : {}),
-    pendingNativeActionIds:
-      state.pendingNativeActionIds.map(persistentToolUseId),
+    pendingNativeActionIds: state.pendingNativeActionIds.map(
+      canonicalPersistentToolUseId,
+    ),
   });
 }

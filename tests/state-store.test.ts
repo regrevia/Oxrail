@@ -1,23 +1,31 @@
+import { execFile } from "node:child_process";
 import {
+  chmod,
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
   stat,
+  symlink,
   unlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
 import { createBrowserTaskState } from "../packages/core/src/state.js";
 import {
   MAX_BROWSER_TASK_STATE_BYTES,
+  readBoundedPrivateFile,
   readBrowserTaskState,
   writeBrowserTaskState,
 } from "../packages/core/src/store.js";
+
+const run = promisify(execFile);
 
 async function storedStatePath(root: string): Promise<string> {
   const [sessionDirectory] = await readdir(root);
@@ -50,6 +58,32 @@ async function injectLock(
   );
   await utimes(lockPath, modifiedAt, modifiedAt);
   return lockPath;
+}
+
+const taskScope = (state: { sessionId: string; taskId: string }) => ({
+  sessionId: state.sessionId,
+  taskId: state.taskId,
+});
+
+async function storedFixture() {
+  const root = path.join(
+    await mkdtemp(path.join(tmpdir(), "oxrail-state-")),
+    "state",
+  );
+  const state = createBrowserTaskState({
+    sessionId: "session-1",
+    taskId: "task-1",
+    hostProfileId: "profile-1",
+    mode: "MICRO_ACTION_GUARD",
+  });
+  await writeBrowserTaskState(root, state, null);
+  const filename = await storedStatePath(root);
+  return {
+    filename,
+    lockPath: path.join(path.dirname(filename), ".browser-task-state.lock"),
+    root,
+    state,
+  };
 }
 
 describe("BrowserTaskState store", () => {
@@ -169,6 +203,101 @@ describe("BrowserTaskState store", () => {
         taskId: initial.taskId,
       }),
     ).resolves.toEqual(initial);
+  });
+
+  it("bounds the actual state bytes and rejects non-private files", async () => {
+    const { filename, root, state } = await storedFixture();
+
+    await writeFile(filename, Buffer.alloc(MAX_BROWSER_TASK_STATE_BYTES + 1), {
+      mode: 0o600,
+    });
+    await expect(
+      readBrowserTaskState(root, taskScope(state)),
+    ).rejects.toMatchObject({ code: "TOO_LARGE" });
+
+    await writeFile(filename, "{}\n", { mode: 0o600 });
+    await chmod(filename, 0o644);
+    await expect(
+      readBrowserTaskState(root, taskScope(state)),
+    ).rejects.toMatchObject({ code: "UNAVAILABLE" });
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "enforces the read bound when a dynamic file reports size zero",
+    async () => {
+      const filename = `/proc/${process.pid}/environ`;
+      expect((await stat(filename)).size).toBe(0);
+      await expect(
+        readBoundedPrivateFile(filename, 0, "TOO_LARGE"),
+      ).rejects.toMatchObject({ code: "TOO_LARGE" });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a device as non-regular state storage",
+    async () => {
+      await expect(
+        readBoundedPrivateFile("/dev/null", 16, "TOO_LARGE"),
+      ).rejects.toMatchObject({ code: "UNAVAILABLE" });
+    },
+  );
+
+  it("does not follow a state-file symlink", async () => {
+    const { filename, root, state } = await storedFixture();
+    const target = `${filename}.target`;
+    await writeFile(target, JSON.stringify(state), { mode: 0o600 });
+    await unlink(filename);
+    await symlink(target, filename);
+
+    await expect(
+      readBrowserTaskState(root, taskScope(state)),
+    ).rejects.toMatchObject({ code: "UNAVAILABLE" });
+  });
+
+  it.each(["directory", "fifo"] as const)(
+    "rejects a non-regular %s state leaf without blocking",
+    async (kind) => {
+      if (kind === "fifo" && process.platform === "win32") return;
+      const { filename, root, state } = await storedFixture();
+      await unlink(filename);
+      if (kind === "directory") await mkdir(filename, { mode: 0o700 });
+      else {
+        await run("mkfifo", [filename]);
+        await chmod(filename, 0o600);
+      }
+
+      await expect(
+        readBrowserTaskState(root, taskScope(state)),
+      ).rejects.toMatchObject({ code: "UNAVAILABLE" });
+    },
+  );
+
+  it("rejects unsafe lock leaves and enforces the 512-byte lock bound", async () => {
+    const fixtures = ["symlink", "fifo", "oversized", "public"] as const;
+    for (const fixture of fixtures) {
+      if (fixture === "fifo" && process.platform === "win32") continue;
+      const { lockPath, root, state } = await storedFixture();
+      if (fixture === "symlink") {
+        const target = `${lockPath}.target`;
+        await writeFile(target, "{}\n", { mode: 0o600 });
+        await symlink(target, lockPath);
+      } else if (fixture === "fifo") {
+        await run("mkfifo", [lockPath]);
+        await chmod(lockPath, 0o600);
+      } else if (fixture === "public") {
+        await writeFile(lockPath, "{}\n", { mode: 0o644 });
+      } else {
+        await writeFile(lockPath, Buffer.alloc(513), { mode: 0o600 });
+      }
+
+      await expect(
+        writeBrowserTaskState(
+          root,
+          { ...state, stateVersion: 1 },
+          state.stateVersion,
+        ),
+      ).rejects.toMatchObject({ code: "UNAVAILABLE" });
+    }
   });
 
   it("fails safely on corrupt state without exposing or overwriting its contents", async () => {

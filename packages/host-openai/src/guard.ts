@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { evaluateAction } from "../../core/src/index.js";
+import {
+  browserOwnershipDecision,
+  evaluateAction,
+} from "../../core/src/index.js";
 import { persistentDocumentBinding } from "../../core/src/safe-state.js";
 import {
   ActionControlSchema,
@@ -107,7 +110,9 @@ const policyTargetFingerprint = (value: string): string =>
 const profileAllowsEnforcement = (profile: HostProfile): boolean =>
   profile.setup.lifecycle === "VERIFIED" &&
   profile.setup.optimization === "ACTIVE" &&
+  profile.derived.safety === "ACTIVE" &&
   profile.hooks.trustState === "active" &&
+  profile.hooks.concurrentConflictProbe === "passed" &&
   profile.evidence.validUntilHostChange &&
   enforceableModes.has(profile.derived.mode);
 
@@ -479,14 +484,16 @@ export function runGuardPreToolUse(input: {
 }): GuardPreToolUseResult {
   const browserTool =
     classifyTool(input.profile, input.call.toolName) === "BROWSER";
+  const stateScopeValid =
+    input.state.sessionId === input.sessionId &&
+    input.state.taskId === input.taskId;
   const enforcementContextValid =
     browserTool &&
     profileAllowsEnforcement(input.profile) &&
     input.state.hostProfileId === input.profile.profileId &&
     input.state.hostProfileStatus === "VALID" &&
     input.state.mode === input.profile.derived.mode &&
-    input.state.sessionId === input.sessionId &&
-    input.state.taskId === input.taskId;
+    stateScopeValid;
   if (!enforcementContextValid) {
     return {
       mode: "BYPASSED",
@@ -494,12 +501,13 @@ export function runGuardPreToolUse(input: {
       reasonCode: "OXRAIL_HOST_ROUTE_UNPROVEN",
     };
   }
-  if (
-    input.state.phase === "USER_LEASE_ACTIVE" ||
-    input.state.phase === "HANDOFF_VERIFYING" ||
-    input.state.pointerOwner === "HUMAN"
-  ) {
-    return activeSafetyDeny("OXRAIL_USER_LEASE_ACTIVE");
+  const ownershipDecision = browserOwnershipDecision(input.state);
+  if (ownershipDecision) {
+    return {
+      mode: "ACTIVE",
+      decision: ownershipDecision,
+      output: buildPreToolUseOutput(ownershipDecision),
+    };
   }
   const decoded = decodeBrowserAction(
     input.profile,

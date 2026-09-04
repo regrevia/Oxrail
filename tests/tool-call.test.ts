@@ -1,216 +1,276 @@
-import {
-  mkdtemp,
-  readFile,
-  readdir,
-  stat,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_TOOL_CALL_SLOTS,
-  TOOL_CALL_POST_MAX_AGE_MS,
-  claimToolCallPhase,
+  completeToolCallPost,
+  hasPendingToolCalls,
+  protectToolCallRequestDigest,
+  recordToolCallPre,
 } from "../packages/core/src/tool-call.js";
+import type { PolicyDecision } from "../packages/protocol/src/index.js";
 
-describe("tool call phase claims", () => {
-  it("claims each ordered phase once within one session/task namespace", async () => {
-    const root = path.join(
-      await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")),
-      "state",
+const allow: PolicyDecision = {
+  disposition: "PASS_THROUGH_ORIGINAL",
+  reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+  recoverable: true,
+};
+const block: PolicyDecision = {
+  disposition: "BLOCK_BEFORE_EXECUTION",
+  reasonCode: "OXRAIL_REDUNDANT_ACTION",
+  recoverable: true,
+};
+const requestDigest = "a".repeat(64);
+const bindingDigest = "b".repeat(64);
+
+const makeRoot = async () =>
+  path.join(await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")), "state");
+
+const baseInput = (toolUseId = "call-1") => ({
+  bindingDigest,
+  decision: allow,
+  requestDigest,
+  sessionId: "session-1",
+  taskId: "task-1",
+  toolUseId,
+});
+
+async function journalDirectory(root: string): Promise<string> {
+  const [session] = await readdir(root);
+  const sessionDirectory = path.join(root, session!);
+  const [task] = await readdir(sessionDirectory);
+  return path.join(sessionDirectory, task!, "tool-calls");
+}
+
+describe("tool call journal", () => {
+  it("keys sanitized request digests with one private per-install key", async () => {
+    const root = await makeRoot();
+    const first = await protectToolCallRequestDigest(root, requestDigest);
+    const repeated = await protectToolCallRequestDigest(root, requestDigest);
+    const changed = await protectToolCallRequestDigest(root, "c".repeat(64));
+
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).toBe(repeated);
+    expect(first).not.toBe(requestDigest);
+    expect(changed).not.toBe(first);
+    const key = path.join(root, ".request-digest-key");
+    expect((await stat(key)).mode & 0o777).toBe(0o600);
+    expect((await readFile(key)).byteLength).toBe(32);
+  });
+
+  it("records, replays, and completes a call without an age limit", async () => {
+    const root = await makeRoot();
+    const input = baseInput();
+
+    await expect(completeToolCallPost(root, input)).resolves.toBe(
+      "OUT_OF_ORDER",
     );
-    const input = {
-      sessionId: "raw-session/canary",
-      taskId: "raw-task/canary",
-      toolUseId: "raw-tool/canary",
-    };
+    await expect(recordToolCallPre(root, input)).resolves.toEqual({
+      decision: allow,
+      journalStatus: "PENDING",
+      kind: "RECORDED",
+    });
+    await expect(
+      recordToolCallPre(root, { ...input, decision: block }),
+    ).resolves.toEqual({
+      decision: allow,
+      journalStatus: "PENDING",
+      kind: "REPLAY",
+    });
+    await expect(hasPendingToolCalls(root, input)).resolves.toBe("PENDING");
+
+    await expect(completeToolCallPost(root, input)).resolves.toBe("COMPLETED");
+    await expect(completeToolCallPost(root, input)).resolves.toBe("DUPLICATE");
+    await expect(hasPendingToolCalls(root, input)).resolves.toBe("NONE");
+  });
+
+  it("makes one concurrent Pre the durable decision", async () => {
+    const root = await makeRoot();
+    const results = await Promise.all(
+      Array.from({ length: 24 }, () => recordToolCallPre(root, baseInput())),
+    );
+
+    expect(results.filter((result) => result.kind === "RECORDED")).toHaveLength(
+      1,
+    );
+    expect(results.filter((result) => result.kind === "REPLAY")).toHaveLength(
+      23,
+    );
+    expect(
+      results.every(
+        (result) =>
+          result.kind === "RECORDED" ||
+          (result.kind === "REPLAY" &&
+            JSON.stringify(result.decision) === JSON.stringify(allow)),
+      ),
+    ).toBe(true);
+  });
+
+  it("makes concurrent Post delivery idempotent", async () => {
+    const root = await makeRoot();
+    const input = baseInput();
+    await recordToolCallPre(root, input);
+
+    const results = await Promise.all(
+      Array.from({ length: 24 }, () => completeToolCallPost(root, input)),
+    );
+    expect(results.filter((result) => result === "COMPLETED")).toHaveLength(1);
+    expect(results.filter((result) => result === "DUPLICATE")).toHaveLength(23);
+    await expect(hasPendingToolCalls(root, input)).resolves.toBe("NONE");
+  });
+
+  it("rejects reuse of one id with a different request or profile binding", async () => {
+    const root = await makeRoot();
+    const input = baseInput();
+    await recordToolCallPre(root, input);
 
     await expect(
-      claimToolCallPhase(root, { ...input, phase: "PostToolUse" }),
-    ).resolves.toBe("IGNORED");
-    await expect(
-      claimToolCallPhase(root, { ...input, phase: "PreToolUse" }),
-    ).resolves.toBe("CLAIMED");
-    await expect(
-      claimToolCallPhase(root, { ...input, phase: "PreToolUse" }),
-    ).resolves.toBe("IGNORED");
-    await expect(
-      claimToolCallPhase(root, { ...input, phase: "PostToolUse" }),
-    ).resolves.toBe("CLAIMED");
-    await expect(
-      claimToolCallPhase(root, { ...input, phase: "PostToolUse" }),
-    ).resolves.toBe("IGNORED");
-    await expect(
-      claimToolCallPhase(root, {
+      recordToolCallPre(root, {
         ...input,
-        taskId: "another-task",
-        phase: "PreToolUse",
+        bindingDigest: "c".repeat(64),
       }),
-    ).resolves.toBe("CLAIMED");
+    ).resolves.toEqual({ kind: "MISMATCH" });
+    await expect(
+      recordToolCallPre(root, {
+        ...input,
+        requestDigest: "d".repeat(64),
+      }),
+    ).resolves.toEqual({ kind: "MISMATCH" });
   });
 
-  it("allows only one concurrent claim for each phase", async () => {
-    const root = path.join(
-      await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")),
-      "state",
-    );
-    const input = {
-      sessionId: "session-1",
-      taskId: "task-1",
-      toolUseId: "call-1",
-    };
+  it("keeps blocking decisions complete and rejects their Post", async () => {
+    const root = await makeRoot();
+    const input = { ...baseInput(), decision: block };
 
-    const pre = await Promise.all(
-      Array.from({ length: 16 }, () =>
-        claimToolCallPhase(root, { ...input, phase: "PreToolUse" }),
-      ),
+    await expect(recordToolCallPre(root, input)).resolves.toEqual({
+      decision: block,
+      journalStatus: "COMPLETE",
+      kind: "RECORDED",
+    });
+    await expect(hasPendingToolCalls(root, input)).resolves.toBe("NONE");
+    await expect(completeToolCallPost(root, input)).resolves.toBe(
+      "OUT_OF_ORDER",
     );
-    expect(pre.filter((result) => result === "CLAIMED")).toHaveLength(1);
-    expect(pre.filter((result) => result === "IGNORED")).toHaveLength(15);
-
-    const post = await Promise.all(
-      Array.from({ length: 16 }, () =>
-        claimToolCallPhase(root, { ...input, phase: "PostToolUse" }),
-      ),
-    );
-    expect(post.filter((result) => result === "CLAIMED")).toHaveLength(1);
-    expect(post.filter((result) => result === "IGNORED")).toHaveLength(15);
   });
 
-  it("does not let an orphaned candidate block its fixed claim slot", async () => {
-    const root = path.join(
-      await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")),
-      "state",
+  it("directly addresses more than 1024 calls without exhausting slots", async () => {
+    const root = await makeRoot();
+    const inputs = Array.from({ length: 1_025 }, (_, index) => ({
+      ...baseInput(`call-${index}`),
+      decision: block,
+    }));
+    for (let offset = 0; offset < inputs.length; offset += 64) {
+      const results = await Promise.all(
+        inputs
+          .slice(offset, offset + 64)
+          .map((input) => recordToolCallPre(root, input)),
+      );
+      expect(results.every((result) => result.kind === "RECORDED")).toBe(true);
+    }
+
+    const files = await readdir(await journalDirectory(root));
+    expect(files).toHaveLength(1_025);
+    expect(files.every((name) => /^[a-f0-9]{64}\.json$/.test(name))).toBe(true);
+  });
+
+  it("recovers a receipt-first Post crash without reporting a pending call", async () => {
+    const root = await makeRoot();
+    const input = baseInput();
+    await recordToolCallPre(root, input);
+    const directory = await journalDirectory(root);
+    const [markerName] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
     );
-    const input = {
-      sessionId: "session-1",
-      taskId: "task-1",
-      toolUseId: "call-1",
-    };
-    await claimToolCallPhase(root, { ...input, phase: "PreToolUse" });
-    const [sessionName] = await readdir(root);
-    const sessionDirectory = path.join(root, sessionName!);
-    const [taskName] = await readdir(sessionDirectory);
-    const claimDirectory = path.join(sessionDirectory, taskName!, "tool-calls");
-    const [preName] = (await readdir(claimDirectory)).filter((name) =>
-      name.endsWith(".pre.json"),
-    );
-    await unlink(path.join(claimDirectory, preName!));
+    const marker = JSON.parse(
+      await readFile(path.join(directory, markerName!), "utf8"),
+    ) as Record<string, unknown>;
     await writeFile(
-      path.join(claimDirectory, `.${preName!.slice(0, 3)}.pre.tmp`),
-      "interrupted candidate",
+      path.join(directory, markerName!.replace(/\.json$/, ".post")),
+      `${JSON.stringify({ ...marker, status: "COMPLETE" })}\n`,
       { mode: 0o600 },
     );
 
-    await expect(
-      claimToolCallPhase(root, { ...input, phase: "PreToolUse" }),
-    ).resolves.toBe("CLAIMED");
+    await expect(hasPendingToolCalls(root, input)).resolves.toBe("NONE");
+    await expect(completeToolCallPost(root, input)).resolves.toBe("DUPLICATE");
+    expect(
+      JSON.parse(await readFile(path.join(directory, markerName!), "utf8")),
+    ).toMatchObject({ status: "COMPLETE" });
   });
 
-  it("persists only private, bounded, digest-addressed claims", async () => {
-    const root = path.join(
-      await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")),
-      "state",
+  it("returns unknown or unavailable for corruption and I/O failures", async () => {
+    const root = await makeRoot();
+    const input = baseInput();
+    await recordToolCallPre(root, input);
+    const directory = await journalDirectory(root);
+    const [marker] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
     );
+    await writeFile(path.join(directory, marker!), "not-json\n", {
+      mode: 0o600,
+    });
+
+    await expect(hasPendingToolCalls(root, input)).resolves.toBe("UNKNOWN");
+    await expect(recordToolCallPre(root, input)).resolves.toEqual({
+      kind: "UNAVAILABLE",
+    });
+    await expect(completeToolCallPost(root, input)).resolves.toBe(
+      "UNAVAILABLE",
+    );
+
+    const unavailableRoot = path.join(
+      await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")),
+      "file",
+    );
+    await writeFile(unavailableRoot, "fixture", { mode: 0o600 });
+    await expect(recordToolCallPre(unavailableRoot, input)).resolves.toEqual({
+      kind: "UNAVAILABLE",
+    });
+    await expect(hasPendingToolCalls(unavailableRoot, input)).resolves.toBe(
+      "UNKNOWN",
+    );
+  });
+
+  it("uses private modes and persists no raw identifiers or page data", async () => {
+    const root = await makeRoot();
     const input = {
+      ...baseInput("raw-tool/canary"),
+      pageData: "page-secret-canary",
       sessionId: "raw-session/canary",
       taskId: "raw-task/canary",
-      toolUseId: "raw-tool/canary",
     };
-    await claimToolCallPhase(root, { ...input, phase: "PreToolUse" });
-    await claimToolCallPhase(root, { ...input, phase: "PostToolUse" });
+    await recordToolCallPre(root, input);
+    await completeToolCallPost(root, input);
 
-    const [sessionName] = await readdir(root);
-    const sessionDirectory = path.join(root, sessionName!);
-    const [taskName] = await readdir(sessionDirectory);
-    const taskDirectory = path.join(sessionDirectory, taskName!);
-    const claimDirectory = path.join(taskDirectory, "tool-calls");
-    const files = await readdir(claimDirectory);
+    const [session] = await readdir(root);
+    const sessionDirectory = path.join(root, session!);
+    const [task] = await readdir(sessionDirectory);
+    const taskDirectory = path.join(sessionDirectory, task!);
+    const directory = path.join(taskDirectory, "tool-calls");
+    const files = await readdir(directory);
     const persisted = (
       await Promise.all(
         files.map((filename) =>
-          readFile(path.join(claimDirectory, filename), "utf8"),
+          readFile(path.join(directory, filename), "utf8"),
         ),
       )
     ).join("\n");
 
-    expect(
-      `${sessionName}/${taskName}/${files.join("/")}/${persisted}`,
-    ).not.toMatch(/raw-(session|task|tool)\/canary/);
+    expect(`${session}/${task}/${files.join("/")}/${persisted}`).not.toMatch(
+      /raw-(session|task|tool)\/canary|page-secret-canary/,
+    );
     expect(files).toHaveLength(2);
-    expect(files.every((filename) => !filename.endsWith(".tmp"))).toBe(true);
+    expect(
+      files.every((name) => /^[a-f0-9]{64}\.(json|post)$/.test(name)),
+    ).toBe(true);
     for (const filename of files) {
-      const slot = Number.parseInt(filename.slice(0, 3), 16);
-      expect(slot).toBeLessThan(MAX_TOOL_CALL_SLOTS);
-      expect(
-        (await stat(path.join(claimDirectory, filename))).mode & 0o777,
-      ).toBe(0o600);
+      expect((await stat(path.join(directory, filename))).mode & 0o777).toBe(
+        0o600,
+      );
     }
-    for (const directory of [
-      root,
-      sessionDirectory,
-      taskDirectory,
-      claimDirectory,
-    ]) {
-      expect((await stat(directory)).mode & 0o777).toBe(0o700);
+    for (const item of [root, sessionDirectory, taskDirectory, directory]) {
+      expect((await stat(item)).mode & 0o777).toBe(0o700);
     }
-  });
-
-  it("ignores a Post claim after its matching Pre claim expires", async () => {
-    const root = path.join(
-      await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-")),
-      "state",
-    );
-    const input = {
-      sessionId: "session-1",
-      taskId: "task-1",
-      toolUseId: "call-1",
-    };
-    await claimToolCallPhase(root, { ...input, phase: "PreToolUse" });
-    const [sessionName] = await readdir(root);
-    const sessionDirectory = path.join(root, sessionName!);
-    const [taskName] = await readdir(sessionDirectory);
-    const claimDirectory = path.join(sessionDirectory, taskName!, "tool-calls");
-    const [preName] = (await readdir(claimDirectory)).filter((name) =>
-      name.endsWith(".pre.json"),
-    );
-    const prePath = path.join(claimDirectory, preName!);
-    const marker = JSON.parse(await readFile(prePath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    await writeFile(
-      prePath,
-      `${JSON.stringify({
-        ...marker,
-        createdAt: Date.now() - TOOL_CALL_POST_MAX_AGE_MS - 1,
-      })}\n`,
-      { mode: 0o600 },
-    );
-
-    await expect(
-      claimToolCallPhase(root, { ...input, phase: "PostToolUse" }),
-    ).resolves.toBe("IGNORED");
-  });
-
-  it("returns IGNORED without exposing invalid input or filesystem errors", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "oxrail-tool-call-"));
-    const root = path.join(directory, "not-a-directory");
-    await writeFile(root, "filesystem-canary", { mode: 0o600 });
-    const input = {
-      sessionId: "private-session-canary",
-      taskId: "private-task-canary",
-      toolUseId: "private-tool-canary",
-      phase: "PreToolUse",
-    } as const;
-
-    await expect(claimToolCallPhase(root, input)).resolves.toBe("IGNORED");
-    await expect(
-      claimToolCallPhase(directory, { ...input, toolUseId: "" }),
-    ).resolves.toBe("IGNORED");
   });
 });

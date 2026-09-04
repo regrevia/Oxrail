@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   activateUserLease,
   beginResume,
+  browserOwnershipDecision,
   completePendingTool,
   createActionDigest,
   createBrowserTaskState,
   evaluateAction,
   finishResume,
+  persistentToolUseId,
   recordActionOutcome,
+  sanitizeBrowserTaskStateForPersistence,
   stageToolDecision,
   stateFingerprintDigest,
   StateVersionConflictError,
@@ -278,6 +281,102 @@ describe("v0.1 core policy", () => {
     expect(resumed).toMatchObject({ phase: "RUNNING", pointerOwner: "NATIVE" });
     expect(resumed).not.toHaveProperty("activeHandoffId");
   });
+
+  it("resumes with the raw handoff id after a persisted-state round trip", () => {
+    const rawHandoffId = "raw-handoff-id";
+    const leased = activateUserLease(state(), rawHandoffId);
+    const reloadedLease = sanitizeBrowserTaskStateForPersistence(leased);
+    expect(reloadedLease.activeHandoffId).not.toBe(rawHandoffId);
+    expect(() =>
+      beginResume(reloadedLease, "wrong-handoff-id", leased.leaseEpoch),
+    ).toThrow("Only the active handoff");
+
+    const resuming = beginResume(
+      reloadedLease,
+      rawHandoffId,
+      leased.leaseEpoch,
+    );
+    const reloadedResume = sanitizeBrowserTaskStateForPersistence(resuming);
+    expect(
+      finishResume(reloadedResume, rawHandoffId, leased.leaseEpoch),
+    ).toMatchObject({ phase: "RUNNING", pointerOwner: "NATIVE" });
+  });
+
+  it("rejects a user lease while an allowed native action awaits PostToolUse", () => {
+    const toolAction = action({ toolUseId: "in-flight-call" });
+    const before = state();
+    const pending = stageToolDecision(
+      before,
+      toolAction,
+      evaluateAction({ action: toolAction, state: before }),
+    );
+
+    expect(() => activateUserLease(pending, "handoff-1")).toThrow(
+      "User lease cannot start while native actions are pending",
+    );
+  });
+
+  it("keeps raw tool ids distinct from the persisted-id namespace", () => {
+    const firstRawId = "call-a";
+    const prefixedRawId = persistentToolUseId(firstRawId);
+    const firstAction = action({ toolUseId: firstRawId });
+    const secondAction = action({ toolUseId: prefixedRawId });
+    const first = stageToolDecision(
+      state(),
+      firstAction,
+      evaluateAction({ action: firstAction, state: state() }),
+    );
+    const second = stageToolDecision(
+      first,
+      secondAction,
+      evaluateAction({ action: secondAction, state: first }),
+    );
+
+    expect(second.pendingNativeActionIds).toHaveLength(2);
+    const afterSecondPost = completePendingTool(second, prefixedRawId);
+    expect(afterSecondPost.pendingNativeActionIds).toEqual([
+      persistentToolUseId(firstRawId),
+    ]);
+    expect(completePendingTool(afterSecondPost, firstRawId)).toMatchObject({
+      pendingNativeActionIds: [],
+    });
+  });
+
+  it("keeps a prefixed raw outcome id distinct after persistence", () => {
+    const firstRawId = "call-a";
+    const prefixedRawId = persistentToolUseId(firstRawId);
+    const toolAction = action({ toolUseId: prefixedRawId });
+    const recorded = recordActionOutcome(
+      state(),
+      toolAction,
+      evaluateAction({ action: toolAction, state: state() }),
+      { meaningfulProgress: true, timestamp: 1 },
+    );
+    const persisted = sanitizeBrowserTaskStateForPersistence(recorded);
+
+    expect(persisted.lastAction?.toolUseId).toBe(
+      persistentToolUseId(prefixedRawId),
+    );
+    expect(persisted.lastAction?.toolUseId).not.toBe(prefixedRawId);
+    expect(sanitizeBrowserTaskStateForPersistence(persisted)).toEqual(
+      persisted,
+    );
+  });
+
+  it.each([
+    ["USER_LEASE_ACTIVE", "HUMAN", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["HANDOFF_VERIFYING", "HUMAN", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["HANDOFF_PREPARING", "NATIVE", "OXRAIL_VERIFICATION_INCONCLUSIVE"],
+    ["RESTORING_TAB", "NONE", "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"],
+    ["RESUMING", "NONE", "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"],
+  ] as const)(
+    "blocks browser ownership while phase=%s and owner=%s",
+    (phase, pointerOwner, reasonCode) => {
+      expect(
+        browserOwnershipDecision({ ...state(), phase, pointerOwner }),
+      ).toMatchObject({ disposition: "BLOCK_BEFORE_EXECUTION", reasonCode });
+    },
+  );
 
   it("detects optimistic state-version conflicts", () => {
     expect(() =>

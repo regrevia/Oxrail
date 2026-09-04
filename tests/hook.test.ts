@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   mkdir,
@@ -5,6 +6,7 @@ import {
   readFile,
   readdir,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,19 +17,33 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HostProfileSchema,
   NativePrimitiveSchema,
+  toolRegistryManifestBinding,
   type HostProfile,
 } from "../packages/protocol/src/index.js";
+import {
+  MAX_BROWSER_TASK_STATE_BYTES,
+  activateUserLease,
+  createBrowserTaskState,
+  readBrowserTaskState,
+  sanitizeBrowserTaskStateForPersistence,
+  writeBrowserTaskState,
+} from "../packages/core/src/index.js";
 import {
   digestSessionId,
   digestToolUseId,
   handleHookEvent,
+  hookBrowserTaskScope,
   hookDefinitionHash,
+  hookRuntimeStateDirectory,
   markerMatches,
   MAX_BROWSER_ROUTE_OBSERVATIONS,
   oxrailDataDirectory,
   recordBrowserHookPhase,
   readBrowserRouteObservations,
   readHookMarker,
+  TOOL_SCHEMA_REGISTRY_FILENAME,
+  ToolSchemaRegistrySchema,
+  toolSchemaRegistryHash,
   writeHostProfile,
 } from "../packages/host-openai/src/index.js";
 
@@ -202,8 +218,117 @@ async function setup() {
   const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-hook-"));
   temporaryDirectories.push(pluginData);
   const definitionHash = await hookDefinitionHash(pluginRoot);
-  await writeHostProfile(pluginData, await fixtureProfile(definitionHash));
-  return { definitionHash, pluginData, pluginRoot };
+  const profile = await fixtureProfile(definitionHash);
+  await writeHostProfile(pluginData, profile);
+  return { definitionHash, pluginData, pluginRoot, profile };
+}
+
+const sha256 = (value: string | Buffer) =>
+  createHash("sha256").update(value).digest("hex");
+
+async function setupActiveGuard(
+  toolContractPatch: Record<string, unknown> = {},
+) {
+  const environment = await setup();
+  const registry = ToolSchemaRegistrySchema.parse({
+    schemaVersion: 1,
+    profileId: "hp_fixture_active",
+    definitionHash: environment.definitionHash,
+    matcherEvidenceHash: "a".repeat(64),
+    tools: [
+      {
+        toolName: "fixture.native.browser",
+        inputSchemaHash: "d".repeat(64),
+        route: "direct-mcp",
+        granularity: "MICRO_ACTION",
+        actionTypePath: ["action"],
+        identityPaths: [["axis"]],
+        impactByAction: { click: "reversible", submit: "high-impact" },
+        defaultImpact: "high-impact",
+        ...toolContractPatch,
+      },
+    ],
+  });
+  const registryHash = toolSchemaRegistryHash(registry);
+  const base = await fixtureProfile(environment.definitionHash);
+  const profile = HostProfileSchema.parse({
+    ...base,
+    profileId: registry.profileId,
+    setup: {
+      ...base.setup,
+      lifecycle: "VERIFIED",
+      firstBrowserHookSeen: true,
+      verificationSource: "passive-first-browser-call",
+      optimization: "ACTIVE",
+    },
+    route: {
+      ...base.route,
+      toolSchemaRegistryHash: registryHash,
+      toolSchemaRegistryEvidenceId: "EVID-HOST-HOOK-ACTIVE-FIXTURE",
+      browserTools: [
+        {
+          canonicalToolName: "fixture.native.browser",
+          inputSchemaHash: registry.tools[0]!.inputSchemaHash,
+          registryManifestBinding: toolRegistryManifestBinding({
+            profileId: registry.profileId,
+            definitionHash: environment.definitionHash,
+            matcherEvidenceHash: registry.matcherEvidenceHash,
+            toolSchemaRegistryHash: registryHash,
+            toolSchemaRegistryEvidenceId: "EVID-HOST-HOOK-ACTIVE-FIXTURE",
+            canonicalToolName: "fixture.native.browser",
+            inputSchemaHash: registry.tools[0]!.inputSchemaHash,
+          }),
+        },
+      ],
+    },
+    derived: {
+      ...base.derived,
+      mode: "MICRO_ACTION_GUARD",
+      safety: "ACTIVE",
+    },
+    hooks: {
+      ...base.hooks,
+      concurrentConflictProbe: "passed",
+    },
+  });
+  await writeHostProfile(environment.pluginData, profile);
+  const directory = path.join(
+    environment.pluginData,
+    "hosts",
+    profile.profileId,
+  );
+  const registryContents = `${JSON.stringify(registry, null, 2)}\n`;
+  await writeFile(
+    path.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
+    registryContents,
+  );
+  const profileContents = await readFile(path.join(directory, "profile.json"));
+  await writeFile(
+    path.join(directory, "manifest.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        profileId: profile.profileId,
+        profileSha256: sha256(profileContents),
+        guard: {
+          toolSchemaRegistryFileSha256: sha256(registryContents),
+          toolSchemaRegistryHash: registryHash,
+          toolSchemaRegistryEvidenceId:
+            profile.route.toolSchemaRegistryEvidenceId,
+          browserTools: profile.route.browserTools,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  return {
+    ...environment,
+    profile,
+    registry,
+    verifyGuardActivation: (candidate: HostProfile) =>
+      candidate.profileId === profile.profileId,
+  };
 }
 
 async function allFiles(directory: string): Promise<string[]> {
@@ -216,6 +341,34 @@ async function allFiles(directory: string): Promise<string[]> {
       }),
     )
   ).flat();
+}
+
+async function runtimeStateLockPath(runtimeRoot: string): Promise<string> {
+  const state = (await allFiles(runtimeRoot)).find(
+    (filename) => path.basename(filename) === "browser-task-state.json",
+  );
+  if (!state) throw new Error("fixture runtime state was not created");
+  return path.join(path.dirname(state), ".browser-task-state.lock");
+}
+
+async function seedUserLease(
+  pluginData: string,
+  profile: HostProfile,
+  sessionId: string,
+): Promise<void> {
+  const scope = hookBrowserTaskScope(sessionId);
+  const runtimeRoot = hookRuntimeStateDirectory(pluginData);
+  const running = createBrowserTaskState({
+    ...scope,
+    hostProfileId: profile.profileId,
+    mode: profile.derived.mode,
+  });
+  await writeBrowserTaskState(runtimeRoot, running, null);
+  await writeBrowserTaskState(
+    runtimeRoot,
+    activateUserLease(running, "fixture-handoff"),
+    running.stateVersion,
+  );
 }
 
 describe("public Codex hooks", () => {
@@ -393,6 +546,597 @@ describe("public Codex hooks", () => {
     await expect(
       readBrowserRouteObservations(environment.pluginData),
     ).resolves.toEqual([]);
+  });
+
+  it("completes metadata-only Post after activation evidence drifts", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "raw-active-session-canary";
+    const turnId = "raw-active-turn-canary";
+    const toolUseId = "raw-active-tool-canary";
+    const pre = await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        turn_id: turnId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
+        tool_input: { action: "click", axis: "primary" },
+      },
+      environment,
+    );
+    expect(pre).toEqual({});
+
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({
+      lastAction: {
+        actionType: "click",
+        decision: "ALLOW",
+        reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+      },
+      pendingNativeActionIds: [expect.stringMatching(/^oxrail-id:/)],
+    });
+    await writeFile(
+      path.join(
+        environment.pluginData,
+        "hosts",
+        environment.profile.profileId,
+        TOOL_SCHEMA_REGISTRY_FILENAME,
+      ),
+      "{}\n",
+    );
+    await writeFile(
+      path.join(
+        environment.pluginData,
+        "hosts",
+        environment.profile.profileId,
+        "manifest.json",
+      ),
+      "{}\n",
+    );
+    environment.verifyGuardActivation = () => {
+      throw new Error("Post cleanup must not require fresh attestation");
+    };
+
+    let responseRead = false;
+    let postInputRead = false;
+    const post: Record<string, unknown> = {
+      hook_event_name: "PostToolUse",
+      session_id: sessionId,
+      turn_id: `${turnId}-next`,
+      tool_name: "fixture.native.browser",
+      tool_use_id: toolUseId,
+    };
+    Object.defineProperties(post, {
+      tool_input: {
+        enumerable: true,
+        get() {
+          postInputRead = true;
+          throw new Error("PostToolUse must not inspect tool_input");
+        },
+      },
+      tool_response: {
+        enumerable: true,
+        get() {
+          responseRead = true;
+          throw new Error("PostToolUse must not inspect tool_response");
+        },
+      },
+    });
+    await expect(handleHookEvent(post, environment)).resolves.toEqual({});
+    expect(postInputRead).toBe(false);
+    expect(responseRead).toBe(false);
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({ pendingNativeActionIds: [] });
+
+    const persisted = await Promise.all(
+      (await allFiles(environment.pluginData)).map((filename) =>
+        readFile(filename, "utf8"),
+      ),
+    );
+    expect(persisted.join("\n")).not.toContain(sessionId);
+    expect(persisted.join("\n")).not.toContain(turnId);
+    expect(persisted.join("\n")).not.toContain(toolUseId);
+  });
+
+  it("does not enforce a seeded lease without an external attestation verifier", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "unattested-session";
+    await seedUserLease(environment.pluginData, environment.profile, sessionId);
+    const { verifyGuardActivation: _untrustedTestSeam, ...production } =
+      environment;
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "unattested-call",
+          tool_input: { action: "submit", axis: "primary" },
+        },
+        production,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+  });
+
+  it("keeps CONFIGURED first-call verification passive despite seeded state", async () => {
+    const environment = await setup();
+    const sessionId = "configured-seeded-session";
+    await seedUserLease(environment.pluginData, environment.profile, sessionId);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "configured-seeded-call",
+          tool_input: { action: "click" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("never applies a browser lease to an unrelated tool", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "unrelated-seeded-session";
+    await seedUserLease(environment.pluginData, environment.profile, sessionId);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.unrelated.tool",
+          tool_use_id: "unrelated-seeded-call",
+          tool_input: { action: "click" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("migrates an idle session state to the current verified profile", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "profile-migration-session";
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    await writeBrowserTaskState(
+      runtimeRoot,
+      createBrowserTaskState({
+        ...scope,
+        hostProfileId: "hp_previous_fixture",
+        mode: "ADVISORY_ONLY",
+      }),
+      null,
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "profile-migration-call",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({
+      hostProfileId: environment.profile.profileId,
+      mode: "MICRO_ACTION_GUARD",
+      revision: 1,
+      targetCacheEpoch: 1,
+      stateVersion: 1,
+      pendingNativeActionIds: [expect.stringMatching(/^oxrail-id:/)],
+    });
+  });
+
+  it("denies a trusted high-impact action through the official PreToolUse shape", async () => {
+    const environment = await setupActiveGuard();
+    const input = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: "high-impact-session",
+      turn_id: "high-impact-turn",
+      tool_name: "fixture.native.browser",
+      tool_use_id: "high-impact-call",
+      tool_input: { action: "submit", axis: "primary" },
+    };
+
+    const first = await handleHookEvent(input, environment);
+    const duplicate = await handleHookEvent(input, environment);
+    for (const output of [first, duplicate]) {
+      expect(output).toEqual({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason:
+            "OXRAIL_HUMAN_BOUNDARY: This action requires host-native approval; Oxrail cannot create approval proactively.",
+        },
+      });
+    }
+  });
+
+  it("never replays an allowed native action for duplicate or mismatched Pre delivery", async () => {
+    const environment = await setupActiveGuard({
+      originPath: ["origin"],
+      revisionPath: ["revision"],
+    });
+    const input = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: "duplicate-allow-session",
+      tool_name: "fixture.native.browser",
+      tool_use_id: "duplicate-allow-call",
+      tool_input: {
+        action: "click",
+        axis: "primary",
+        origin: "https://example.test",
+        revision: 0,
+      },
+    };
+
+    await expect(handleHookEvent(input, environment)).resolves.toEqual({});
+    for (const duplicate of [
+      input,
+      {
+        ...input,
+        tool_input: {
+          ...input.tool_input,
+          axis: "changed",
+        },
+      },
+      {
+        ...input,
+        tool_input: {
+          ...input.tool_input,
+          origin: "https://changed.example.test",
+        },
+      },
+      {
+        ...input,
+        tool_input: {
+          ...input.tool_input,
+          revision: 1,
+        },
+      },
+    ]) {
+      await expect(
+        handleHookEvent(duplicate, environment),
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            "OXRAIL_VERIFICATION_INCONCLUSIVE",
+          ),
+        },
+      });
+    }
+  });
+
+  it("serializes concurrent duplicate Pre delivery before native execution", async () => {
+    const environment = await setupActiveGuard();
+    const input = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: "concurrent-duplicate-session",
+      tool_name: "fixture.native.browser",
+      tool_use_id: "concurrent-duplicate-call",
+      tool_input: { action: "click", axis: "primary" },
+    };
+    const outputs = await Promise.all(
+      Array.from({ length: 2 }, () => handleHookEvent(input, environment)),
+    );
+
+    expect(
+      outputs.filter((output) => JSON.stringify(output) === "{}"),
+    ).toHaveLength(1);
+    expect(
+      outputs.filter(
+        (output) =>
+          "hookSpecificOutput" in output &&
+          output.hookSpecificOutput.permissionDecision === "deny",
+      ),
+    ).toHaveLength(1);
+
+    const highImpact = {
+      ...input,
+      session_id: "concurrent-high-impact-session",
+      tool_use_id: "concurrent-high-impact-call",
+      tool_input: { action: "submit", axis: "primary" },
+    };
+    const denials = await Promise.all(
+      Array.from({ length: 2 }, () => handleHookEvent(highImpact, environment)),
+    );
+    expect(
+      denials.every(
+        (output) =>
+          "hookSpecificOutput" in output &&
+          output.hookSpecificOutput.permissionDecision === "deny" &&
+          output.hookSpecificOutput.permissionDecisionReason.includes(
+            "OXRAIL_HUMAN_BOUNDARY",
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves a computed high-impact deny when state persistence fails", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "oversized-state-session";
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const initial = {
+      ...createBrowserTaskState({
+        ...scope,
+        hostProfileId: environment.profile.profileId,
+        mode: environment.profile.derived.mode,
+      }),
+      pendingNativeActionIds: Array.from(
+        { length: 843 },
+        (_, index) => `oxrail-id:${index.toString(16).padStart(64, "0")}`,
+      ),
+    };
+    expect(
+      Buffer.byteLength(
+        `${JSON.stringify(sanitizeBrowserTaskStateForPersistence(initial))}\n`,
+      ),
+    ).toBeLessThanOrEqual(MAX_BROWSER_TASK_STATE_BYTES);
+    await writeBrowserTaskState(runtimeRoot, initial, null);
+
+    const request = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: sessionId,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "oversized-state-call",
+      tool_input: { action: "submit", axis: "primary" },
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(
+        handleHookEvent(request, environment),
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            "OXRAIL_HUMAN_BOUNDARY",
+          ),
+        },
+      });
+    }
+    await expect(readBrowserTaskState(runtimeRoot, scope)).resolves.toEqual(
+      initial,
+    );
+  });
+
+  it("does not enforce a persisted lease after activation evidence drifts", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "lease-session";
+    const turnId = "lease-turn";
+    const seedTool = "seed-call";
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        turn_id: turnId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: seedTool,
+        tool_input: { action: "click", axis: "primary" },
+      },
+      environment,
+    );
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        session_id: sessionId,
+        turn_id: turnId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: seedTool,
+      },
+      environment,
+    );
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const running = await readBrowserTaskState(runtimeRoot, scope);
+    if (!running) throw new Error("fixture state was not created");
+    const leased = activateUserLease(running, "fixture-handoff");
+    await writeBrowserTaskState(runtimeRoot, leased, running.stateVersion);
+    const driftedProfileId = "hp_fixture_active_drifted";
+    const driftedProfile = HostProfileSchema.parse({
+      ...environment.profile,
+      profileId: driftedProfileId,
+      setup: {
+        ...environment.profile.setup,
+        lifecycle: "CONFIGURED",
+        firstBrowserHookSeen: false,
+        verificationSource: "none",
+        optimization: "BYPASSED",
+      },
+      route: {
+        ...environment.profile.route,
+        browserTools: environment.profile.route.browserTools.map((tool) => ({
+          ...tool,
+          registryManifestBinding: toolRegistryManifestBinding({
+            profileId: driftedProfileId,
+            definitionHash: environment.profile.hooks.definitionHash,
+            matcherEvidenceHash: environment.profile.route.matcherEvidenceHash,
+            toolSchemaRegistryHash:
+              environment.profile.route.toolSchemaRegistryHash!,
+            toolSchemaRegistryEvidenceId:
+              environment.profile.route.toolSchemaRegistryEvidenceId!,
+            canonicalToolName: tool.canonicalToolName,
+            inputSchemaHash: tool.inputSchemaHash,
+          }),
+        })),
+      },
+      derived: {
+        ...environment.profile.derived,
+        mode: "ADVISORY_ONLY",
+        safety: "INACTIVE",
+      },
+    });
+    await writeHostProfile(environment.pluginData, driftedProfile);
+
+    const request = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: sessionId,
+      turn_id: `${turnId}-next`,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "call-during-user-lease",
+      tool_input: { action: "click", axis: "primary" },
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(handleHookEvent(request, environment)).resolves.toEqual({});
+    }
+
+    await writeFile(
+      path.join(
+        environment.pluginData,
+        "hosts",
+        driftedProfileId,
+        "manifest.json",
+      ),
+      "{}\n",
+    );
+    await expect(handleHookEvent(request, environment)).resolves.toEqual({});
+  });
+
+  it("fails open when the session state lock is unavailable", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "locked-session";
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "seed-lock-state",
+        tool_input: { action: "click", axis: "seed" },
+      },
+      environment,
+    );
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        session_id: sessionId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "seed-lock-state",
+      },
+      environment,
+    );
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const lockPath = await runtimeStateLockPath(runtimeRoot);
+    await writeFile(
+      lockPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        createdAt: Date.now(),
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          turn_id: "next-turn",
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-lock",
+          tool_input: { action: "click", axis: "next" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+    await unlink(lockPath);
+  });
+
+  it("retries metadata-only Post cleanup after a transient state lock", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "post-retry-session";
+    const toolUseId = "post-retry-call";
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
+        tool_input: { action: "click", axis: "primary" },
+      },
+      environment,
+    );
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const lockPath = await runtimeStateLockPath(runtimeRoot);
+    await writeFile(
+      lockPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        createdAt: Date.now(),
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+    const post = {
+      hook_event_name: "PostToolUse" as const,
+      session_id: sessionId,
+      turn_id: "later-turn",
+      tool_name: "fixture.native.browser",
+      tool_use_id: toolUseId,
+    };
+    const releaseLock = new Promise<void>((resolve, reject) => {
+      setTimeout(() => void unlink(lockPath).then(resolve, reject), 1);
+    });
+    await expect(handleHookEvent(post, environment)).resolves.toEqual({});
+    await releaseLock;
+    await expect(
+      readBrowserTaskState(runtimeRoot, hookBrowserTaskScope(sessionId)),
+    ).resolves.toMatchObject({ pendingNativeActionIds: [] });
+  });
+
+  it("does not invent no-progress outcomes from metadata-only Post events", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "no-progress-session";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const toolUseId = `no-progress-call-${attempt}`;
+      await expect(
+        handleHookEvent(
+          {
+            hook_event_name: "PreToolUse",
+            session_id: sessionId,
+            tool_name: "fixture.native.browser",
+            tool_use_id: toolUseId,
+            tool_input: { action: "click", axis: "same" },
+          },
+          environment,
+        ),
+      ).resolves.toEqual({});
+      await handleHookEvent(
+        {
+          hook_event_name: "PostToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: toolUseId,
+        },
+        environment,
+      );
+    }
+
+    await expect(
+      readBrowserTaskState(
+        hookRuntimeStateDirectory(environment.pluginData),
+        hookBrowserTaskScope(sessionId),
+      ),
+    ).resolves.toMatchObject({ noProgressCount: 0 });
   });
 
   it("bounds passive browser-route evidence without storing tool ids", async () => {

@@ -112,9 +112,9 @@ function repeatsWithoutProgress(
   return actionIdentity(action) === actionDigestIdentity(state.lastAction);
 }
 
-export function evaluateAction(context: PolicyContext): PolicyDecision {
-  const { action, state } = context;
-
+export function browserOwnershipDecision(
+  state: BrowserTaskState,
+): PolicyDecision | undefined {
   if (
     state.phase === "USER_LEASE_ACTIVE" ||
     state.phase === "HANDOFF_VERIFYING" ||
@@ -126,13 +126,31 @@ export function evaluateAction(context: PolicyContext): PolicyDecision {
       recoverable: true,
     };
   }
-  if (state.phase === "RESUMING" || state.pointerOwner === "NONE") {
+  if (
+    state.phase === "RESUMING" ||
+    state.phase === "RESTORING_TAB" ||
+    state.pointerOwner === "NONE"
+  ) {
     return {
       disposition: "BLOCK_BEFORE_EXECUTION",
       reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
       recoverable: true,
     };
   }
+  if (state.phase === "HANDOFF_PREPARING") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+      recoverable: true,
+    };
+  }
+  return undefined;
+}
+
+export function evaluateAction(context: PolicyContext): PolicyDecision {
+  const { action, state } = context;
+  const ownershipDecision = browserOwnershipDecision(state);
+  if (ownershipDecision) return ownershipDecision;
 
   const freshAndCovered =
     context.routeCovered !== false && state.hostProfileStatus === "VALID";
@@ -232,6 +250,7 @@ export function deriveHostMode(
     profile.hooks.trustState !== "active" ||
     profile.hooks.policy === "disabled" ||
     profile.hooks.policy === "managed-only" ||
+    profile.hooks.concurrentConflictProbe !== "passed" ||
     !profile.evidence.validUntilHostChange
   ) {
     return "UNSUPPORTED";

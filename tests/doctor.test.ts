@@ -839,6 +839,10 @@ describe("oxrail doctor", () => {
         mode: "MICRO_ACTION_GUARD",
         handoff: "ACTIVE",
       },
+      hooks: {
+        ...profile.hooks,
+        concurrentConflictProbe: "passed",
+      },
     });
     await writeHostProfile(environment.pluginData, activeHandoffProfile);
     for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {

@@ -13148,7 +13148,7 @@ var EvidenceTraceSchema = external_exports.strictObject({
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
-  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || !profile.evidence.validUntilHostChange) {
+  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || profile.hooks.concurrentConflictProbe !== "passed" || !profile.evidence.validUntilHostChange) {
     return "UNSUPPORTED";
   }
   if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
@@ -13182,9 +13182,6 @@ function deriveHostMode(profile) {
 
 // packages/core/src/store.ts
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
-
-// packages/core/src/tool-call.ts
-var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
 
 // packages/evidence/src/gate.ts
 var digest = (contents) => createHash2("sha256").update(contents).digest("hex");
