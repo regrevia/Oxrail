@@ -28,7 +28,6 @@ export interface NewBrowserTaskState {
   taskId: string;
   hostProfileId: string;
   mode: HostMode;
-  goalSummary?: string;
 }
 
 export function createBrowserTaskState(
@@ -38,7 +37,7 @@ export function createBrowserTaskState(
     schemaVersion: 3,
     sessionId: input.sessionId,
     taskId: input.taskId,
-    goalSummary: input.goalSummary ?? "browser task",
+    goalSummary: "browser task",
     hostProfileId: input.hostProfileId,
     hostProfileStatus: "VALID",
     mode: input.mode,
