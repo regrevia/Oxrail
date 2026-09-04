@@ -17,6 +17,7 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_ACTIVE_INDEX_ENTRIES,
   MAX_ACTIVE_TOOL_CALLS,
   completeToolCallPost,
   hasPendingToolCalls,
@@ -306,6 +307,37 @@ describe("tool call journal", () => {
       pendingToolUseIds: [persistentToolUseId(input.toolUseId)],
     });
   });
+
+  it("stops trusting an active directory with excessive temporary debris", async () => {
+    const root = await makeRoot();
+    const input = baseInput("temporary-debris-call");
+    await recordToolCallPre(root, input);
+    const directory = await journalDirectory(root);
+    const active = path.join(directory, "active");
+    const [canonical] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    const digest = canonical!.replace(/\.json$/, "");
+    const temporaries = Array.from(
+      { length: MAX_ACTIVE_INDEX_ENTRIES },
+      (_, index) =>
+        path.join(
+          active,
+          `.${digest}.${index.toString(16).padStart(36, "0")}.tmp`,
+        ),
+    );
+    for (let offset = 0; offset < temporaries.length; offset += 64) {
+      await Promise.all(
+        temporaries
+          .slice(offset, offset + 64)
+          .map((filename) => writeFile(filename, "partial\n", { mode: 0o600 })),
+      );
+    }
+
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+  }, 60_000);
 
   it("bounds activation work when the active index exceeds its ceiling", async () => {
     const root = await makeRoot();

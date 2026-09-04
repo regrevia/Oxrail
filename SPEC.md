@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.3
+# Oxrail — 唯一实现规范（SPEC）v1.0.4
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.3
+  spec_version: 1.0.4
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -2886,7 +2886,7 @@ EvidenceState        # run_id / WP / test manifest
 - 持久 ToolCall canonical marker 使用 v2 格式保存去敏的 `persistentToolUseId`，并保留 first-decision replay history；Handoff activation 只读取同一 task journal 下有版本 sentinel 的 `active/` 索引，不得随历史总量全表扫描；
 - pending marker 发布顺序固定为 private mutation intent → canonical first-decision claim → 独立 active marker → 目录 fsync → 清除 intent；任一中断期间索引必须返回 `UNKNOWN`，Post 可从完整 intent 恢复 canonical/active/completion；
 - Post journal 更新与 `BrowserTaskState` 清理必须在同一 per-task lock 内串行化；只有 state 已持久化且不再保留对应 `persistentToolUseId` 后才可回收完成的 active marker，并应在后续成功 Post/Handoff 协调中批量清理 crash 遗留项；
-- active index 同时存在的 call 上限为 256；超限、不一致、损坏、缺少可信 sentinel 或旧版未索引 journal 均视为 `UNKNOWN`，Handoff 保持 `INACTIVE/FAILED_SAFE`，但 Native Computer Use 继续遵循基础 fail-open；当前开发版不原地迁移无 sentinel 的旧 session，须以新 session 重建索引；
+- active index 以流式目录迭代读取并在第 257 个 call 或第 514 个总目录项前停止信任；超限、不一致、损坏、缺少可信 sentinel 或旧版未索引 journal 均视为 `UNKNOWN`，Handoff 保持 `INACTIVE/FAILED_SAFE`，但 Native Computer Use 继续遵循基础 fail-open；当前开发版不原地迁移无 sentinel 的旧 session，须以新 session 重建索引；
 - receipt-first crash 后必须把完成回执与 `BrowserTaskState.pendingNativeActionIds` 精确协调；legacy/损坏/缺失映射不得凭 aggregate pending 状态猜测完成；
 - 文件写入采用 temp + fsync + atomic rename；
 - session 状态带 `stateVersion`，更新使用 CAS；
@@ -3777,7 +3777,7 @@ Conversation UI and non-browser discussion = MAY CONTINUE
 
 租约激活采用 write-ahead admission gate：先原子持久化 `PREPARING/generation=n+1`，再取得 task-state lock、精确协调 v2 ToolCall journal 与 pending state，最后验证 Host-minted tab-binding/native-action-fence receipt 并切换为 `ACTIVE`。该 receipt 必须绑定本代 generation，并由 Host 在观察到 barrier 后等待所有更早已准入或排队的 native Browser calls 终结后签发；这也覆盖 Hook fail-open 未能落 journal 的调用。普通 Browser Pre 在 lock 外保存 gate 快照，进入 lock 后必须复读；状态不是 `OPEN` 或 generation 改变时均不得进入受跟踪的 native action journal。取消/释放只写同一 generation 的终态 tombstone，不删除代际证据。
 
-ToolCall 的 canonical v2 marker/receipt 为 O(1) duplicate replay history；Handoff 不扫描这些历史文件，只扫描有 sentinel、mutation intent 与 256-call ceiling 的 `active/` 索引。Pre 在 canonical 前写 intent，Post 在同一 task lock 内修复或完成该 intent；完成项只有在 durable state 已移除对应 pending identity 后才回收，且后续成功 Post 或 activation 会清理 state 不再引用的 crash 遗留项。任何 dirty intent、active/canonical/receipt 不一致、active ceiling 超限或 legacy 无 sentinel 状态都使本次 Handoff 协调为 `UNKNOWN/FAILED_SAFE`，不得把空目录或缺失索引解释成“全部 native action 已完成”。正常 steady-state activation 的工作量只与当前 active calls 有关；异常恢复与 session-level 历史保留另行计量，不得冒充正常 P95。
+ToolCall 的 canonical v2 marker/receipt 为 O(1) duplicate replay history；Handoff 不扫描这些历史文件，只用流式目录迭代读取有 sentinel、mutation intent、256-call ceiling 与 513-entry ceiling 的 `active/` 索引，并在首个越界项立即停止。Pre 在 canonical 前写 intent，Post 在同一 task lock 内修复或完成该 intent；完成项只有在 durable state 已移除对应 pending identity 后才回收，且后续成功 Post 或 activation 会清理 state 不再引用的 crash 遗留项。任何 dirty intent、active/canonical/receipt 不一致、active/entry ceiling 超限或 legacy 无 sentinel 状态都使本次 Handoff 协调为 `UNKNOWN/FAILED_SAFE`，不得把空目录或缺失索引解释成“全部 native action 已完成”。正常 steady-state activation 的工作量只与当前 active calls 有关；异常恢复与 session-level 历史保留另行计量，不得冒充正常 P95。
 
 task state 与 barrier 的 `ACTIVE/CANCELLED` 发布必须由同一 per-task lock 串行化；状态先提交、barrier 后发布的 crash window 保持 `PREPARING` 并拒绝 Agent，不得让不同 receipt 并发覆盖。重复的同 lease activation 可从已持久化的同一 ACTIVE barrier 幂等确认，不要求 Host 重签字节完全相同的新 receipt。过期 `PREPARING` 只有在持久状态仍证明 `RUNNING + NATIVE` 时才可无需原始 lease 写入 `CANCELLED` tombstone；若状态已是 Human/user-held，则保持封锁并报告 `USER_LEASE_RECOVERY_REQUIRED`，重启后恢复 UI 与重新验证，禁止猜测交还 Agent。
 
@@ -4096,7 +4096,7 @@ ChatGPT Work lifecycle parity with Codex: UNKNOWN
 - **REQ-HO-016**：Browser SMH 与普通 Oxrail 数据流中任何 secret canary occurrence = 0；Credential Channel 只适用 `SEC-21.2B` 的限定 occurrence，不得扩大到 Browser SMH。
 - **REQ-HO-017**：Browser USER lease 激活前必须验证新鲜、Host-minted 且绑定当前 Host Profile、browser instance、同一 `tabId`/session/origin/document、本代 admission generation 与 native-action fence 的 receipt；fence 只能在 barrier 可见且 Host 确认此前已准入或排队的 native Browser calls 全部终结后签发，并在本地 journal 协调后验证。Agent、模型、网页、裸 `tabId` 或仅 journal 清空不能自证该绑定与静默点。
 - **REQ-HO-018**：Handoff admission gate 必须在取得 task-state lock 前持久化 `PREPARING`，并保留单调 generation 的终态 tombstone；Browser Pre 在 lock 外与 lock 内各读取一次，只有两次均为同一 `OPEN` generation 才可进入 native action journal，防止被跟踪调用的并发和 ABA 穿透；任何未能落 journal 的 fail-open 调用仍必须由 `REQ-HO-017` 的 Host native-action fence 覆盖。state 与 barrier 的 activation/cancel 发布必须在同一 task lock 内串行化；过期准备仅可在仍证明 Native ownership 时自动取消，user-held/unknown 必须保持封锁并进入显式恢复。
-- **REQ-HO-019**：Handoff activation 的正常路径必须只扫描带可信 sentinel 的 bounded active ToolCall index，而不是 canonical replay history；pending Pre 必须以 durable mutation intent 覆盖 canonical/index 之间的 crash window，Post journal 与 state coordination 必须共用 per-task lock，active completion 仅可在 durable state 不再引用对应 identity 后回收，并由后续成功 Post/activation 清理可证明已不再引用的 crash 遗留项。active 同时存在超过 256 项、dirty intent、legacy 无 sentinel、缺失或不一致 marker/receipt 均返回 `UNKNOWN/FAILED_SAFE`，禁止猜测清空；Native Computer Use 仍按基础 Hook fail-open 合同继续。
+- **REQ-HO-019**：Handoff activation 的正常路径必须只扫描带可信 sentinel 的 bounded active ToolCall index，而不是 canonical replay history；目录必须流式迭代并在第 257 个 call 或第 514 个总 entry 前停止信任。pending Pre 必须以 durable mutation intent 覆盖 canonical/index 之间的 crash window，Post journal 与 state coordination 必须共用 per-task lock，active completion 仅可在 durable state 不再引用对应 identity 后回收，并由后续成功 Post/activation 清理可证明已不再引用的 crash 遗留项。任一 ceiling 超限、dirty intent、legacy 无 sentinel、缺失或不一致 marker/receipt 均返回 `UNKNOWN/FAILED_SAFE`，禁止猜测清空；Native Computer Use 仍按基础 Hook fail-open 合同继续。
 
 ---
 
@@ -11767,6 +11767,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.4 — 2026-09-04
+
+- bounded active index 改为 `opendir` 流式读取，在 256 calls 或 513 total entries ceiling 后立即 `UNKNOWN`；
+- Post/activation 的完成项 sweep 复用同一有界扫描，不再在 per-task lock 内执行无界全目录读取；
+- 增加 excessive temporary debris 与 over-ceiling activation 的回归测试。
 
 ### v1.0.3 — 2026-09-04
 

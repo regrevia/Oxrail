@@ -13204,6 +13204,10 @@ function deriveHostMode(profile) {
 // packages/core/src/store.ts
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
+// packages/core/src/tool-call.ts
+var MAX_ACTIVE_TOOL_CALLS = 256;
+var MAX_ACTIVE_INDEX_ENTRIES = MAX_ACTIVE_TOOL_CALLS * 2 + 1;
+
 // packages/evidence/src/gate.ts
 var digest = (contents) => createHash2("sha256").update(contents).digest("hex");
 var releaseDependencies2 = [

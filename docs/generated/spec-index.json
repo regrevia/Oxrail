@@ -2,8 +2,8 @@
   "schema_version": 1,
   "generated_at": "2026-09-04",
   "canonical_file": "OXRAIL_SPEC.md",
-  "spec_version": "1.0.3",
-  "spec_sha256": "38157db40bd0687052bb0cc62a8dea1a28259464c638699934a52ccd27bee06d",
+  "spec_version": "1.0.4",
+  "spec_sha256": "57813884e3f87a6a446b931a6a1b2a5b1cde23043f78116c1c11b0dcdc31bf90",
   "counts": {
     "sections": 51,
     "requirements": 124,
@@ -632,7 +632,7 @@
       "title": "文档实时维护、变更与归档协议",
       "anchor": "sec-50",
       "start_line": 11616,
-      "end_line": 11860,
+      "end_line": 11866,
       "keywords": [
         "living-spec",
         "maintenance",
@@ -2065,7 +2065,7 @@
       "locations": [
         185,
         10344,
-        11801
+        11807
       ]
     },
     "REQ-CRED-002": {
@@ -2320,7 +2320,7 @@
         4266,
         8220,
         9761,
-        11794
+        11800
       ]
     },
     "REQ-SEC-002": {
@@ -4723,7 +4723,7 @@
         7730,
         7995,
         8596,
-        11812
+        11818
       ]
     },
     "REQ-HOST-008": {
@@ -4939,7 +4939,7 @@
         137,
         7995,
         10344,
-        11801
+        11807
       ]
     }
   },
@@ -5157,7 +5157,7 @@
         10344,
         10375,
         10421,
-        11801
+        11807
       ]
     }
   },
@@ -5674,7 +5674,7 @@
       "locations": [
         6797,
         10387,
-        11801
+        11807
       ]
     },
     "KILL-K30": {
@@ -9567,7 +9567,7 @@
       "title": "V1.0 final acceptance",
       "anchor": "wp-rls-100",
       "start_line": 11549,
-      "end_line": 11860,
+      "end_line": 11866,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -11042,7 +11042,7 @@
       "locations": [
         6060,
         10376,
-        11801
+        11807
       ],
       "sections": [
         "SEC-35",
@@ -11840,7 +11840,7 @@
       "locations": [
         6150,
         10376,
-        11801
+        11807
       ],
       "sections": [
         "SEC-36",
@@ -12128,7 +12128,7 @@
         7757,
         8028,
         8625,
-        11812
+        11818
       ],
       "sections": [
         "SEC-10",

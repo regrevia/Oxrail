@@ -13857,6 +13857,7 @@ import {
   lstat as lstat2,
   mkdir as mkdir3,
   open as open3,
+  opendir,
   readdir,
   rename as rename2,
   unlink as unlink3
@@ -13975,6 +13976,7 @@ async function createLocalDigestProtector(root) {
 // packages/core/src/tool-call.ts
 var MAX_TOOL_CALL_MARKER_BYTES = 1024;
 var MAX_ACTIVE_TOOL_CALLS = 256;
+var MAX_ACTIVE_INDEX_ENTRIES = MAX_ACTIVE_TOOL_CALLS * 2 + 1;
 var MAX_ID_LENGTH = 4096;
 var ACTIVE_DIRECTORY = "active";
 var ACTIVE_INDEX = ".active-index-v1";
@@ -14311,7 +14313,7 @@ async function recordToolCallPre(root, input) {
     return { kind: "UNAVAILABLE" };
   }
 }
-async function scanToolCallJournal(root, scope, maximumCalls = MAX_ACTIVE_TOOL_CALLS) {
+async function scanToolCallJournal(root, scope) {
   if (!validScope(scope)) return { kind: "UNKNOWN" };
   const directory = journalDirectory(root, scope);
   const active = activeDirectory(directory);
@@ -14330,18 +14332,23 @@ async function scanToolCallJournal(root, scope, maximumCalls = MAX_ACTIVE_TOOL_C
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 63) !== 0) {
       return { kind: "UNKNOWN" };
     }
-    entries = await readdir(active, { withFileTypes: true });
+    entries = await opendir(active);
   } catch {
     return { kind: "UNKNOWN" };
   }
   const calls = [];
-  for (const entry of entries) {
+  let entriesSeen = 0;
+  for await (const entry of entries) {
+    entriesSeen += 1;
+    if (entriesSeen > MAX_ACTIVE_INDEX_ENTRIES) {
+      return { kind: "UNKNOWN" };
+    }
     if (entry.isFile() && entry.name === ACTIVE_INDEX) continue;
     if (entry.isFile() && ACTIVE_INDEX_TEMPORARY.test(entry.name)) continue;
     if (entry.isFile() && ACTIVE_MARKER_TEMPORARY.test(entry.name)) continue;
     const match = /^([a-f0-9]{64})\.json$/.exec(entry.name);
     if (!entry.isFile() || !match) return { kind: "UNKNOWN" };
-    if (calls.length === maximumCalls) return { kind: "UNKNOWN" };
+    if (calls.length === MAX_ACTIVE_TOOL_CALLS) return { kind: "UNKNOWN" };
     const toolDigest = match[1];
     const marker = await readMarker(path3.join(active, entry.name), toolDigest);
     if (marker.kind !== "VALID" || marker.marker.status !== "PENDING" || !decisionLeavesNativeActionPending(marker.marker.decision)) {
@@ -14434,11 +14441,7 @@ async function retireCompletedToolCalls(root, scope, retainedPersistentToolUseId
       return "UNAVAILABLE";
     }
     const retained = new Set(retainedPersistentToolUseIds);
-    const scanned = await scanToolCallJournal(
-      root,
-      scope,
-      Number.MAX_SAFE_INTEGER
-    );
+    const scanned = await scanToolCallJournal(root, scope);
     if (scanned.kind === "UNKNOWN") return "UNAVAILABLE";
     const persistentIds = scanned.calls.flatMap(
       ({ marker }) => marker.schemaVersion === 2 ? [marker.persistentToolUseId] : []

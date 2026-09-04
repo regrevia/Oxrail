@@ -13199,6 +13199,10 @@ function deriveHostMode(profile2) {
 // packages/core/src/store.ts
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
+// packages/core/src/tool-call.ts
+var MAX_ACTIVE_TOOL_CALLS = 256;
+var MAX_ACTIVE_INDEX_ENTRIES = MAX_ACTIVE_TOOL_CALLS * 2 + 1;
+
 // packages/host-openai/src/guard.ts
 var hash4 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
 var magicPropertySegments = /* @__PURE__ */ new Set([

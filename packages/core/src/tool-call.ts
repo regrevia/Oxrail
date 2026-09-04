@@ -6,6 +6,7 @@ import {
   lstat,
   mkdir,
   open,
+  opendir,
   readdir,
   rename,
   unlink,
@@ -21,6 +22,7 @@ import { persistentToolUseId } from "./safe-state.js";
 
 export const MAX_TOOL_CALL_MARKER_BYTES = 1_024;
 export const MAX_ACTIVE_TOOL_CALLS = 256;
+export const MAX_ACTIVE_INDEX_ENTRIES = MAX_ACTIVE_TOOL_CALLS * 2 + 1;
 
 const MAX_ID_LENGTH = 4_096;
 const ACTIVE_DIRECTORY = "active";
@@ -621,7 +623,6 @@ interface ScannedToolCall {
 async function scanToolCallJournal(
   root: string,
   scope: ToolCallScope,
-  maximumCalls = MAX_ACTIVE_TOOL_CALLS,
 ): Promise<{ kind: "KNOWN"; calls: ScannedToolCall[] } | { kind: "UNKNOWN" }> {
   if (!validScope(scope)) return { kind: "UNKNOWN" };
   const directory = journalDirectory(root, scope);
@@ -652,19 +653,24 @@ async function scanToolCallJournal(
     ) {
       return { kind: "UNKNOWN" };
     }
-    entries = await readdir(active, { withFileTypes: true });
+    entries = await opendir(active);
   } catch {
     return { kind: "UNKNOWN" };
   }
 
   const calls: ScannedToolCall[] = [];
-  for (const entry of entries) {
+  let entriesSeen = 0;
+  for await (const entry of entries) {
+    entriesSeen += 1;
+    if (entriesSeen > MAX_ACTIVE_INDEX_ENTRIES) {
+      return { kind: "UNKNOWN" };
+    }
     if (entry.isFile() && entry.name === ACTIVE_INDEX) continue;
     if (entry.isFile() && ACTIVE_INDEX_TEMPORARY.test(entry.name)) continue;
     if (entry.isFile() && ACTIVE_MARKER_TEMPORARY.test(entry.name)) continue;
     const match = /^([a-f0-9]{64})\.json$/.exec(entry.name);
     if (!entry.isFile() || !match) return { kind: "UNKNOWN" };
-    if (calls.length === maximumCalls) return { kind: "UNKNOWN" };
+    if (calls.length === MAX_ACTIVE_TOOL_CALLS) return { kind: "UNKNOWN" };
     const toolDigest = match[1]!;
     const marker = await readMarker(path.join(active, entry.name), toolDigest);
     if (
@@ -890,11 +896,7 @@ export async function retireCompletedToolCalls(
       return "UNAVAILABLE";
     }
     const retained = new Set(retainedPersistentToolUseIds);
-    const scanned = await scanToolCallJournal(
-      root,
-      scope,
-      Number.MAX_SAFE_INTEGER,
-    );
+    const scanned = await scanToolCallJournal(root, scope);
     if (scanned.kind === "UNKNOWN") return "UNAVAILABLE";
     const persistentIds = scanned.calls.flatMap(({ marker }) =>
       marker.schemaVersion === 2 ? [marker.persistentToolUseId] : [],
