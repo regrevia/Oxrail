@@ -28,8 +28,8 @@ Native Interaction Fidelity and real-host benchmark evidence are still in progre
 ## Install from GitHub
 
 Requires a current Codex CLI with plugin marketplace support and Node.js 20 or newer.
-The repository is currently a v0.1 alpha on `dev`; `main` will be created only after the real-host release gate is accepted.
-The marketplace installs the immutable `v0.1.0-alpha.0` plugin tag; `dev` may contain newer unaccepted work.
+`main` is the latest accepted stable line; ongoing development happens on `dev` and reaches `main` only after a milestone gate passes.
+The marketplace currently installs the immutable `v0.1.0-alpha.0` plugin tag; `dev` may contain newer unaccepted work.
 
 ```bash
 codex plugin marketplace add regrevia/Oxrail
