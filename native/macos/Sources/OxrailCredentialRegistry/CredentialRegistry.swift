@@ -109,6 +109,17 @@ struct CredentialRegistryBundle: Equatable {
     var registryManifestHash: String
 }
 
+package struct EmbeddedCredentialPromptDescriptor: Equatable, Sendable {
+    package let scope: CredentialReferenceScope
+    package let windowTitle: String
+    package let siteLabel: String
+    package let purposeLabel: String
+    package let fieldLabel: String
+    package let submitLabel: String
+    package let cancelLabel: String
+    package let pasteboardWarning: String
+}
+
 func credentialRegistryDigest<Value: Encodable>(
     domain: String,
     value: Value
@@ -206,6 +217,32 @@ func embeddedFixtureCredentialRegistry() -> CredentialRegistryBundle {
             consumerRegistryHash: "71e4b865818705e073c556f3adea9bb296fe359f0385cb48ec6054862347b1be"
         ),
         registryManifestHash: "2fd54c5c4bf0672d670323d3bb181aa185ebfdec8667baedb69e13222790e4d7"
+    )
+}
+
+package func embeddedCredentialPromptDescriptor(
+    for credentialUseId: String
+) -> EmbeddedCredentialPromptDescriptor? {
+    let bundle = embeddedFixtureCredentialRegistry()
+    guard let scope = embeddedCredentialReferenceScope(),
+          credentialUseId.utf8.count <= 256,
+          evaluateCredentialRegistry(bundle).status == .matchedFixtureNonAuthorizing,
+          bundle.templateRegistry.templates.count == 1,
+          let template = bundle.templateRegistry.templates.first,
+          template.credentialUseId == credentialUseId,
+          scope.credentialUseId == credentialUseId,
+          template.secureFieldClass == "NSSecureTextField" else {
+        return nil
+    }
+    return EmbeddedCredentialPromptDescriptor(
+        scope: scope,
+        windowTitle: template.windowTitle,
+        siteLabel: template.siteLabel,
+        purposeLabel: template.purposeLabel,
+        fieldLabel: template.fieldLabel,
+        submitLabel: template.submitLabel,
+        cancelLabel: template.cancelLabel,
+        pasteboardWarning: template.pasteboardWarning
     )
 }
 

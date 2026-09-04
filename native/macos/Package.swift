@@ -21,6 +21,11 @@ let package = Package(
             linkerSettings: [.linkedFramework("Security")]
         ),
         .target(
+            name: "OxrailCredentialEnclave",
+            dependencies: ["OxrailCredentialRegistry"],
+            linkerSettings: [.linkedFramework("AppKit")]
+        ),
+        .target(
             name: "OxrailKeychainProbe",
             linkerSettings: [.linkedFramework("Security")]
         ),
@@ -35,6 +40,10 @@ let package = Package(
         .testTarget(
             name: "OxrailCredentialRegistryTests",
             dependencies: ["OxrailCredentialRegistry"]
+        ),
+        .testTarget(
+            name: "OxrailCredentialEnclaveTests",
+            dependencies: ["OxrailCredentialEnclave", "OxrailCredentialRegistry"]
         ),
         .testTarget(
             name: "OxrailKeychainProbeTests",

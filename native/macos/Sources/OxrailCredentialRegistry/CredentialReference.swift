@@ -33,20 +33,20 @@ public struct CredentialReferenceLifecycleReport: Equatable, Sendable {
     }
 }
 
-struct CredentialReferenceScope: Equatable {
-    var credentialUseId: String
-    var credentialKind: String
-    var templateId: String
-    var serviceId: String
-    var provisioningOrigin: String
-    var purposeId: String
-    var consumerId: String
-    var grantTtlSeconds: Int
-    var generation: Int
-    var registryVersion: Int
-    var templateRegistryHash: String
-    var consumerRegistryHash: String
-    var registryManifestHash: String
+package struct CredentialReferenceScope: Equatable, Sendable {
+    package var credentialUseId: String
+    package var credentialKind: String
+    package var templateId: String
+    package var serviceId: String
+    package var provisioningOrigin: String
+    package var purposeId: String
+    package var consumerId: String
+    package var grantTtlSeconds: Int
+    package var generation: Int
+    package var registryVersion: Int
+    package var templateRegistryHash: String
+    package var consumerRegistryHash: String
+    package var registryManifestHash: String
 }
 
 enum FixtureCredentialReferenceUse: Equatable {
@@ -149,7 +149,7 @@ final class FixtureCredentialReferenceStore: @unchecked Sendable {
     }
 }
 
-func embeddedCredentialReferenceScope() -> CredentialReferenceScope? {
+package func embeddedCredentialReferenceScope() -> CredentialReferenceScope? {
     let bundle = embeddedFixtureCredentialRegistry()
     guard evaluateCredentialRegistry(bundle).status == .matchedFixtureNonAuthorizing,
           bundle.templateRegistry.templates.count == 1,

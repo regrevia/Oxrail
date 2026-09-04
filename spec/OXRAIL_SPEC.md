@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.16
+# Oxrail — 唯一实现规范（SPEC）v1.0.17
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -2220,6 +2220,8 @@ macOS native package 的 code-identity verifier foundation 只提供零参数、
 macOS native package 的 credential-registry validator foundation 只提供零参数、只读的 `runEmbeddedCredentialRegistryObservation()`：production 入口只观察 build-fixed 的 template registry、consumer registry 与 manifest，禁止由 argv、env、HostProfile、页面、Agent 或调用方替换。首个 foundation 只包含一份 `API_KEY` fixture template 与一份同 service/consumer/origin 绑定的 fixture HTTPS consumer，固定 `NSSecureTextField`、`POST` bearer placement、禁用 redirect，并校验 schema/version、ID、canonical HTTPS origin/path、TTL/generation、跨 registry 关联及严格 64 位小写 SHA-256。三类摘要分别按 domain `oxrail-credential-template-registry-v1`、`oxrail-credential-consumer-registry-v1`、`oxrail-credential-registry-manifest-v1` 对 `UTF8(domain) || 0x00 || sorted-key JSON（不转义 slash）` 计算。输出只允许固定的 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=REGISTRY_STRUCTURE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 version/Hash。embedded manifest 与同一可替换 binary 内的 self-hash 只证明 fixture 结构自洽，不是 code-signed sealed manifest、外部可信 pin 或 launcher-owned rollback floor；`MATCHED_FIXTURE_NON_AUTHORIZING` 不得映射为 HostProfile `registryManifestVerification=passed`，不得启动 helper/prompt、访问 Keychain/pasteboard/network、消费 credential、接入 Hook/Doctor/Profile activation，也不证明 G15、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
 
 macOS native package 的 opaque credential reference lifecycle foundation 只提供零参数、仅进程内且无持久副作用的 `runEmbeddedCredentialReferenceLifecycleObservation()`：production 入口只从当前 build-fixed embedded registry 取得唯一 `API_KEY` fixture scope，并使用 Security.framework `SecRandomCopyBytes(kSecRandomDefault, 32, ...)` 生成 32-byte 随机 handle，编码为 `ocref1_` 加 43 位无填充 base64url；外部不得注入 reference、clock、registry 或 scope，测试替身只允许存在于 package-internal seam。每个 ephemeral reference 必须精确绑定 credential use/kind/template、service、provisioning origin、purpose、consumer、grant TTL、generation、registry version 与三类 registry Hash，以及 `issuedAt/expiresAt`；claim 只有在完整 scope 仍与 embedded registry 一致、时间有效、未撤销且未消费时才成立，首次成功 claim 必须在同一进程锁内原子地标记已消费，scope/Hash 不匹配、过期、撤销、generation rotation 与 replay 一律拒绝。公开报告固定为 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=OPAQUE_REFERENCE_LIFECYCLE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 registry version/Hash，绝不包含 credential reference、随机 bytes、secret 或自由文本。该 foundation 不处理任何 credential value，不显示 prompt，不访问 Keychain/pasteboard/file/env/argv/stdio/shell/network，不启动 helper/consumer，不接 Hook/Doctor/Profile activation，也不证明 G15、完成 `TEST-SEC-113`/`TEST-SEC-114`、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
+
+macOS native package 的 inert credential-enclave boundary 是一个不导出 product 的 Swift target。package-internal accessor 只可从已经自校验的 embedded fixture registry 按唯一 `credentialUseId` 投影固定 prompt descriptor，并复用包含 registry version 与三类 Hash 的完整 opaque-reference scope；调用方不能提交 title、origin、purpose、consumer、style 或任意字段。`runEmbeddedCredentialEnclaveObservation()` 只在 MainActor 构造但绝不展示包含恰好一个 `NSSecureTextField` 的固定 `NSAlert` surface，且公开报告固定为 `FIXTURE_ONLY_NON_AUTHORIZING / SECURE_FIELD_BOUNDARY_ONLY / NOT_PRESENTED / storage=UNAVAILABLE / activation=INACTIVE`。内部测试 seam 把 secure field 的短作用域值转成进程内 `Data` 交给固定 sink 后立即清空 field，并尽力 reset 临时 Data；test sink 只比较而不保留传入的 secret `Data` 副本，它不声称 Swift `String` 或被恶意 sink 复制的 `Data` 可被可靠 zeroize。production 没有可用或持久化 sink、executable、launcher、`runModal`、Keychain writer、pasteboard、file/env/argv/stdio/shell/network/XPC 或模型调用入口；fixture ticket 也不能展示 UI 或写入 credential。target-wide source/package tripwire 只用于防回归，不是安全证明。该 foundation 只验证固定 UI 与未来同进程 secret boundary，不证明签名、ACL、Handoff、Host-wide suspension、Keychain、G15 或 Credential `ACTIVE`。
 
 `toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
 
@@ -6357,6 +6359,7 @@ Credential fixture 由目标服务验证 canary 并只返回布尔成功状态�
 | `TEST-SEC-118` | paste 后匹配 pasteboard 在 Agent resume 前清空；清理失败或 clipboard manager 场景保持 fail-closed |
 | `TEST-SEC-119` | fixture-only profile 不能 ACTIVE；至少一个 audited real consumer 的 origin/path/method/schema/output binding 通过真实服务 probe |
 | `TEST-SEC-120` | INACTIVE bootstrap 不武装 fence；显式 fixture root 下所有 Hook 可见 Pre/Post 在 profile/classifier 前共享 PREPARE mutex；非 OPEN、UNKNOWN 与畸形身份拒绝，OPEN journal 故障则 Native BYPASSED；只有真实 Post 结算，原始身份和 payload 不持久化，未覆盖 Host 路径使 Credential 保持 INACTIVE |
+| `TEST-SEC-121` | non-product macOS enclave 只能从 embedded registry 构造一个未展示的 NSSecureTextField surface，并绑定完整 reference scope；未知 ID 拒绝，submit/cancel/错误均清空 field，test sink 只比较且不保留传入的 secret Data 副本；target-wide tripwire 防止加入 presenter、Keychain 或通用 secret 通道，production 保持 INACTIVE |
 
 ## 36.5 Gate
 
@@ -10578,13 +10581,14 @@ Prove one narrow macOS API-key path from the exact authenticated Chrome tab thro
 - [ ] Default doctor is read-only; explicit extended probe cleans its unique temporary Keychain item on success and failure.
 - [ ] Fixture-only capability is marked experimental/inactive; one audited real consumer passes its bound live-service probe before public activation.
 - [ ] Doctor reports Credential protection `ACTIVE` only after `GATE-G15` and current evidence pass; every other state is explicit `INACTIVE`.
-- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`120` pass with sanitized evidence.
+- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`121` pass with sanitized evidence.
 
 **测试 / 证据**
 
 - HandoffBench Credential Channel subset
 - SecretLeakBench Credential Channel subset
 - TEST-SEC-120 Host wildcard credential-fence integration
+- TEST-SEC-121 inert native credential-enclave boundary
 - HostProfile v5 contract and doctor probes
 - Full BENCH-NIF handoff subset
 
@@ -10635,6 +10639,7 @@ Release only semantic, validated caching and a scoped macOS Credential Channel t
 - SecretLeakBench
 - HandoffBench Credential Channel subset
 - TEST-SEC-120 Host wildcard credential-fence integration
+- TEST-SEC-121 inert native credential-enclave boundary
 
 **阻断 / Kill**
 
@@ -11974,6 +11979,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.17 — 2026-09-04
+
+- 新增不导出 product 的 `OxrailCredentialEnclave` target：只从 embedded fixture registry 按唯一 ID 派生固定 `NSAlert`，包含恰好一个 `NSSecureTextField`，调用方不能注入 UI 或 scope；
+- production observation 只构造、不展示、不写入，固定报告 `FIXTURE_ONLY_NON_AUTHORIZING / NOT_PRESENTED / storage=UNAVAILABLE / INACTIVE`；内部 test sink 验证 submit/cancel/error 清空 field、结果不含 canary；
+- 明确当前没有 launcher、runModal、Keychain writer、pasteboard、IPC 或模型入口，fixture ticket 不能触发 UI；增加 `TEST-SEC-121`，签名/ACL/Host-wide G15 完成前 Credential protection 继续 `INACTIVE`。
 
 ### v1.0.16 — 2026-09-04
 
