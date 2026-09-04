@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.11
+# Oxrail — 唯一实现规范（SPEC）v1.0.12
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.11
+  spec_version: 1.0.12
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -2217,6 +2217,8 @@ export type NativePrimitive =
 macOS native package 的 code-identity verifier foundation 只提供零参数、只读的 `runPinnedCodeIdentityObservation()`：production target/path、Team ID、signing identifier、CDHash 与 designated requirement 只能来自 build-fixed release pins，禁止由 argv、env、HostProfile 或调用方覆盖。实现必须通过公开 Security.framework 严格验证 launcher 与 helper 的两个不同身份，对 pinned requirement 做系统 validity check，并把其编译数据与候选自身 designated requirement data 精确比较，同时逐一匹配 Team/signing ID/20-byte CDHash；单 CDHash 合同还必须拒绝未证明为 thin Mach-O 的 artifact。输出固定为 `schemaVersion=1`、`authority=NON_AUTHORIZING`、`scope=CODE_IDENTITY_ONLY` 及 `MATCHED_NON_AUTHORIZING | INACTIVE`，不得包含路径、OSStatus 或自由文本。当前正式 release pins 尚未配置，因此 production 入口固定 `INACTIVE`；测试注入只允许存在于 package-internal seam。该局部观察不启动 helper，不访问 prompt、Keychain、pasteboard 或持久状态，不实现应用层网络 client/endpoint，不接 Hook/Doctor/Profile activation，也不证明 Host-wide suspension、G15 或 Credential `ACTIVE`。
 
 macOS native package 的 credential-registry validator foundation 只提供零参数、只读的 `runEmbeddedCredentialRegistryObservation()`：production 入口只观察 build-fixed 的 template registry、consumer registry 与 manifest，禁止由 argv、env、HostProfile、页面、Agent 或调用方替换。首个 foundation 只包含一份 `API_KEY` fixture template 与一份同 service/consumer/origin 绑定的 fixture HTTPS consumer，固定 `NSSecureTextField`、`POST` bearer placement、禁用 redirect，并校验 schema/version、ID、canonical HTTPS origin/path、TTL/generation、跨 registry 关联及严格 64 位小写 SHA-256。三类摘要分别按 domain `oxrail-credential-template-registry-v1`、`oxrail-credential-consumer-registry-v1`、`oxrail-credential-registry-manifest-v1` 对 `UTF8(domain) || 0x00 || sorted-key JSON（不转义 slash）` 计算。输出只允许固定的 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=REGISTRY_STRUCTURE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 version/Hash。embedded manifest 与同一可替换 binary 内的 self-hash 只证明 fixture 结构自洽，不是 code-signed sealed manifest、外部可信 pin 或 launcher-owned rollback floor；`MATCHED_FIXTURE_NON_AUTHORIZING` 不得映射为 HostProfile `registryManifestVerification=passed`，不得启动 helper/prompt、访问 Keychain/pasteboard/network、消费 credential、接入 Hook/Doctor/Profile activation，也不证明 G15、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
+
+macOS native package 的 opaque credential reference lifecycle foundation 只提供零参数、仅进程内且无持久副作用的 `runEmbeddedCredentialReferenceLifecycleObservation()`：production 入口只从当前 build-fixed embedded registry 取得唯一 `API_KEY` fixture scope，并使用 Security.framework `SecRandomCopyBytes(kSecRandomDefault, 32, ...)` 生成 32-byte 随机 handle，编码为 `ocref1_` 加 43 位无填充 base64url；外部不得注入 reference、clock、registry 或 scope，测试替身只允许存在于 package-internal seam。每个 ephemeral reference 必须精确绑定 credential use/kind/template、service、provisioning origin、purpose、consumer、grant TTL、generation、registry version 与三类 registry Hash，以及 `issuedAt/expiresAt`；claim 只有在完整 scope 仍与 embedded registry 一致、时间有效、未撤销且未消费时才成立，首次成功 claim 必须在同一进程锁内原子地标记已消费，scope/Hash 不匹配、过期、撤销、generation rotation 与 replay 一律拒绝。公开报告固定为 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=OPAQUE_REFERENCE_LIFECYCLE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 registry version/Hash，绝不包含 credential reference、随机 bytes、secret 或自由文本。该 foundation 不处理任何 credential value，不显示 prompt，不访问 Keychain/pasteboard/file/env/argv/stdio/shell/network，不启动 helper/consumer，不接 Hook/Doctor/Profile activation，也不证明 G15、完成 `TEST-SEC-113`/`TEST-SEC-114`、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
 
 `toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
 
@@ -11783,6 +11785,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.12 — 2026-09-04
+
+- 新增零参数、无持久副作用的 macOS opaque credential reference lifecycle foundation；仅从 build-fixed `API_KEY` fixture registry 派生进程内 reference，并由 Security.framework 生成不可预测的 32-byte handle；
+- reference 精确绑定 service/origin/purpose/consumer/TTL/generation 与三类 registry Hash；首次成功 claim 在进程锁内原子消费，scope/Hash 不匹配、过期、撤销、rotation 与 replay 全部拒绝；
+- 公开 observation 不返回 reference 或随机值，固定保持 `FIXTURE_ONLY_NON_AUTHORIZING/INACTIVE`；模块不接触 secret、prompt、Keychain、pasteboard、网络、Hook/Doctor/Profile，不满足 G15 或激活 Credential protection。
 
 ### v1.0.11 — 2026-09-04
 

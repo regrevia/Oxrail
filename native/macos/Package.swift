@@ -16,7 +16,10 @@ let package = Package(
             name: "OxrailCodeIdentity",
             linkerSettings: [.linkedFramework("Security")]
         ),
-        .target(name: "OxrailCredentialRegistry"),
+        .target(
+            name: "OxrailCredentialRegistry",
+            linkerSettings: [.linkedFramework("Security")]
+        ),
         .target(
             name: "OxrailKeychainProbe",
             linkerSettings: [.linkedFramework("Security")]

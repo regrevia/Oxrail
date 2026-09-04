@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Added a process-local, fixture-only macOS opaque credential-reference lifecycle with Security.framework randomness and exact scope, TTL, generation, registry-hash, revocation, and one-shot replay checks; the public observation never returns the reference and remains inactive.
 - Added a build-fixed, read-only macOS credential-registry validator for one exact API-key fixture template/HTTPS consumer; it only reports non-authorizing structure evidence and always leaves Credential activation inactive.
 - Added a manual, permission-minimal macOS Chrome MV3 probe for the controlled loopback fixture; it tests same-tab move/focus/restore primitives only and always reports Host fence unavailable and Handoff inactive.
 - Added a read-only macOS Security.framework launcher/helper identity verifier foundation with fixed non-authorizing output, exact Team/signing-ID/CDHash/designated-requirement checks, and thin Mach-O enforcement; release pins remain deliberately unconfigured, so production reports `INACTIVE` and no Credential path is activated.
