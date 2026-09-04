@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.4
+# Oxrail — 唯一实现规范（SPEC）v1.0.5
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.4
+  spec_version: 1.0.5
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -4260,6 +4260,8 @@ missing/expired/revoked item
 - credential-input lease 从任何 generate/reveal 动作之前开始，到 pasteboard hygiene、Keychain commit、prompt teardown，以及 allowlisted non-secret verifier 证明真实页面的一次性 key reveal surface 已关闭/遮蔽后才结束；除同一 enclave 的固定协议外，期间任何 Agent tool call 必须拒绝。verifier 不能读取 key value；无法证明 surface 已消失或覆盖率无法证明时 Credential Channel 不得 ACTIVE，且 Agent 不恢复。
 - release-pinned launcher/helper signing requirements 与 exact CodeDirectory Hash 的 `credentialTrustRootDigest` 必须作为 literal 进入宿主实际 review/hash 的 Hook definition，并由 Host probe 证明当前 trust 决定确实绑定该 exact definition。修改任一 release pin 必须同时改变该 literal；只有 Host probe 证明宿主重新授权后才能恢复 `ACTIVE`。在此绑定尚未实现或无法证明时，pin 改变只允许令 profile stale/Credential `INACTIVE`，不得承诺宿主一定重新弹出授权。launcher 验证失败、helper/registry/profile 同时替换或旧完整签名 bundle rollback 都不能进入 credential path。
 - fixture consumer 只用于安全验收；公开 capability 至少包含一个签名 registry 中的独立审计真实 consumer。每个 consumer 固定 TLS origin/path/method、credential placement、非敏感参数 schema 与输出白名单，不存在通用 HTTP、shell 或 reveal 通道。
+
+Agent-visible provisioning intent 唯一允许的结构是严格的 `{ schemaVersion: 1, credentialUseId }`；页面没有直接调用权限，任何受页面内容影响而附加的字段也必须拒绝。`credentialUseId` 只能命中一次 sealed allowlist。template、service、provisioning origin、purpose、consumer、TTL、generation 与 registry Hash 全部由可信 registry 和当前 USER Handoff scope 派生，不能由 Agent 覆盖。Core 在 native verifier 可用前只能生成显式 `FIXTURE_ONLY_NON_AUTHORIZING` 的无秘密 ticket；该 ticket 不得启动 helper、授权 Keychain 或令 Credential protection 进入 `ACTIVE`。模型可见结果只允许固定 `READY/STORED/CANCELLED/ERROR` 状态、opaque `credentialRef` 与固定 error code，不允许自由文本错误、Keychain persistent ref 或任何 value/export 字段。
 
 普通环境变量或用户私有文件不构成安全通道：Agent 可以读取文件、执行 `env/printenv`、令子进程继承并输出值，且这些值可能进入 shell history、错误、诊断或 crash artifact。类似环境变量的易用性只能由 opaque `credentialRef` 提供，明文不得进入 Agent 可读取的命名空间。
 
@@ -11767,6 +11769,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.5 — 2026-09-04
+
+- Credential provisioning 的 Agent/page 输入收窄为唯一 allowlisted `credentialUseId`，所有 UI 与 scope 字段由 fixed registry 和当前 USER Handoff 派生；
+- 增加显式无授权的 fixture admission ticket 与固定 model-visible result 合同，拒绝自由文本错误、Keychain persistent ref 和任何 secret/value/export 字段；
+- native attestation verifier 未完成前，admission ticket 不得启动 helper 或激活 Credential capability。
 
 ### v1.0.4 — 2026-09-04
 

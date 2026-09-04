@@ -8,6 +8,7 @@ All notable project changes are documented here. The normative specification his
 - Bound persisted action signatures to a purpose-separated local HMAC key generation with safe legacy-state migration.
 - Added a monotonic Handoff admission gate, exact v2 tool-call reconciliation, serialized activation/cancel publication, and ownership-aware timeout recovery; activation requires a fresh Host-minted same-tab/native-action-fence receipt.
 - Split durable tool-call replay history from a streaming, bounded active Handoff index, with crash intents, lock-serialized Post/state cleanup, and safe `UNKNOWN` degradation for dirty, legacy, corrupt, excessive-debris, or over-ceiling indexes.
+- Bound credential provisioning to one allowlisted ID, the active real-tab Handoff scope, a fixed registry, a non-authorizing fixture ticket, and a fixed secret-free public result.
 
 ## [0.1.0-alpha.0] - 2026-09-04
 

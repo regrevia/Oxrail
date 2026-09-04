@@ -19,6 +19,30 @@ const finiteNonNegative = z.number().finite().nonnegative();
 const nonNegativeInt = z.number().int().nonnegative();
 const noCredentialKinds = z.array(z.literal("API_KEY")).length(0);
 const apiKeyOnly = z.array(z.literal("API_KEY")).length(1);
+const credentialRegistryId = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-z0-9][a-z0-9._:-]*$/);
+const canonicalHttpsOrigin = z
+  .string()
+  .max(2_048)
+  .superRefine((value, ctx) => {
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol !== "https:" || parsed.origin !== value) {
+        ctx.addIssue({
+          code: "custom",
+          message: "expected a canonical HTTPS origin",
+        });
+      }
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message: "expected a canonical HTTPS origin",
+      });
+    }
+  });
 
 export function toolRegistryManifestBinding(input: {
   canonicalToolName: string;
@@ -165,6 +189,111 @@ export const CredentialChannelCapabilitySchema = z.strictObject({
 });
 export type CredentialChannelCapability = z.infer<
   typeof CredentialChannelCapabilitySchema
+>;
+
+/** The only Agent-visible request shape; page content has no caller authority. */
+export const CredentialProvisionIntentSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  credentialUseId: credentialRegistryId,
+});
+export type CredentialProvisionIntent = z.infer<
+  typeof CredentialProvisionIntentSchema
+>;
+
+/** Secret-free entry loaded from a fixed, sealed registry. */
+export const CredentialUseRegistryEntrySchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  credentialUseId: credentialRegistryId,
+  credentialKind: z.literal("API_KEY"),
+  templateId: credentialRegistryId,
+  serviceId: credentialRegistryId,
+  provisioningOrigin: canonicalHttpsOrigin,
+  purposeId: credentialRegistryId,
+  consumerId: credentialRegistryId,
+  grantTtlSeconds: z.number().int().positive().max(31_536_000),
+  generation: z.number().int().positive(),
+  readiness: z.literal("FIXTURE_ONLY"),
+  registryVersion: z.number().int().positive(),
+  templateRegistryHash: hash,
+  consumerRegistryHash: hash,
+  registryManifestHash: hash,
+});
+export type CredentialUseRegistryEntry = z.infer<
+  typeof CredentialUseRegistryEntrySchema
+>;
+
+/**
+ * Internal, secret-free fixture ticket. It is deliberately non-authorizing:
+ * a future signed macOS verifier must mint the real enclave launch authority.
+ */
+export const CredentialEnclaveTicketSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  authority: z.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  ticketId: z.string().regex(/^oct1_[a-f0-9]{64}$/),
+  credentialUseId: credentialRegistryId,
+  credentialKind: z.literal("API_KEY"),
+  templateId: credentialRegistryId,
+  serviceId: credentialRegistryId,
+  provisioningOrigin: canonicalHttpsOrigin,
+  purposeId: credentialRegistryId,
+  consumerId: credentialRegistryId,
+  grantTtlSeconds: z.number().int().positive().max(31_536_000),
+  generation: z.number().int().positive(),
+  registryVersion: z.number().int().positive(),
+  templateRegistryHash: hash,
+  consumerRegistryHash: hash,
+  registryManifestHash: hash,
+  issuedAt: nonNegativeInt,
+  handoff: z.strictObject({
+    handoffId: nonEmpty.max(4_096),
+    sessionId: nonEmpty.max(4_096),
+    taskId: nonEmpty.max(4_096),
+    tabId: nonNegativeInt,
+    topOrigin: canonicalHttpsOrigin,
+    documentBinding: nonEmpty.max(4_096),
+    leaseEpoch: z.number().int().positive(),
+    acquiredAt: nonNegativeInt,
+    expiresAt: nonNegativeInt,
+    bindingHash: hash,
+  }),
+});
+export type CredentialEnclaveTicket = z.infer<
+  typeof CredentialEnclaveTicketSchema
+>;
+
+const opaqueCredentialRef = z
+  .string()
+  .regex(/^ocref1_[A-Za-z0-9_-]{43}$/, "expected an opaque credential ref");
+const credentialPublicResultBase = {
+  schemaVersion: z.literal(1),
+};
+
+/** The complete model-visible result surface; no free-form error text exists. */
+export const CredentialPublicResultSchema = z.union([
+  z.strictObject({
+    ...credentialPublicResultBase,
+    status: z.enum(["READY", "STORED"]),
+    credentialRef: opaqueCredentialRef,
+  }),
+  z.strictObject({
+    ...credentialPublicResultBase,
+    status: z.literal("CANCELLED"),
+  }),
+  z.strictObject({
+    ...credentialPublicResultBase,
+    status: z.literal("ERROR"),
+    errorCode: z.enum([
+      "UNAVAILABLE",
+      "NOT_AUTHORIZED",
+      "SCOPE_MISMATCH",
+      "EXPIRED",
+      "REVOKED",
+      "INTERNAL_ERROR",
+    ]),
+  }),
+]);
+export type CredentialPublicResult = z.infer<
+  typeof CredentialPublicResultSchema
 >;
 
 const UnsupportedCredentialChannelSchema = z.strictObject({
@@ -1316,6 +1445,10 @@ export const ProtocolSchemas = {
   "browser-task-state": BrowserTaskStateSchema,
   "action-envelope": ActionEnvelopeSchema,
   "action-digest": ActionDigestSchema,
+  "credential-enclave-ticket": CredentialEnclaveTicketSchema,
+  "credential-provision-intent": CredentialProvisionIntentSchema,
+  "credential-public-result": CredentialPublicResultSchema,
+  "credential-use-registry-entry": CredentialUseRegistryEntrySchema,
   "observation-digest": ObservationDigestSchema,
   "state-fingerprint": StateFingerprintSchema,
   "control-critical-contract": ControlCriticalContractSchema,

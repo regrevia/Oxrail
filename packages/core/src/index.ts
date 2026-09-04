@@ -1,4 +1,5 @@
 export * from "./cache.js";
+export * from "./credential-admission.js";
 export * from "./handoff.js";
 export * from "./handoff-coordinator.js";
 export * from "./local-digest.js";

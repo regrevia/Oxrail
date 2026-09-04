@@ -12107,6 +12107,23 @@ var finiteNonNegative = external_exports.number().finite().nonnegative();
 var nonNegativeInt = external_exports.number().int().nonnegative();
 var noCredentialKinds = external_exports.array(external_exports.literal("API_KEY")).length(0);
 var apiKeyOnly = external_exports.array(external_exports.literal("API_KEY")).length(1);
+var credentialRegistryId = external_exports.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._:-]*$/);
+var canonicalHttpsOrigin = external_exports.string().max(2048).superRefine((value, ctx) => {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.origin !== value) {
+      ctx.addIssue({
+        code: "custom",
+        message: "expected a canonical HTTPS origin"
+      });
+    }
+  } catch {
+    ctx.addIssue({
+      code: "custom",
+      message: "expected a canonical HTTPS origin"
+    });
+  }
+});
 function toolRegistryManifestBinding(input) {
   return deterministicDigest("oxrail-tool-registry-manifest-binding-v1", input);
 }
@@ -12219,6 +12236,85 @@ var CredentialChannelCapabilitySchema = external_exports.strictObject({
   opaqueReferenceOnly: external_exports.boolean(),
   genericSecretExport: external_exports.literal("DENIED")
 });
+var CredentialProvisionIntentSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  credentialUseId: credentialRegistryId
+});
+var CredentialUseRegistryEntrySchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  credentialUseId: credentialRegistryId,
+  credentialKind: external_exports.literal("API_KEY"),
+  templateId: credentialRegistryId,
+  serviceId: credentialRegistryId,
+  provisioningOrigin: canonicalHttpsOrigin,
+  purposeId: credentialRegistryId,
+  consumerId: credentialRegistryId,
+  grantTtlSeconds: external_exports.number().int().positive().max(31536e3),
+  generation: external_exports.number().int().positive(),
+  readiness: external_exports.literal("FIXTURE_ONLY"),
+  registryVersion: external_exports.number().int().positive(),
+  templateRegistryHash: hash3,
+  consumerRegistryHash: hash3,
+  registryManifestHash: hash3
+});
+var CredentialEnclaveTicketSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  authority: external_exports.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  ticketId: external_exports.string().regex(/^oct1_[a-f0-9]{64}$/),
+  credentialUseId: credentialRegistryId,
+  credentialKind: external_exports.literal("API_KEY"),
+  templateId: credentialRegistryId,
+  serviceId: credentialRegistryId,
+  provisioningOrigin: canonicalHttpsOrigin,
+  purposeId: credentialRegistryId,
+  consumerId: credentialRegistryId,
+  grantTtlSeconds: external_exports.number().int().positive().max(31536e3),
+  generation: external_exports.number().int().positive(),
+  registryVersion: external_exports.number().int().positive(),
+  templateRegistryHash: hash3,
+  consumerRegistryHash: hash3,
+  registryManifestHash: hash3,
+  issuedAt: nonNegativeInt,
+  handoff: external_exports.strictObject({
+    handoffId: nonEmpty.max(4096),
+    sessionId: nonEmpty.max(4096),
+    taskId: nonEmpty.max(4096),
+    tabId: nonNegativeInt,
+    topOrigin: canonicalHttpsOrigin,
+    documentBinding: nonEmpty.max(4096),
+    leaseEpoch: external_exports.number().int().positive(),
+    acquiredAt: nonNegativeInt,
+    expiresAt: nonNegativeInt,
+    bindingHash: hash3
+  })
+});
+var opaqueCredentialRef = external_exports.string().regex(/^ocref1_[A-Za-z0-9_-]{43}$/, "expected an opaque credential ref");
+var credentialPublicResultBase = {
+  schemaVersion: external_exports.literal(1)
+};
+var CredentialPublicResultSchema = external_exports.union([
+  external_exports.strictObject({
+    ...credentialPublicResultBase,
+    status: external_exports.enum(["READY", "STORED"]),
+    credentialRef: opaqueCredentialRef
+  }),
+  external_exports.strictObject({
+    ...credentialPublicResultBase,
+    status: external_exports.literal("CANCELLED")
+  }),
+  external_exports.strictObject({
+    ...credentialPublicResultBase,
+    status: external_exports.literal("ERROR"),
+    errorCode: external_exports.enum([
+      "UNAVAILABLE",
+      "NOT_AUTHORIZED",
+      "SCOPE_MISMATCH",
+      "EXPIRED",
+      "REVOKED",
+      "INTERNAL_ERROR"
+    ])
+  })
+]);
 var UnsupportedCredentialChannelSchema = external_exports.strictObject({
   activation: external_exports.literal("INACTIVE"),
   inactiveReasons: external_exports.array(nonEmpty).min(1),
