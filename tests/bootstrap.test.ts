@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,6 +15,7 @@ import {
   HostInventorySchema,
   bootstrapHostProfile,
   matcherEvidenceHashForInventory,
+  readHostInventory,
   type HostInventory,
 } from "../packages/host-openai/src/bootstrap.js";
 import {
@@ -43,6 +51,17 @@ const inventory = {
 } satisfies HostInventory;
 
 describe("host profile bootstrap", () => {
+  it("bounds the inventory before parsing it", async () => {
+    const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-bootstrap-"));
+    temporaryDirectories.push(pluginData);
+    const inventoryPath = path.join(pluginData, "inventory.json");
+    await writeFile(inventoryPath, Buffer.alloc(1_048_577, 0x20));
+
+    await expect(readHostInventory(inventoryPath)).rejects.toThrow(
+      "file exceeds local limit",
+    );
+  });
+
   it("loads only an exact inventory candidate without claiming trust or protection", async () => {
     const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-bootstrap-"));
     temporaryDirectories.push(pluginData);
@@ -119,6 +138,48 @@ describe("host profile bootstrap", () => {
     await expect(loadHostProfile(pluginData)).resolves.toMatchObject({
       valid: false,
       errors: ["host profile integrity check failed"],
+    });
+  });
+
+  it.each([
+    [
+      "active selector",
+      "active-profile.json",
+      "host profile selection is unreadable",
+    ],
+    [
+      "profile",
+      path.join("hosts", "PROFILE_ID", "profile.json"),
+      "host profile integrity check failed",
+    ],
+    [
+      "manifest",
+      path.join("hosts", "PROFILE_ID", "manifest.json"),
+      "host profile integrity check failed",
+    ],
+  ])("rejects a symlinked %s", async (_name, relativePath, error) => {
+    const pluginData = await mkdtemp(
+      path.join(tmpdir(), "oxrail-bootstrap-nofollow-"),
+    );
+    temporaryDirectories.push(pluginData);
+    const inventoryPath = path.join(pluginData, "inventory.json");
+    await writeFile(inventoryPath, `${JSON.stringify(inventory)}\n`);
+    const profile = await bootstrapHostProfile({
+      inventoryPath,
+      pluginData,
+      pluginRoot: process.cwd(),
+    });
+    const filename = path.join(
+      pluginData,
+      relativePath.replace("PROFILE_ID", profile.profileId),
+    );
+    const target = `${filename}.target`;
+    await rename(filename, target);
+    await symlink(target, filename);
+
+    await expect(loadHostProfile(pluginData)).resolves.toEqual({
+      errors: [error],
+      valid: false,
     });
   });
 

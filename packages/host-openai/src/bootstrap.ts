@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   HostProfileSchema,
   NativePrimitiveSchema,
@@ -9,6 +9,7 @@ import {
 import { z } from "zod";
 
 import { hookDefinitionHash } from "./hook.js";
+import { readBoundedRegularFile } from "./bounded-file.js";
 import { writeHostProfile } from "./profile.js";
 
 const exactToolName = z
@@ -105,8 +106,11 @@ export async function readHostInventory(inventoryPath: string): Promise<{
   inventory: HostInventory;
   sha256: string;
 }> {
-  const raw = await readFile(inventoryPath);
-  if (raw.length > 1_048_576) throw new Error("host inventory exceeds 1 MiB");
+  const raw = await readBoundedRegularFile(
+    inventoryPath,
+    1_048_576,
+    path.dirname(inventoryPath),
+  );
   return {
     inventory: HostInventorySchema.parse(JSON.parse(raw.toString("utf8"))),
     sha256: createHash("sha256").update(raw).digest("hex"),

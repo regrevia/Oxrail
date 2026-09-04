@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 // packages/host-openai/src/bootstrap.ts
 import { createHash as createHash5 } from "node:crypto";
-import { readFile as readFile3 } from "node:fs/promises";
+import path5 from "node:path";
 
 // packages/protocol/src/digest.ts
 import { createHash } from "node:crypto";
@@ -794,10 +794,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path5) {
-  if (!path5)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path5.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1156,11 +1156,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path5, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path5);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -1328,7 +1328,7 @@ function treeifyError(error43, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error44, path5 = []) => {
+  const processError = (error44, path7 = []) => {
     var _a, _b;
     for (const issue2 of error44.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -1338,7 +1338,7 @@ function treeifyError(error43, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path5, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1370,8 +1370,8 @@ function treeifyError(error43, _mapper) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path5) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -12988,12 +12988,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
     ["test_results", manifest.test_results.length],
     ["reviewers", manifest.reviewers.length]
   ];
-  for (const [path5, size] of requiredCollections) {
+  for (const [path7, size] of requiredCollections) {
     if (size === 0) {
       context.addIssue({
         code: "custom",
-        path: [path5],
-        message: `ACCEPTED evidence requires ${path5}`
+        path: [path7],
+        message: `ACCEPTED evidence requires ${path7}`
       });
     }
   }
@@ -13138,19 +13138,12 @@ var EvidenceTraceSchema = external_exports.strictObject({
 // packages/host-openai/src/hook.ts
 import { createHash as createHash4 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
-import path3 from "node:path";
+import path4 from "node:path";
 
 // packages/host-openai/src/profile.ts
 import { createHash as createHash2, randomUUID } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  open,
-  rename,
-  unlink,
-  writeFile
-} from "node:fs/promises";
-import path from "node:path";
+import { open as open2, rename, unlink } from "node:fs/promises";
+import path2 from "node:path";
 
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
@@ -13193,6 +13186,83 @@ var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 // packages/core/src/tool-call.ts
 var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
 
+// packages/host-openai/src/bounded-file.ts
+import { constants } from "node:fs";
+import { chmod, lstat, mkdir, open } from "node:fs/promises";
+import path from "node:path";
+function relativePath(root, filename) {
+  const relative = path.relative(path.resolve(root), path.resolve(filename));
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("path escapes its local root");
+  }
+  return relative;
+}
+async function rejectSymlinkPath(root, filename) {
+  const relative = relativePath(root, filename);
+  let current = path.resolve(root);
+  for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+    if (segment) current = path.join(current, segment);
+    const stats = await lstat(current);
+    if (stats.isSymbolicLink())
+      throw new Error("symbolic links are not allowed");
+    if (current !== path.resolve(filename) && !stats.isDirectory()) {
+      throw new Error("path ancestor is not a directory");
+    }
+  }
+}
+async function readBoundedRegularFile(filename, maximumBytes, root = path.dirname(filename)) {
+  if (process.platform === "win32") {
+    throw new Error("bounded no-follow reads are unsupported on Windows");
+  }
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0) {
+    throw new TypeError("maximumBytes must be a non-negative safe integer");
+  }
+  await rejectSymlinkPath(root, filename);
+  const handle = await open(
+    filename,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error("path is not a regular file");
+    if (stats.size > maximumBytes) throw new Error("file exceeds local limit");
+    const value = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < value.length) {
+      const { bytesRead } = await handle.read(
+        value,
+        length,
+        value.length - length,
+        length
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maximumBytes) throw new Error("file exceeds local limit");
+    return value.subarray(0, length);
+  } finally {
+    await handle.close();
+  }
+}
+async function ensurePrivateDirectoryPath(root, directory) {
+  const relative = relativePath(root, directory);
+  let current = path.resolve(root);
+  await mkdir(current, { recursive: true, mode: 448 });
+  for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+    if (segment) {
+      current = path.join(current, segment);
+      await mkdir(current, { mode: 448 }).catch((error43) => {
+        if (error43.code !== "EEXIST") throw error43;
+      });
+    }
+    const stats = await lstat(current);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error("private path is not a real directory");
+    }
+    await chmod(current, 448);
+  }
+}
+
 // packages/host-openai/src/profile.ts
 var HOSTS_DIRECTORY = "hosts";
 var HOST_PROFILE_FILENAME = "profile.json";
@@ -13201,26 +13271,34 @@ var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
 var CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR = "credential activation denied: independent macOS attestation verifier unavailable";
 var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 var sha256 = (value) => createHash2("sha256").update(value).digest("hex");
-var profileDirectory = (pluginData2, profileId) => path.join(pluginData2, HOSTS_DIRECTORY, profileId);
-async function readLimited(filename, maximumBytes) {
-  const handle = await open(filename, "r");
-  try {
-    if ((await handle.stat()).size > maximumBytes)
-      throw new Error("file exceeds local limit");
-    return await handle.readFile();
-  } finally {
-    await handle.close();
-  }
-}
+var profileDirectory = (pluginData2, profileId) => path2.join(pluginData2, HOSTS_DIRECTORY, profileId);
 async function writePrivate(filename, value) {
-  const temporary = path.join(
-    path.dirname(filename),
-    `.${path.basename(filename)}.${randomUUID()}.tmp`
+  const temporary = path2.join(
+    path2.dirname(filename),
+    `.${path2.basename(filename)}.${randomUUID()}.tmp`
   );
+  let handle;
   try {
-    await writeFile(temporary, value, { flag: "wx", mode: 384 });
+    handle = await open2(temporary, "wx", 384);
+    await handle.writeFile(value, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
     await rename(temporary, filename);
+    const directory = await open2(path2.dirname(filename), "r");
+    try {
+      await directory.sync();
+    } catch (error43) {
+      if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(
+        error43.code ?? ""
+      )) {
+        throw error43;
+      }
+    } finally {
+      await directory.close();
+    }
   } catch (error43) {
+    await handle?.close();
     await unlink(temporary).catch(() => void 0);
     throw error43;
   }
@@ -13297,19 +13375,20 @@ async function loadHostProfile(pluginData2, constraints = {}, explicitProfilePat
   try {
     if (explicitProfilePath) {
       profilePath = explicitProfilePath;
-      profileId = path.basename(path.dirname(profilePath));
+      profileId = path2.basename(path2.dirname(profilePath));
     } else {
       const active = JSON.parse(
-        (await readLimited(
-          path.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
-          16384
+        (await readBoundedRegularFile(
+          path2.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
+          16384,
+          pluginData2
         )).toString("utf8")
       );
       if (!active || typeof active !== "object" || active.schemaVersion !== 1 || !safeProfileId(active.profileId)) {
         throw new Error("invalid active profile selection");
       }
       profileId = active.profileId;
-      profilePath = path.join(
+      profilePath = path2.join(
         profileDirectory(pluginData2, profileId),
         HOST_PROFILE_FILENAME
       );
@@ -13325,11 +13404,13 @@ async function loadHostProfile(pluginData2, constraints = {}, explicitProfilePat
   try {
     if (!safeProfileId(profileId))
       throw new Error("unsafe host profile identifier");
+    const readRoot = explicitProfilePath ? path2.dirname(profilePath) : pluginData2;
     const [rawProfile, rawManifest] = await Promise.all([
-      readLimited(profilePath, 1048576),
-      readLimited(
-        path.join(path.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
-        16384
+      readBoundedRegularFile(profilePath, 1048576, readRoot),
+      readBoundedRegularFile(
+        path2.join(path2.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        16384,
+        readRoot
       )
     ]);
     const manifest = JSON.parse(rawManifest.toString("utf8"));
@@ -13357,19 +13438,13 @@ async function writeHostProfile(pluginData2, input) {
   if (!safeProfileId(profile.profileId))
     throw new Error("unsafe host profile identifier");
   const directory = profileDirectory(pluginData2, profile.profileId);
-  const traces = path.join(directory, "sanitized-traces");
-  await mkdir(traces, { recursive: true, mode: 448 });
-  await Promise.all([
-    chmod(pluginData2, 448),
-    chmod(path.join(pluginData2, HOSTS_DIRECTORY), 448),
-    chmod(directory, 448),
-    chmod(traces, 448)
-  ]);
+  const traces = path2.join(directory, "sanitized-traces");
+  await ensurePrivateDirectoryPath(pluginData2, traces);
   const serialized = `${JSON.stringify(profile, null, 2)}
 `;
-  await writePrivate(path.join(directory, HOST_PROFILE_FILENAME), serialized);
+  await writePrivate(path2.join(directory, HOST_PROFILE_FILENAME), serialized);
   await writePrivate(
-    path.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+    path2.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
     `${JSON.stringify(
       {
         schemaVersion: 1,
@@ -13382,7 +13457,7 @@ async function writeHostProfile(pluginData2, input) {
 `
   );
   await writePrivate(
-    path.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
+    path2.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
     `${JSON.stringify({ schemaVersion: 1, profileId: profile.profileId })}
 `
   );
@@ -13391,9 +13466,9 @@ async function writeHostProfile(pluginData2, input) {
 
 // packages/host-openai/src/state.ts
 import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir2, readFile, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
+import { mkdir as mkdir2, readFile, readdir, rename as rename2, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import path2 from "node:path";
+import path3 from "node:path";
 var HOOK_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
@@ -13402,7 +13477,7 @@ var HOOK_EVENTS = [
   "PostToolUse"
 ];
 var HOOK_MARKER_FRESHNESS_MS = 3e4;
-var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
+var oxrailDataDirectory = (home = homedir()) => path3.join(home, ".oxrail");
 var digestSessionId = (sessionId2) => createHash3("sha256").update("oxrail-session-v1\0").update(sessionId2).digest("hex");
 var digestToolUseId = (toolUseId) => createHash3("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
@@ -13412,9 +13487,9 @@ var markerNames = {
   PermissionRequest: "permission-request.json",
   PostToolUse: "post-tool-use.json"
 };
-var stateDirectory = (pluginData2) => path2.join(pluginData2, "setup-verification");
-var browserRouteDirectory = (pluginData2) => path2.join(stateDirectory(pluginData2), "browser-route");
-var markerPath = (pluginData2, event, browserHook) => path2.join(
+var stateDirectory = (pluginData2) => path3.join(pluginData2, "setup-verification");
+var browserRouteDirectory = (pluginData2) => path3.join(stateDirectory(pluginData2), "browser-route");
+var markerPath = (pluginData2, event, browserHook) => path3.join(
   stateDirectory(pluginData2),
   `${browserHook ? "browser-" : ""}${markerNames[event]}`
 );
@@ -13427,7 +13502,7 @@ function isBrowserRouteObservation(value) {
 async function recordBrowserHookPhase(pluginData2, phase, observation, now = Date.now()) {
   const directory = browserRouteDirectory(pluginData2);
   await mkdir2(directory, { recursive: true, mode: 448 });
-  const destination = path2.join(
+  const destination = path3.join(
     directory,
     `${observation.toolUseDigest.slice(0, 2)}.json`
   );
@@ -13447,11 +13522,11 @@ async function recordBrowserHookPhase(pluginData2, phase, observation, now = Dat
     ...phase === "PreToolUse" ? { preObservedAt: previous?.preObservedAt ?? observedAt } : { postObservedAt: previous?.postObservedAt ?? observedAt },
     schemaVersion: 1
   };
-  const temporary = path2.join(
+  const temporary = path3.join(
     directory,
     `.${observation.toolUseDigest}.${randomUUID2()}`
   );
-  await writeFile2(temporary, `${JSON.stringify(value)}
+  await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
   await rename2(temporary, destination);
 }
@@ -13465,7 +13540,7 @@ async function readBrowserRouteObservations(pluginData2) {
       names.map(async (name) => {
         try {
           const value = JSON.parse(
-            await readFile(path2.join(directory, name), "utf8")
+            await readFile(path3.join(directory, name), "utf8")
           );
           return isBrowserRouteObservation(value) ? value : void 0;
         } catch {
@@ -13489,9 +13564,9 @@ async function recordHookMarker(pluginData2, marker, now = Date.now()) {
   const directory = stateDirectory(pluginData2);
   await mkdir2(directory, { recursive: true, mode: 448 });
   const destination = markerPath(pluginData2, marker.event, marker.browserHook);
-  const temporary = path2.join(
+  const temporary = path3.join(
     directory,
-    `.${path2.basename(destination)}.${randomUUID2()}`
+    `.${path3.basename(destination)}.${randomUUID2()}`
   );
   const value = {
     ...marker,
@@ -13499,7 +13574,7 @@ async function recordHookMarker(pluginData2, marker, now = Date.now()) {
     observedAt: new Date(now).toISOString(),
     schemaVersion: 2
   };
-  await writeFile2(temporary, `${JSON.stringify(value)}
+  await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
   await rename2(temporary, destination);
 }
@@ -13534,7 +13609,7 @@ async function hookDefinitionHash(pluginRoot2) {
     "dist/hooks/post-tool.mjs"
   ];
   const files = await Promise.all(
-    filenames.map((filename) => readFile2(path3.join(pluginRoot2, filename)))
+    filenames.map((filename) => readFile2(path4.join(pluginRoot2, filename)))
   );
   const digest = createHash4("sha256").update("oxrail-hook-definition-v2\0");
   for (const [index, filename] of filenames.entries()) {
@@ -13605,8 +13680,11 @@ var matcherEvidenceHashForInventory = (inventory) => deterministicDigest("oxrail
   toolRoute: inventory.toolRoute
 });
 async function readHostInventory(inventoryPath2) {
-  const raw = await readFile3(inventoryPath2);
-  if (raw.length > 1048576) throw new Error("host inventory exceeds 1 MiB");
+  const raw = await readBoundedRegularFile(
+    inventoryPath2,
+    1048576,
+    path5.dirname(inventoryPath2)
+  );
   return {
     inventory: HostInventorySchema.parse(JSON.parse(raw.toString("utf8"))),
     sha256: createHash5("sha256").update(raw).digest("hex")
@@ -13614,8 +13692,8 @@ async function readHostInventory(inventoryPath2) {
 }
 
 // packages/host-openai/src/doctor.ts
-import { access, readFile as readFile4 } from "node:fs/promises";
-import path4 from "node:path";
+import { access, readFile as readFile3 } from "node:fs/promises";
+import path6 from "node:path";
 var inactiveHandoff = {
   conversationContextPreserved: false,
   lease: "NONE",
@@ -13631,8 +13709,8 @@ var exists = (filename) => access(filename).then(
 async function validPluginManifest(pluginRoot2) {
   try {
     const manifest = JSON.parse(
-      await readFile4(
-        path4.join(pluginRoot2, ".codex-plugin", "plugin.json"),
+      await readFile3(
+        path6.join(pluginRoot2, ".codex-plugin", "plugin.json"),
         "utf8"
       )
     );
@@ -13646,7 +13724,7 @@ async function validPluginManifest(pluginRoot2) {
 async function registeredHookEvents(pluginRoot2) {
   try {
     const definition = JSON.parse(
-      await readFile4(path4.join(pluginRoot2, "hooks", "hooks.json"), "utf8")
+      await readFile3(path6.join(pluginRoot2, "hooks", "hooks.json"), "utf8")
     );
     if (!definition || typeof definition !== "object") return /* @__PURE__ */ new Set();
     const hooks = definition.hooks;
@@ -13723,7 +13801,7 @@ async function runDoctor(options) {
   const sessionDigest = options.sessionId ? digestSessionId(options.sessionId) : void 0;
   const [pluginInstalled, skillAvailable, events] = await Promise.all([
     validPluginManifest(options.pluginRoot),
-    exists(path4.join(options.pluginRoot, "skills", "oxrail", "SKILL.md")),
+    exists(path6.join(options.pluginRoot, "skills", "oxrail", "SKILL.md")),
     registeredHookEvents(options.pluginRoot)
   ]);
   const preRegistered = events.has("PreToolUse");

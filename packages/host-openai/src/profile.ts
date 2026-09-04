@@ -1,12 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  open,
-  rename,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { deriveHostMode } from "../../core/src/index.js";
@@ -14,6 +7,10 @@ import {
   HostProfileSchema,
   type HostProfile,
 } from "../../protocol/src/index.js";
+import {
+  ensurePrivateDirectoryPath,
+  readBoundedRegularFile,
+} from "./bounded-file.js";
 
 export const HOSTS_DIRECTORY = "hosts";
 export const HOST_PROFILE_FILENAME = "profile.json";
@@ -48,26 +45,35 @@ const sha256 = (value: Uint8Array | string) =>
 const profileDirectory = (pluginData: string, profileId: string) =>
   path.join(pluginData, HOSTS_DIRECTORY, profileId);
 
-async function readLimited(filename: string, maximumBytes: number) {
-  const handle = await open(filename, "r");
-  try {
-    if ((await handle.stat()).size > maximumBytes)
-      throw new Error("file exceeds local limit");
-    return await handle.readFile();
-  } finally {
-    await handle.close();
-  }
-}
-
 async function writePrivate(filename: string, value: string) {
   const temporary = path.join(
     path.dirname(filename),
     `.${path.basename(filename)}.${randomUUID()}.tmp`,
   );
+  let handle;
   try {
-    await writeFile(temporary, value, { flag: "wx", mode: 0o600 });
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(value, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
     await rename(temporary, filename);
+    const directory = await open(path.dirname(filename), "r");
+    try {
+      await directory.sync();
+    } catch (error) {
+      if (
+        !["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(
+          (error as NodeJS.ErrnoException).code ?? "",
+        )
+      ) {
+        throw error;
+      }
+    } finally {
+      await directory.close();
+    }
   } catch (error) {
+    await handle?.close();
     await unlink(temporary).catch(() => undefined);
     throw error;
   }
@@ -191,9 +197,10 @@ export async function loadHostProfile(
     } else {
       const active = JSON.parse(
         (
-          await readLimited(
+          await readBoundedRegularFile(
             path.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
             16_384,
+            pluginData,
           )
         ).toString("utf8"),
       ) as unknown;
@@ -225,11 +232,15 @@ export async function loadHostProfile(
   try {
     if (!safeProfileId(profileId))
       throw new Error("unsafe host profile identifier");
+    const readRoot = explicitProfilePath
+      ? path.dirname(profilePath)
+      : pluginData;
     const [rawProfile, rawManifest] = await Promise.all([
-      readLimited(profilePath, 1_048_576),
-      readLimited(
+      readBoundedRegularFile(profilePath, 1_048_576, readRoot),
+      readBoundedRegularFile(
         path.join(path.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
         16_384,
+        readRoot,
       ),
     ]);
     const manifest = JSON.parse(rawManifest.toString("utf8")) as unknown;
@@ -273,13 +284,7 @@ export async function writeHostProfile(
     throw new Error("unsafe host profile identifier");
   const directory = profileDirectory(pluginData, profile.profileId);
   const traces = path.join(directory, "sanitized-traces");
-  await mkdir(traces, { recursive: true, mode: 0o700 });
-  await Promise.all([
-    chmod(pluginData, 0o700),
-    chmod(path.join(pluginData, HOSTS_DIRECTORY), 0o700),
-    chmod(directory, 0o700),
-    chmod(traces, 0o700),
-  ]);
+  await ensurePrivateDirectoryPath(pluginData, traces);
 
   const serialized = `${JSON.stringify(profile, null, 2)}\n`;
   await writePrivate(path.join(directory, HOST_PROFILE_FILENAME), serialized);

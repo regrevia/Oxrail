@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { open } from "node:fs/promises";
 import path from "node:path";
 
 import { z } from "zod";
@@ -19,6 +17,7 @@ import {
   HOST_PROFILE_FILENAME,
   HOST_PROFILE_MANIFEST_FILENAME,
 } from "./profile.js";
+import { readBoundedRegularFile } from "./bounded-file.js";
 
 export const TOOL_SCHEMA_REGISTRY_FILENAME = "tool-schema-registry.json";
 
@@ -97,34 +96,6 @@ const bypassed = (error: string): ToolSchemaRegistryBundleLoad => ({
   errors: [error],
 });
 
-async function readLimited(filename: string, maximumBytes: number) {
-  const handle = await open(
-    filename,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  );
-  try {
-    const stats = await handle.stat();
-    if (!stats.isFile()) throw new Error("path is not a regular file");
-    if (stats.size > maximumBytes) throw new Error("file exceeds local limit");
-    const value = Buffer.alloc(maximumBytes + 1);
-    let length = 0;
-    while (length < value.length) {
-      const { bytesRead } = await handle.read(
-        value,
-        length,
-        value.length - length,
-        length,
-      );
-      if (bytesRead === 0) break;
-      length += bytesRead;
-    }
-    if (length > maximumBytes) throw new Error("file exceeds local limit");
-    return value.subarray(0, length);
-  } finally {
-    await handle.close();
-  }
-}
-
 const sameHash = (left: string, right: string) =>
   left.toLowerCase() === right.toLowerCase();
 const pinMap = (
@@ -182,12 +153,21 @@ export async function loadToolSchemaRegistryBundle(
   let rawManifest: Buffer;
   try {
     [rawProfile, rawRegistry, rawManifest] = await Promise.all([
-      readLimited(path.join(directory, HOST_PROFILE_FILENAME), 1_048_576),
-      readLimited(
+      readBoundedRegularFile(
+        path.join(directory, HOST_PROFILE_FILENAME),
+        1_048_576,
+        pluginData,
+      ),
+      readBoundedRegularFile(
         path.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
         1_048_576,
+        pluginData,
       ),
-      readLimited(path.join(directory, HOST_PROFILE_MANIFEST_FILENAME), 16_384),
+      readBoundedRegularFile(
+        path.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+        16_384,
+        pluginData,
+      ),
     ]);
   } catch {
     return bypassed(

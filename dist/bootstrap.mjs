@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 // packages/host-openai/src/bootstrap.ts
 import { createHash as createHash4 } from "node:crypto";
-import { readFile as readFile2 } from "node:fs/promises";
+import path5 from "node:path";
 
 // packages/protocol/src/digest.ts
 import { createHash } from "node:crypto";
@@ -794,10 +794,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1156,11 +1156,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -1328,7 +1328,7 @@ function treeifyError(error43, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error44, path4 = []) => {
+  const processError = (error44, path6 = []) => {
     var _a, _b;
     for (const issue2 of error44.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -1338,7 +1338,7 @@ function treeifyError(error43, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1370,8 +1370,8 @@ function treeifyError(error43, _mapper) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path6) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -12988,12 +12988,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
     ["test_results", manifest.test_results.length],
     ["reviewers", manifest.reviewers.length]
   ];
-  for (const [path4, size] of requiredCollections) {
+  for (const [path6, size] of requiredCollections) {
     if (size === 0) {
       context.addIssue({
         code: "custom",
-        path: [path4],
-        message: `ACCEPTED evidence requires ${path4}`
+        path: [path6],
+        message: `ACCEPTED evidence requires ${path6}`
       });
     }
   }
@@ -13138,19 +13138,12 @@ var EvidenceTraceSchema = external_exports.strictObject({
 // packages/host-openai/src/hook.ts
 import { createHash as createHash3 } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import path3 from "node:path";
+import path4 from "node:path";
 
 // packages/host-openai/src/profile.ts
 import { createHash as createHash2, randomUUID } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  open,
-  rename,
-  unlink,
-  writeFile
-} from "node:fs/promises";
-import path from "node:path";
+import { open as open2, rename, unlink } from "node:fs/promises";
+import path2 from "node:path";
 
 // packages/core/src/policy.ts
 function deriveHostMode(profile2) {
@@ -13193,6 +13186,83 @@ var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 // packages/core/src/tool-call.ts
 var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
 
+// packages/host-openai/src/bounded-file.ts
+import { constants } from "node:fs";
+import { chmod, lstat, mkdir, open } from "node:fs/promises";
+import path from "node:path";
+function relativePath(root, filename) {
+  const relative = path.relative(path.resolve(root), path.resolve(filename));
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("path escapes its local root");
+  }
+  return relative;
+}
+async function rejectSymlinkPath(root, filename) {
+  const relative = relativePath(root, filename);
+  let current = path.resolve(root);
+  for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+    if (segment) current = path.join(current, segment);
+    const stats = await lstat(current);
+    if (stats.isSymbolicLink())
+      throw new Error("symbolic links are not allowed");
+    if (current !== path.resolve(filename) && !stats.isDirectory()) {
+      throw new Error("path ancestor is not a directory");
+    }
+  }
+}
+async function readBoundedRegularFile(filename, maximumBytes, root = path.dirname(filename)) {
+  if (process.platform === "win32") {
+    throw new Error("bounded no-follow reads are unsupported on Windows");
+  }
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0) {
+    throw new TypeError("maximumBytes must be a non-negative safe integer");
+  }
+  await rejectSymlinkPath(root, filename);
+  const handle = await open(
+    filename,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error("path is not a regular file");
+    if (stats.size > maximumBytes) throw new Error("file exceeds local limit");
+    const value = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < value.length) {
+      const { bytesRead } = await handle.read(
+        value,
+        length,
+        value.length - length,
+        length
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maximumBytes) throw new Error("file exceeds local limit");
+    return value.subarray(0, length);
+  } finally {
+    await handle.close();
+  }
+}
+async function ensurePrivateDirectoryPath(root, directory) {
+  const relative = relativePath(root, directory);
+  let current = path.resolve(root);
+  await mkdir(current, { recursive: true, mode: 448 });
+  for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+    if (segment) {
+      current = path.join(current, segment);
+      await mkdir(current, { mode: 448 }).catch((error43) => {
+        if (error43.code !== "EEXIST") throw error43;
+      });
+    }
+    const stats = await lstat(current);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error("private path is not a real directory");
+    }
+    await chmod(current, 448);
+  }
+}
+
 // packages/host-openai/src/profile.ts
 var HOSTS_DIRECTORY = "hosts";
 var HOST_PROFILE_FILENAME = "profile.json";
@@ -13201,16 +13271,34 @@ var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
 var CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR = "credential activation denied: independent macOS attestation verifier unavailable";
 var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 var sha256 = (value) => createHash2("sha256").update(value).digest("hex");
-var profileDirectory = (pluginData2, profileId) => path.join(pluginData2, HOSTS_DIRECTORY, profileId);
+var profileDirectory = (pluginData2, profileId) => path2.join(pluginData2, HOSTS_DIRECTORY, profileId);
 async function writePrivate(filename, value) {
-  const temporary = path.join(
-    path.dirname(filename),
-    `.${path.basename(filename)}.${randomUUID()}.tmp`
+  const temporary = path2.join(
+    path2.dirname(filename),
+    `.${path2.basename(filename)}.${randomUUID()}.tmp`
   );
+  let handle;
   try {
-    await writeFile(temporary, value, { flag: "wx", mode: 384 });
+    handle = await open2(temporary, "wx", 384);
+    await handle.writeFile(value, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
     await rename(temporary, filename);
+    const directory = await open2(path2.dirname(filename), "r");
+    try {
+      await directory.sync();
+    } catch (error43) {
+      if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(
+        error43.code ?? ""
+      )) {
+        throw error43;
+      }
+    } finally {
+      await directory.close();
+    }
   } catch (error43) {
+    await handle?.close();
     await unlink(temporary).catch(() => void 0);
     throw error43;
   }
@@ -13290,19 +13378,13 @@ async function writeHostProfile(pluginData2, input) {
   if (!safeProfileId(profile2.profileId))
     throw new Error("unsafe host profile identifier");
   const directory = profileDirectory(pluginData2, profile2.profileId);
-  const traces = path.join(directory, "sanitized-traces");
-  await mkdir(traces, { recursive: true, mode: 448 });
-  await Promise.all([
-    chmod(pluginData2, 448),
-    chmod(path.join(pluginData2, HOSTS_DIRECTORY), 448),
-    chmod(directory, 448),
-    chmod(traces, 448)
-  ]);
+  const traces = path2.join(directory, "sanitized-traces");
+  await ensurePrivateDirectoryPath(pluginData2, traces);
   const serialized = `${JSON.stringify(profile2, null, 2)}
 `;
-  await writePrivate(path.join(directory, HOST_PROFILE_FILENAME), serialized);
+  await writePrivate(path2.join(directory, HOST_PROFILE_FILENAME), serialized);
   await writePrivate(
-    path.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+    path2.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
     `${JSON.stringify(
       {
         schemaVersion: 1,
@@ -13315,7 +13397,7 @@ async function writeHostProfile(pluginData2, input) {
 `
   );
   await writePrivate(
-    path.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
+    path2.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
     `${JSON.stringify({ schemaVersion: 1, profileId: profile2.profileId })}
 `
   );
@@ -13324,8 +13406,8 @@ async function writeHostProfile(pluginData2, input) {
 
 // packages/host-openai/src/state.ts
 import { homedir } from "node:os";
-import path2 from "node:path";
-var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
+import path3 from "node:path";
+var oxrailDataDirectory = (home = homedir()) => path3.join(home, ".oxrail");
 
 // packages/host-openai/src/hook.ts
 async function hookDefinitionHash(pluginRoot2) {
@@ -13336,7 +13418,7 @@ async function hookDefinitionHash(pluginRoot2) {
     "dist/hooks/post-tool.mjs"
   ];
   const files = await Promise.all(
-    filenames.map((filename) => readFile(path3.join(pluginRoot2, filename)))
+    filenames.map((filename) => readFile(path4.join(pluginRoot2, filename)))
   );
   const digest = createHash3("sha256").update("oxrail-hook-definition-v2\0");
   for (const [index, filename] of filenames.entries()) {
@@ -13410,8 +13492,11 @@ var unknownPrimitives = () => Object.fromEntries(
   NativePrimitiveSchema.options.map((primitive) => [primitive, "unknown"])
 );
 async function readHostInventory(inventoryPath2) {
-  const raw = await readFile2(inventoryPath2);
-  if (raw.length > 1048576) throw new Error("host inventory exceeds 1 MiB");
+  const raw = await readBoundedRegularFile(
+    inventoryPath2,
+    1048576,
+    path5.dirname(inventoryPath2)
+  );
   return {
     inventory: HostInventorySchema.parse(JSON.parse(raw.toString("utf8"))),
     sha256: createHash4("sha256").update(raw).digest("hex")
