@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { generateProtocolSchemas } from "../packages/protocol/src/generate.js";
 import {
   CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR,
+  hostProfileBindingHash,
   validateHostProfile,
   writeHostProfile,
 } from "../packages/host-openai/src/profile.js";
@@ -232,6 +233,19 @@ describe("versioned protocol", () => {
     ).toEqual([
       "host profile schema v3 is stale; run Oxrail setup to create a v5 profile",
     ]);
+  });
+
+  it("binds Host receipts to complete current Profile content", () => {
+    const profile = HostProfileSchema.parse(hostProfile());
+    const drifted = {
+      ...profile,
+      setup: { ...profile.setup, firstBrowserHookSeen: true },
+    };
+
+    expect(drifted.profileId).toBe(profile.profileId);
+    expect(hostProfileBindingHash(drifted)).not.toBe(
+      hostProfileBindingHash(profile),
+    );
   });
 
   it("requires externally pinned browser contracts before optimization", () => {

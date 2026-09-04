@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { deriveHostMode } from "../../core/src/index.js";
 import {
+  deterministicDigest,
   HostProfileSchema,
   type HostProfile,
 } from "../../protocol/src/index.js";
@@ -44,6 +45,13 @@ const sha256 = (value: Uint8Array | string) =>
   createHash("sha256").update(value).digest("hex");
 const profileDirectory = (pluginData: string, profileId: string) =>
   path.join(pluginData, HOSTS_DIRECTORY, profileId);
+
+export function hostProfileBindingHash(value: unknown): string {
+  return deterministicDigest(
+    "oxrail-host-profile-binding-v1",
+    HostProfileSchema.parse(value),
+  );
+}
 
 async function writePrivate(filename: string, value: string) {
   const temporary = path.join(

@@ -96,7 +96,9 @@ const completionSignalKinds: readonly CompletionSignalKind[] = [
 ];
 
 function assertNonEmpty(value: string, name: string): void {
-  if (value.length === 0) throw new TypeError(`${name} must not be empty`);
+  if (value.length === 0 || value.includes("\0")) {
+    throw new TypeError(`${name} must be non-empty text without NUL bytes`);
+  }
 }
 
 function assertTimestamp(value: number, name: string): void {

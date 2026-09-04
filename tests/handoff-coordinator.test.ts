@@ -8,11 +8,13 @@ import {
   abandonPreparedHandoff,
   activatePreparedHandoff,
   compareHandoffGates,
+  handoffScopeBindingHash,
   prepareHandoffBarrier,
   readHandoffGate,
   recoverExpiredHandoffPreparation,
   type HandoffTabBindingAttestation,
 } from "../packages/core/src/handoff-coordinator.js";
+import { persistentDocumentBinding } from "../packages/core/src/safe-state.js";
 import {
   prepareHandoffLease,
   type HandoffLease,
@@ -37,8 +39,13 @@ import type {
 } from "../packages/protocol/src/index.js";
 
 const CREATED_AT = 1_000;
+const PREPARED_AT = 1_100;
 const NOW = 2_000;
 const HOST_PROFILE = "profile-content-canary";
+const HOST_BINDING = {
+  profileBindingHash: "d".repeat(64),
+  profileId: HOST_PROFILE,
+} as const;
 const SCOPE = {
   documentBinding: "document-content-canary",
   sessionId: "session-content-canary",
@@ -55,9 +62,11 @@ const attestation: HandoffTabBindingAttestation = {
   admissionGeneration: 1,
   browserInstanceBindingHash: "a".repeat(64),
   expiresAt: 9_000,
+  hostProfileBindingHash: HOST_BINDING.profileBindingHash,
   nativeActionFenceHash: "e".repeat(64),
   observedAt: 1_900,
   receiptHash: "b".repeat(64),
+  scopeBindingHash: handoffScopeBindingHash(SCOPE),
 };
 
 const makeRoot = async () =>
@@ -75,6 +84,13 @@ const makeLease = (
     previousLeaseEpoch,
     scope: SCOPE,
   });
+
+const prepareBarrier = (
+  root: string,
+  lease: HandoffLease,
+  host = HOST_BINDING,
+  clock: () => number = () => PREPARED_AT,
+) => prepareHandoffBarrier(root, lease, host, clock);
 
 const makeState = (
   pendingNativeActionIds: string[] = [],
@@ -97,11 +113,39 @@ async function prepareFixture(
 ): Promise<BrowserTaskState> {
   const state = makeState(pendingNativeActionIds);
   await writeBrowserTaskState(root, state, null);
-  await prepareHandoffBarrier(root, lease, HOST_PROFILE);
+  await prepareBarrier(root, lease);
   return state;
 }
 
 const verifyTab = async () => attestation;
+
+const activate = (
+  root: string,
+  lease: HandoffLease,
+  verify: Parameters<typeof activatePreparedHandoff>[3] = verifyTab,
+  clock: () => number = () => NOW,
+) => activatePreparedHandoff(root, lease, HOST_BINDING, verify, clock);
+
+const invalidAttestations: Array<
+  [string, Partial<HandoffTabBindingAttestation>]
+> = [
+  ["wrong Host Profile binding", { hostProfileBindingHash: "f".repeat(64) }],
+  ["wrong same-tab scope binding", { scopeBindingHash: "f".repeat(64) }],
+  ["receipt before the barrier", { observedAt: PREPARED_AT - 1 }],
+  ["receipt from the future", { observedAt: NOW + 1 }],
+  ["receipt observed after its expiry", { expiresAt: 1_800 }],
+  ["expired receipt", { expiresAt: NOW - 1 }],
+  ["receipt beyond the lease", { expiresAt: 10_001 }],
+  [
+    "non-lowercase browser binding hash",
+    { browserInstanceBindingHash: "A".repeat(64) },
+  ],
+  [
+    "non-lowercase native fence hash",
+    { nativeActionFenceHash: "E".repeat(64) },
+  ],
+  ["non-lowercase receipt hash", { receiptHash: "B".repeat(64) }],
+];
 
 const toolInput = (toolUseId: string) => ({
   bindingDigest: "c".repeat(64),
@@ -169,9 +213,7 @@ describe("handoff coordinator", () => {
     const root = await makeRoot();
     const lease = makeLease();
 
-    await expect(
-      prepareHandoffBarrier(root, lease, HOST_PROFILE),
-    ).resolves.toBe("PREPARED");
+    await expect(prepareBarrier(root, lease)).resolves.toBe("PREPARED");
     await expect(readHandoffGate(root, SCOPE)).resolves.toEqual({
       generation: 1,
       kind: "KNOWN",
@@ -212,24 +254,20 @@ describe("handoff coordinator", () => {
     const first = makeLease("handoff-first-content-canary");
     const second = makeLease("handoff-second-content-canary");
 
-    await expect(
-      prepareHandoffBarrier(root, first, HOST_PROFILE),
-    ).resolves.toBe("PREPARED");
-    await expect(
-      prepareHandoffBarrier(root, first, HOST_PROFILE),
-    ).resolves.toBe("REPLAY");
-    await expect(
-      prepareHandoffBarrier(root, second, HOST_PROFILE),
-    ).rejects.toThrow("another handoff owns this lease epoch");
+    await expect(prepareBarrier(root, first)).resolves.toBe("PREPARED");
+    await expect(prepareBarrier(root, first)).resolves.toBe("REPLAY");
+    await expect(prepareBarrier(root, second)).rejects.toThrow(
+      "another handoff owns this lease epoch",
+    );
   });
 
   it("admits only the next generation on a fresh root", async () => {
     const root = await makeRoot();
     const future = makeLease("future-handoff", 7);
 
-    await expect(
-      prepareHandoffBarrier(root, future, HOST_PROFILE),
-    ).rejects.toThrow("handoff admission gate is not open");
+    await expect(prepareBarrier(root, future)).rejects.toThrow(
+      "handoff admission gate is not open",
+    );
     await expect(readHandoffGate(root, SCOPE)).resolves.toEqual({
       generation: 0,
       kind: "KNOWN",
@@ -243,8 +281,8 @@ describe("handoff coordinator", () => {
     const second = makeLease("concurrent-generation-two", 1);
 
     const [firstResult, secondResult] = await Promise.allSettled([
-      prepareHandoffBarrier(root, first, HOST_PROFILE),
-      prepareHandoffBarrier(root, second, HOST_PROFILE),
+      prepareBarrier(root, first),
+      prepareBarrier(root, second),
     ]);
     expect(firstResult.status).toBe("fulfilled");
     expect(secondResult.status).toBe("rejected");
@@ -260,11 +298,11 @@ describe("handoff coordinator", () => {
     const lease = makeLease();
     await prepareFixture(root, lease);
 
+    await expect(activate(root, lease, async () => undefined)).resolves.toEqual(
+      { kind: "FAILED_SAFE" },
+    );
     await expect(
-      activatePreparedHandoff(root, lease, NOW, async () => undefined),
-    ).resolves.toEqual({ kind: "FAILED_SAFE" });
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, async () => ({
+      activate(root, lease, async () => ({
         ...attestation,
         admissionGeneration: 2,
       })),
@@ -274,9 +312,7 @@ describe("handoff coordinator", () => {
       status: "PREPARING",
     });
 
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, verifyTab),
-    ).resolves.toMatchObject({
+    await expect(activate(root, lease)).resolves.toMatchObject({
       kind: "ACTIVE",
       lease: { holder: "USER", leaseEpoch: 1, state: "ACTIVE" },
     });
@@ -293,6 +329,120 @@ describe("handoff coordinator", () => {
     });
   });
 
+  it("binds the receipt to every field in the same-tab scope", () => {
+    for (const changed of [
+      { ...SCOPE, sessionId: `${SCOPE.sessionId}-other` },
+      { ...SCOPE, taskId: `${SCOPE.taskId}-other` },
+      { ...SCOPE, tabId: SCOPE.tabId + 1 },
+      { ...SCOPE, topOrigin: "https://other.test" },
+      { ...SCOPE, documentBinding: `${SCOPE.documentBinding}-other` },
+    ]) {
+      expect(handoffScopeBindingHash(changed)).not.toBe(
+        attestation.scopeBindingHash,
+      );
+    }
+  });
+
+  it("keeps raw and already-persisted document bindings distinct", () => {
+    const raw = "document-binding-alias-canary";
+
+    expect(
+      handoffScopeBindingHash({ ...SCOPE, documentBinding: raw }),
+    ).not.toBe(
+      handoffScopeBindingHash({
+        ...SCOPE,
+        documentBinding: persistentDocumentBinding(raw),
+      }),
+    );
+  });
+
+  it("rejects ambiguous NUL-delimited lease identities", () => {
+    expect(() =>
+      prepareHandoffLease({
+        createdAt: CREATED_AT,
+        expiresAt: 10_000,
+        handoffId: "nul-scope-handoff",
+        nonce: "n".repeat(32),
+        previousLeaseEpoch: 0,
+        scope: { ...SCOPE, sessionId: "a\0b", taskId: "c" },
+      }),
+    ).toThrow("without NUL bytes");
+    expect(handoffScopeBindingHash({ ...SCOPE, sessionId: "a\0b" })).not.toBe(
+      handoffScopeBindingHash({ ...SCOPE, sessionId: "a", taskId: "b\0c" }),
+    );
+  });
+
+  it.each(invalidAttestations)(
+    "keeps Native ownership for %s",
+    async (_name, patch) => {
+      const root = await makeRoot();
+      const lease = makeLease();
+      await prepareFixture(root, lease);
+
+      await expect(
+        activate(root, lease, async () => ({
+          ...attestation,
+          ...patch,
+        })),
+      ).resolves.toEqual({ kind: "FAILED_SAFE" });
+      await expect(readHandoffGate(root, SCOPE)).resolves.toMatchObject({
+        generation: 1,
+        status: "PREPARING",
+      });
+      await expect(readBrowserTaskState(root, SCOPE)).resolves.toMatchObject({
+        phase: "RUNNING",
+        pointerOwner: "NATIVE",
+      });
+    },
+  );
+
+  it("rejects a changed current Host Profile before invoking the verifier", async () => {
+    const root = await makeRoot();
+    const lease = makeLease();
+    let verifications = 0;
+    await prepareFixture(root, lease);
+
+    await expect(
+      activatePreparedHandoff(
+        root,
+        lease,
+        { ...HOST_BINDING, profileBindingHash: "f".repeat(64) },
+        async () => {
+          verifications += 1;
+          return attestation;
+        },
+        () => NOW,
+      ),
+    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    expect(verifications).toBe(0);
+  });
+
+  it("rechecks expiry after an asynchronous Host verification", async () => {
+    const root = await makeRoot();
+    const lease = makeLease();
+    let currentTime = NOW;
+    await prepareFixture(root, lease);
+
+    await expect(
+      activate(
+        root,
+        lease,
+        async () => {
+          currentTime = attestation.expiresAt + 1;
+          return attestation;
+        },
+        () => currentTime,
+      ),
+    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    await expect(readHandoffGate(root, SCOPE)).resolves.toMatchObject({
+      status: "PREPARING",
+    });
+    await expect(readBrowserTaskState(root, SCOPE)).resolves.toMatchObject({
+      phase: "RUNNING",
+      pointerOwner: "NATIVE",
+    });
+  });
+
   it("waits while the exact native tool call remains pending", async () => {
     const root = await makeRoot();
     const lease = makeLease();
@@ -300,9 +450,9 @@ describe("handoff coordinator", () => {
     await prepareFixture(root, lease, [toolUseId]);
     await recordToolCallPre(root, toolInput(toolUseId));
 
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, verifyTab),
-    ).resolves.toEqual({ kind: "WAITING_FOR_NATIVE" });
+    await expect(activate(root, lease)).resolves.toEqual({
+      kind: "WAITING_FOR_NATIVE",
+    });
     await expect(readHandoffGate(root, SCOPE)).resolves.toMatchObject({
       status: "PREPARING",
     });
@@ -329,9 +479,9 @@ describe("handoff coordinator", () => {
       );
     }
 
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, verifyTab),
-    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    await expect(activate(root, lease)).resolves.toEqual({
+      kind: "FAILED_SAFE",
+    });
     await expect(inspectToolCallJournal(root, SCOPE)).resolves.toEqual({
       kind: "UNKNOWN",
     });
@@ -349,7 +499,7 @@ describe("handoff coordinator", () => {
     await recordToolCallPre(root, toolInput(toolUseId));
 
     await expect(
-      activatePreparedHandoff(root, lease, NOW, async () => {
+      activate(root, lease, async () => {
         verifications += 1;
         return attestation;
       }),
@@ -364,7 +514,7 @@ describe("handoff coordinator", () => {
       }),
     ).resolves.toBe("COMPLETED");
     await expect(
-      activatePreparedHandoff(root, lease, NOW, async () => {
+      activate(root, lease, async () => {
         verifications += 1;
         return attestation;
       }),
@@ -401,9 +551,9 @@ describe("handoff coordinator", () => {
       pendingToolUseIds: [],
     });
 
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, verifyTab),
-    ).resolves.toMatchObject({ kind: "ACTIVE" });
+    await expect(activate(root, lease)).resolves.toMatchObject({
+      kind: "ACTIVE",
+    });
     await expect(readBrowserTaskState(root, SCOPE)).resolves.toMatchObject({
       leaseEpoch: 1,
       pendingNativeActionIds: [],
@@ -416,9 +566,9 @@ describe("handoff coordinator", () => {
     const stateOnlyRoot = await makeRoot();
     const stateOnlyLease = makeLease();
     await prepareFixture(stateOnlyRoot, stateOnlyLease, ["state-only-call"]);
-    await expect(
-      activatePreparedHandoff(stateOnlyRoot, stateOnlyLease, NOW, verifyTab),
-    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    await expect(activate(stateOnlyRoot, stateOnlyLease)).resolves.toEqual({
+      kind: "FAILED_SAFE",
+    });
     await expect(
       readBrowserTaskState(stateOnlyRoot, SCOPE),
     ).resolves.toMatchObject({ phase: "RUNNING", pointerOwner: "NATIVE" });
@@ -430,9 +580,9 @@ describe("handoff coordinator", () => {
     await writeFile(await findToolMarker(unknownRoot), "not-json\n", {
       mode: 0o600,
     });
-    await expect(
-      activatePreparedHandoff(unknownRoot, unknownLease, NOW, verifyTab),
-    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    await expect(activate(unknownRoot, unknownLease)).resolves.toEqual({
+      kind: "FAILED_SAFE",
+    });
     await expect(readHandoffGate(unknownRoot, SCOPE)).resolves.toMatchObject({
       status: "PREPARING",
     });
@@ -450,9 +600,9 @@ describe("handoff coordinator", () => {
     await expect(readHandoffGate(root, SCOPE)).resolves.toEqual({
       kind: "UNKNOWN",
     });
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, verifyTab),
-    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    await expect(activate(root, lease)).resolves.toEqual({
+      kind: "FAILED_SAFE",
+    });
     await expect(readBrowserTaskState(root, SCOPE)).resolves.toMatchObject({
       phase: "RUNNING",
       pointerOwner: "NATIVE",
@@ -473,9 +623,9 @@ describe("handoff coordinator", () => {
     await expect(readHandoffGate(root, SCOPE)).resolves.toMatchObject({
       status: "PREPARING",
     });
-    await expect(
-      activatePreparedHandoff(root, lease, NOW, verifyTab),
-    ).resolves.toMatchObject({ kind: "ACTIVE" });
+    await expect(activate(root, lease)).resolves.toMatchObject({
+      kind: "ACTIVE",
+    });
     await expect(readHandoffGate(root, SCOPE)).resolves.toEqual({
       generation: 1,
       kind: "KNOWN",
@@ -493,14 +643,14 @@ describe("handoff coordinator", () => {
     await prepareFixture(root, lease);
 
     await expect(
-      activatePreparedHandoff(root, lease, NOW, async () => {
+      activate(root, lease, async () => {
         verifications += 1;
         return attestation;
       }),
     ).resolves.toMatchObject({ kind: "ACTIVE" });
     const active = await readBrowserTaskState(root, SCOPE);
     await expect(
-      activatePreparedHandoff(root, lease, NOW, async () => {
+      activate(root, lease, async () => {
         verifications += 1;
         return { ...attestation, receiptHash: "f".repeat(64) };
       }),
@@ -516,11 +666,11 @@ describe("handoff coordinator", () => {
     await prepareFixture(root, lease);
 
     const results = await Promise.all([
-      activatePreparedHandoff(root, lease, NOW, async () => {
+      activate(root, lease, async () => {
         verifications += 1;
         return attestation;
       }),
-      activatePreparedHandoff(root, lease, NOW, async () => {
+      activate(root, lease, async () => {
         verifications += 1;
         return { ...attestation, receiptHash: "f".repeat(64) };
       }),
@@ -605,9 +755,7 @@ describe("handoff coordinator", () => {
     });
 
     const second = makeLease("handoff-generation-two", 1);
-    await expect(
-      prepareHandoffBarrier(root, second, HOST_PROFILE),
-    ).resolves.toBe("PREPARED");
+    await expect(prepareBarrier(root, second)).resolves.toBe("PREPARED");
     await expect(readHandoffGate(root, SCOPE)).resolves.toEqual({
       generation: 2,
       kind: "KNOWN",

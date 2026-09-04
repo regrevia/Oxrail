@@ -11,12 +11,14 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import type { BrowserTaskState } from "../../protocol/src/index.js";
+import {
+  deterministicDigest,
+  type BrowserTaskState,
+} from "../../protocol/src/index.js";
 import { type HandoffLease, transitionHandoffLease } from "./handoff.js";
 import {
-  canonicalPersistentDocumentBinding,
-  canonicalPersistentHandoffId,
   canonicalPersistentToolUseId,
+  persistentDocumentBinding,
   persistentHandoffId,
 } from "./safe-state.js";
 import { activateUserLease } from "./state.js";
@@ -35,6 +37,7 @@ const MAX_BARRIER_BYTES = 1_024;
 const TEMPORARY = /^\.lease-[0-9]+\.[a-f0-9-]{36}\.tmp$/;
 const HASH = /^[a-f0-9]{64}$/;
 const PERSISTENT_ID = /^oxrail-id:[a-f0-9]{64}$/;
+const SAFE_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 type PersistedHandoffBarrierState = "ACTIVE" | "CANCELLED" | "PREPARING";
 
@@ -43,7 +46,8 @@ interface PersistedHandoffBarrier {
   createdAt: number;
   expiresAt: number;
   handoffId: string;
-  hostProfileDigest: string;
+  hostProfileBindingHash: string;
+  hostProfileIdHash: string;
   leaseEpoch: number;
   nativeActionFenceHash: string | null;
   nonceDigest: string;
@@ -55,14 +59,30 @@ interface PersistedHandoffBarrier {
   updatedAt: number;
 }
 
-/** Trusted Host output minted after this gate and all older native calls settle. */
+/**
+ * Trusted Host output minted after this gate and all older native calls settle.
+ * Hash equality checks binding consistency; only the external Host verifier can
+ * establish authenticity and native-action coverage.
+ */
 export interface HandoffTabBindingAttestation {
   admissionGeneration: number;
   browserInstanceBindingHash: string;
   expiresAt: number;
+  hostProfileBindingHash: string;
   nativeActionFenceHash: string;
   observedAt: number;
   receiptHash: string;
+  scopeBindingHash: string;
+}
+
+export interface HandoffHostBinding {
+  profileBindingHash: string;
+  profileId: string;
+}
+
+interface PersistedHostBinding {
+  hostProfileBindingHash: string;
+  hostProfileIdHash: string;
 }
 
 export type VerifyHandoffTabBinding = (
@@ -130,15 +150,38 @@ function digest(domain: string, ...values: (number | string)[]): string {
 const taskBindingDigest = (scope: { sessionId: string; taskId: string }) =>
   digest("oxrail-handoff-task-binding-v1", scope.sessionId, scope.taskId);
 
-const scopeDigest = (lease: HandoffLease) =>
-  digest(
-    "oxrail-handoff-scope-v1",
-    lease.scope.sessionId,
-    lease.scope.taskId,
-    lease.scope.tabId,
-    lease.scope.topOrigin,
-    canonicalPersistentDocumentBinding(lease.scope.documentBinding),
-  );
+export const handoffScopeBindingHash = (scope: HandoffLease["scope"]) =>
+  deterministicDigest("oxrail-handoff-scope-v1", {
+    documentBindingHash: persistentDocumentBinding(scope.documentBinding),
+    sessionId: scope.sessionId,
+    tabId: scope.tabId,
+    taskId: scope.taskId,
+    topOrigin: scope.topOrigin,
+  });
+
+function persistedHostBinding(
+  binding: HandoffHostBinding,
+): PersistedHostBinding {
+  if (
+    !SAFE_PROFILE_ID.test(binding.profileId) ||
+    !HASH.test(binding.profileBindingHash)
+  ) {
+    throw new TypeError("invalid Host Profile binding");
+  }
+  return {
+    hostProfileBindingHash: binding.profileBindingHash,
+    hostProfileIdHash: digest(
+      "oxrail-handoff-host-profile-id-v1",
+      binding.profileId,
+    ),
+  };
+}
+
+const safeTaskScope = (scope: { sessionId: string; taskId: string }) =>
+  scope.sessionId.length > 0 &&
+  !scope.sessionId.includes("\0") &&
+  scope.taskId.length > 0 &&
+  !scope.taskId.includes("\0");
 
 const barrierDirectory = (
   root: string,
@@ -208,7 +251,7 @@ function parseBarrier(value: unknown): PersistedHandoffBarrier {
     typeof value !== "object" ||
     Array.isArray(value) ||
     Object.keys(value).sort().join(",") !==
-      "browserInstanceBindingHash,createdAt,expiresAt,handoffId,hostProfileDigest,leaseEpoch,nativeActionFenceHash,nonceDigest,schemaVersion,scopeDigest,state,tabBindingReceiptHash,taskBindingDigest,updatedAt"
+      "browserInstanceBindingHash,createdAt,expiresAt,handoffId,hostProfileBindingHash,hostProfileIdHash,leaseEpoch,nativeActionFenceHash,nonceDigest,schemaVersion,scopeDigest,state,tabBindingReceiptHash,taskBindingDigest,updatedAt"
   ) {
     throw new Error("invalid handoff barrier");
   }
@@ -227,7 +270,8 @@ function parseBarrier(value: unknown): PersistedHandoffBarrier {
     !HASH.test(barrier.nonceDigest ?? "") ||
     !HASH.test(barrier.scopeDigest ?? "") ||
     !HASH.test(barrier.taskBindingDigest ?? "") ||
-    !HASH.test(barrier.hostProfileDigest ?? "") ||
+    !HASH.test(barrier.hostProfileBindingHash ?? "") ||
+    !HASH.test(barrier.hostProfileIdHash ?? "") ||
     (barrier.browserInstanceBindingHash !== null &&
       !HASH.test(barrier.browserInstanceBindingHash ?? "")) ||
     (barrier.nativeActionFenceHash !== null &&
@@ -262,7 +306,7 @@ function barrierForLease(
   lease: HandoffLease,
   state: PersistedHandoffBarrierState,
   updatedAt: number,
-  hostProfileDigest: string,
+  host: PersistedHostBinding,
   attestation?: HandoffTabBindingAttestation,
 ): PersistedHandoffBarrier {
   if (
@@ -278,13 +322,14 @@ function barrierForLease(
     throw new TypeError("invalid pending handoff lease");
   }
   if (
-    !HASH.test(hostProfileDigest) ||
     (state === "ACTIVE") !== Boolean(attestation) ||
     (attestation &&
       (attestation.admissionGeneration !== lease.leaseEpoch ||
         !HASH.test(attestation.browserInstanceBindingHash) ||
+        attestation.hostProfileBindingHash !== host.hostProfileBindingHash ||
         !HASH.test(attestation.nativeActionFenceHash) ||
-        !HASH.test(attestation.receiptHash)))
+        !HASH.test(attestation.receiptHash) ||
+        attestation.scopeBindingHash !== handoffScopeBindingHash(lease.scope)))
   ) {
     throw new TypeError("invalid handoff attestation");
   }
@@ -293,12 +338,13 @@ function barrierForLease(
     createdAt: lease.acquiredAt,
     expiresAt: lease.expiresAt,
     handoffId: persistentHandoffId(lease.handoffId),
-    hostProfileDigest,
+    hostProfileBindingHash: host.hostProfileBindingHash,
+    hostProfileIdHash: host.hostProfileIdHash,
     leaseEpoch: lease.leaseEpoch,
     nativeActionFenceHash: attestation?.nativeActionFenceHash ?? null,
     nonceDigest: digest("oxrail-handoff-nonce-v1", lease.nonce),
     schemaVersion: 1,
-    scopeDigest: scopeDigest(lease),
+    scopeDigest: handoffScopeBindingHash(lease.scope),
     state,
     tabBindingReceiptHash: attestation?.receiptHash ?? null,
     taskBindingDigest: taskBindingDigest(lease.scope),
@@ -314,7 +360,8 @@ function sameLease(
     barrier.createdAt === expected.createdAt &&
     barrier.expiresAt === expected.expiresAt &&
     barrier.handoffId === expected.handoffId &&
-    barrier.hostProfileDigest === expected.hostProfileDigest &&
+    barrier.hostProfileBindingHash === expected.hostProfileBindingHash &&
+    barrier.hostProfileIdHash === expected.hostProfileIdHash &&
     barrier.leaseEpoch === expected.leaseEpoch &&
     barrier.nonceDigest === expected.nonceDigest &&
     barrier.scopeDigest === expected.scopeDigest &&
@@ -361,6 +408,7 @@ async function replaceBarrier(
   root: string,
   lease: HandoffLease,
   updatedAt: number,
+  host: PersistedHostBinding,
   attestation: HandoffTabBindingAttestation,
 ): Promise<void> {
   const directory = barrierDirectory(root, lease.scope);
@@ -370,7 +418,7 @@ async function replaceBarrier(
     lease,
     "ACTIVE",
     updatedAt,
-    current.hostProfileDigest,
+    host,
     attestation,
   );
   if (!sameLease(current, replacement) || current.state === "CANCELLED") {
@@ -421,12 +469,10 @@ async function cancelBarrier(
 ): Promise<void> {
   const destination = barrierPath(root, lease.scope, lease.leaseEpoch);
   const current = await readBarrier(destination);
-  const replacement = barrierForLease(
-    lease,
-    "CANCELLED",
-    updatedAt,
-    current.hostProfileDigest,
-  );
+  const replacement = barrierForLease(lease, "CANCELLED", updatedAt, {
+    hostProfileBindingHash: current.hostProfileBindingHash,
+    hostProfileIdHash: current.hostProfileIdHash,
+  });
   if (!sameLease(current, replacement) || current.state !== "PREPARING") {
     throw new Error("handoff barrier cannot be cancelled");
   }
@@ -469,17 +515,25 @@ async function writeBarrierReplacement(
 export async function prepareHandoffBarrier(
   root: string,
   lease: HandoffLease,
-  hostProfileId: string,
+  host: HandoffHostBinding,
+  clock: () => number = Date.now,
 ): Promise<"PREPARED" | "REPLAY"> {
-  if (!hostProfileId) throw new TypeError("hostProfileId must not be empty");
+  if (!safeTaskScope(lease.scope)) {
+    throw new TypeError("invalid handoff task scope");
+  }
+  const persistedHost = persistedHostBinding(host);
+  const directory = await ensureBarrierDirectory(root, lease.scope);
+  const destination = barrierPath(root, lease.scope, lease.leaseEpoch);
+  const preparedAt = clock();
+  if (!Number.isSafeInteger(preparedAt) || preparedAt < 0) {
+    throw new TypeError("invalid handoff preparation time");
+  }
   const barrier = barrierForLease(
     lease,
     "PREPARING",
-    lease.acquiredAt,
-    digest("oxrail-handoff-host-profile-v1", hostProfileId),
+    preparedAt,
+    persistedHost,
   );
-  const directory = await ensureBarrierDirectory(root, lease.scope);
-  const destination = barrierPath(root, lease.scope, lease.leaseEpoch);
   try {
     const existing = await readBarrier(destination);
     if (!sameLease(existing, barrier) || existing.state === "CANCELLED") {
@@ -512,6 +566,7 @@ export async function readHandoffGate(
   root: string,
   scope: { sessionId: string; taskId: string },
 ): Promise<HandoffGateSnapshot> {
+  if (!safeTaskScope(scope)) return { kind: "UNKNOWN" };
   try {
     const directory = barrierDirectory(root, scope);
     let entries;
@@ -573,8 +628,7 @@ function matchesActiveState(
     state.pointerOwner === "HUMAN" &&
     state.leaseEpoch === lease.leaseEpoch &&
     state.activeHandoffId !== undefined &&
-    canonicalPersistentHandoffId(state.activeHandoffId) ===
-      persistentHandoffId(lease.handoffId)
+    state.activeHandoffId === persistentHandoffId(lease.handoffId)
   );
 }
 
@@ -588,8 +642,8 @@ function matchesPreparedState(
     state.leaseEpoch + 1 === lease.leaseEpoch &&
     state.currentOrigin === lease.scope.topOrigin &&
     state.documentBinding !== undefined &&
-    canonicalPersistentDocumentBinding(state.documentBinding) ===
-      canonicalPersistentDocumentBinding(lease.scope.documentBinding)
+    state.documentBinding ===
+      persistentDocumentBinding(lease.scope.documentBinding)
   );
 }
 
@@ -597,10 +651,13 @@ function matchesPreparedState(
 export async function activatePreparedHandoff(
   root: string,
   lease: HandoffLease,
-  now: number,
+  host: HandoffHostBinding,
   verifyTabBinding: VerifyHandoffTabBinding,
+  clock: () => number = Date.now,
 ): Promise<HandoffActivationResult> {
   try {
+    if (!safeTaskScope(lease.scope)) return { kind: "FAILED_SAFE" };
+    const expectedHost = persistedHostBinding(host);
     return await transitionBrowserTaskStateWithRetry<HandoffActivationResult>(
       root,
       lease.scope,
@@ -619,22 +676,28 @@ export async function activatePreparedHandoff(
         const expected = barrierForLease(
           lease,
           "PREPARING",
-          lease.acquiredAt,
-          currentBarrier.hostProfileDigest,
+          currentBarrier.updatedAt,
+          expectedHost,
         );
         if (
           !sameLease(currentBarrier, expected) ||
           !["ACTIVE", "PREPARING"].includes(currentBarrier.state) ||
           currentBarrier.state !== gate.status ||
           !state ||
-          currentBarrier.hostProfileDigest !==
-            digest("oxrail-handoff-host-profile-v1", state.hostProfileId)
+          state.hostProfileId !== host.profileId ||
+          currentBarrier.hostProfileBindingHash !==
+            expectedHost.hostProfileBindingHash ||
+          currentBarrier.hostProfileIdHash !== expectedHost.hostProfileIdHash
         ) {
           return { value: { kind: "FAILED_SAFE" } as const };
         }
         const alreadyActive = matchesActiveState(state, lease);
         if (currentBarrier.state === "ACTIVE") {
           if (!alreadyActive) {
+            return { value: { kind: "FAILED_SAFE" } as const };
+          }
+          const replayAt = clock();
+          if (!Number.isSafeInteger(replayAt) || replayAt < 0) {
             return { value: { kind: "FAILED_SAFE" } as const };
           }
           const replay = transitionHandoffLease(
@@ -647,7 +710,7 @@ export async function activatePreparedHandoff(
               scope: lease.scope,
               observedAt: currentBarrier.updatedAt,
             },
-            now,
+            replayAt,
           );
           return {
             afterCommit: async () => {
@@ -684,17 +747,25 @@ export async function activatePreparedHandoff(
 
         // The receipt must describe the tab after every older native action drained.
         const verified = await verifyTabBinding(lease);
+        const verifiedAt = clock();
         if (
           !verified ||
+          !Number.isSafeInteger(verifiedAt) ||
+          verifiedAt < 0 ||
           verified.admissionGeneration !== lease.leaseEpoch ||
           !HASH.test(verified.browserInstanceBindingHash) ||
+          verified.hostProfileBindingHash !==
+            currentBarrier.hostProfileBindingHash ||
           !HASH.test(verified.nativeActionFenceHash) ||
           !HASH.test(verified.receiptHash) ||
+          verified.scopeBindingHash !== handoffScopeBindingHash(lease.scope) ||
           !Number.isSafeInteger(verified.observedAt) ||
-          verified.observedAt < lease.acquiredAt ||
-          verified.observedAt > now ||
+          verified.observedAt < currentBarrier.updatedAt ||
+          verified.observedAt > verifiedAt ||
           !Number.isSafeInteger(verified.expiresAt) ||
-          verified.expiresAt < now
+          verified.observedAt > verified.expiresAt ||
+          verified.expiresAt < verifiedAt ||
+          verified.expiresAt > lease.expiresAt
         ) {
           return { value: { kind: "FAILED_SAFE" } as const };
         }
@@ -706,16 +777,22 @@ export async function activatePreparedHandoff(
             leaseEpoch: lease.leaseEpoch,
             nonce: lease.nonce,
             scope: lease.scope,
-            observedAt: now,
+            observedAt: verifiedAt,
           },
-          now,
+          verifiedAt,
         );
         if (!activation.accepted) {
           return { value: { kind: "FAILED_SAFE" } as const };
         }
         return {
           afterCommit: async () => {
-            await replaceBarrier(root, lease, now, verified);
+            await replaceBarrier(
+              root,
+              lease,
+              verifiedAt,
+              expectedHost,
+              verified,
+            );
             await retireCompletedToolCalls(root, lease.scope, []);
           },
           ...(alreadyActive
@@ -745,7 +822,9 @@ export async function recoverExpiredHandoffPreparation(
   scope: { sessionId: string; taskId: string },
   now: number,
 ): Promise<HandoffPreparationRecoveryResult> {
-  if (!Number.isSafeInteger(now) || now < 0) return "UNKNOWN";
+  if (!safeTaskScope(scope) || !Number.isSafeInteger(now) || now < 0) {
+    return "UNKNOWN";
+  }
   try {
     return await transitionBrowserTaskStateWithRetry<HandoffPreparationRecoveryResult>(
       root,
@@ -762,8 +841,8 @@ export async function recoverExpiredHandoffPreparation(
         if (
           current.state !== gate.status ||
           !state ||
-          current.hostProfileDigest !==
-            digest("oxrail-handoff-host-profile-v1", state.hostProfileId)
+          current.hostProfileIdHash !==
+            digest("oxrail-handoff-host-profile-id-v1", state.hostProfileId)
         ) {
           return { value: "UNKNOWN" as const };
         }
@@ -771,8 +850,7 @@ export async function recoverExpiredHandoffPreparation(
           state.pointerOwner === "HUMAN" &&
           state.leaseEpoch === gate.generation &&
           state.activeHandoffId !== undefined &&
-          canonicalPersistentHandoffId(state.activeHandoffId) ===
-            current.handoffId;
+          state.activeHandoffId === current.handoffId;
         if (userOwned) {
           return { value: "USER_LEASE_RECOVERY_REQUIRED" as const };
         }
@@ -824,6 +902,7 @@ export async function abandonPreparedHandoff(
   lease: HandoffLease,
   now: number,
 ): Promise<boolean> {
+  if (!safeTaskScope(lease.scope)) return false;
   try {
     return await transitionBrowserTaskState<boolean>(
       root,
@@ -835,8 +914,11 @@ export async function abandonPreparedHandoff(
         const expected = barrierForLease(
           lease,
           "PREPARING",
-          lease.acquiredAt,
-          current.hostProfileDigest,
+          current.updatedAt,
+          {
+            hostProfileBindingHash: current.hostProfileBindingHash,
+            hostProfileIdHash: current.hostProfileIdHash,
+          },
         );
         if (
           state &&

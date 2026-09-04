@@ -25,6 +25,7 @@ import {
   activatePreparedHandoff,
   activateUserLease,
   createBrowserTaskState,
+  handoffScopeBindingHash,
   prepareHandoffBarrier,
   prepareHandoffLease,
   readBrowserTaskState,
@@ -38,6 +39,7 @@ import {
   hookBrowserTaskScope,
   hookDefinitionHash,
   hookRuntimeStateDirectory,
+  hostProfileBindingHash,
   markerMatches,
   MAX_BROWSER_ROUTE_OBSERVATIONS,
   oxrailDataDirectory,
@@ -421,7 +423,11 @@ async function prepareFixtureHandoff(
   await prepareHandoffBarrier(
     runtimeRoot,
     lease,
-    environment.profile.profileId,
+    {
+      profileBindingHash: hostProfileBindingHash(environment.profile),
+      profileId: environment.profile.profileId,
+    },
+    () => 1_000,
   );
   return { lease, runtimeRoot };
 }
@@ -777,14 +783,25 @@ describe("public Codex hooks", () => {
       true,
     );
     await expect(
-      activatePreparedHandoff(runtimeRoot, lease, 1_001, () => ({
-        admissionGeneration: 1,
-        browserInstanceBindingHash: "a".repeat(64),
-        expiresAt: 10_000,
-        nativeActionFenceHash: "e".repeat(64),
-        observedAt: 1_001,
-        receiptHash: "b".repeat(64),
-      })),
+      activatePreparedHandoff(
+        runtimeRoot,
+        lease,
+        {
+          profileBindingHash: hostProfileBindingHash(environment.profile),
+          profileId: environment.profile.profileId,
+        },
+        () => ({
+          admissionGeneration: 1,
+          browserInstanceBindingHash: "a".repeat(64),
+          expiresAt: 10_000,
+          hostProfileBindingHash: hostProfileBindingHash(environment.profile),
+          nativeActionFenceHash: "e".repeat(64),
+          observedAt: 1_001,
+          receiptHash: "b".repeat(64),
+          scopeBindingHash: handoffScopeBindingHash(lease.scope),
+        }),
+        () => 1_001,
+      ),
     ).resolves.toMatchObject({ kind: "ACTIVE" });
 
     await expect(
