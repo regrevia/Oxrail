@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v0.5.0
+# Oxrail — 唯一实现规范（SPEC）v1.0.0
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -11,10 +11,11 @@
 **完整性校验：** `OXRAIL_SPEC.sha256`  
 **替代文档：** `OXRAIL_SPEC_v0.1_review-draft.md`、`OXRAIL_SPEC_v0.2_authoritative.md`、`OXRAIL_SPEC_v0.2.0_CANONICAL.md`、`OXRAIL_SPEC_v0.3_partial.backup.md` 及其所有口头补充、审阅笔记和中间方案  
 **目标读者：** 架构审阅 Agent、实现 Agent、安全审阅者、Benchmark 审阅者  
-**首要实验宿主：** ChatGPT Desktop 中的 Codex + Computer Use Plugin + 用户真实 Chrome  
+**首要实验宿主：** macOS 上 ChatGPT Desktop 中的 Codex + Computer Use Plugin + 用户真实 Chrome
 **首要 Handoff 目标：** 对话上下文保留；只让渡浏览器控制；把同一真实标签页就地呈现给用户；完成后自动验证并继续  
 **次要独立宿主：** ChatGPT Work、Built-in Browser、Codex CLI；不得共享未经验证的能力结论  
 **首要浏览器：** 用户真实 Google Chrome；Built-in Browser 必须作为独立 browser path 记录  
+**首要操作系统：** macOS；Windows Credential Channel 延后且默认为 `UNSUPPORTED`，不得复用 macOS 能力结论
 **首要原则：** **Interpose, never replace. — 插在中间优化，不重造底层。**
 
 ---
@@ -47,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 0.5.0
+  spec_version: 1.0.0
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -58,7 +59,7 @@ spec:
     - OXRAIL_SPEC_v0.3_partial.backup.md
   owner: Oxrail maintainers
   section_count: 51
-  work_package_count: 98
+  work_package_count: 99
   companion_files:
     - OXRAIL_SPEC_INDEX.json
     - OXRAIL_SPEC.sha256
@@ -66,6 +67,7 @@ spec:
     - OpenAI host or Computer Use plugin update
     - Codex Hook contract change
     - Chrome extension permission/API change
+    - macOS credential helper、Keychain entitlement 或 consumer registry change
     - any KILL trigger
     - milestone acceptance or rejection
 ```
@@ -132,6 +134,7 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HOST-010**：安装生命周期只使用 `INSTALLED → CONFIGURED → VERIFIED`；等待首个真实 Browser 调用时显示 `READY — awaiting first native browser call`。
 - **REQ-HOST-011**：Oxrail Hook 缺失、未信任、被禁用、超时或故障时必须让 Native Chrome Computer Use fail-open，并明确显示 `Oxrail optimization unavailable / BYPASSED`。
 - **REQ-HOST-012**：Safety/Handoff 只有在对应能力已验证且当前实际生效时才可显示 `ACTIVE`；否则必须显示 `INACTIVE` 及原因，不得暗示 secret/handoff protection 正在工作。
+- **REQ-HOST-013**：Secure Credential Channel 必须按 `OS + helper build/signature + template registry + consumer registry` 独立验证；首版只支持 macOS，Windows 默认为 `UNSUPPORTED`。
 
 ### 动作与结果
 
@@ -172,11 +175,27 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HO-005**：完成后必须通过非敏感状态自动验证并自动恢复 Agent；不得要求用户回聊天发送“继续”。
 - **REQ-HO-006**：无法可靠自动判断时只允许窗口内一键 `Done` 作为降级；稳定支持路径不得依赖聊天消息。
 - **REQ-HO-007**：完成后尽可能把同一标签页恢复到原窗口、索引、固定和分组状态。
-- **REQ-HO-008**：Handoff 期间禁止读取字段值、键盘输入、剪贴板、截图、Cookie、Token 或密码管理器内容。
+- **REQ-HO-008**：Browser SMH verifier、extension 与普通 Oxrail runtime 在 Handoff 期间禁止读取字段值、键盘输入、剪贴板、截图、Cookie、Token 或密码管理器内容；唯一例外是 `REQ-CRED-012` 允许 credential enclave 在用户显式粘贴提交后对系统 pasteboard 做精确 compare-and-clear，该值不得进入 Browser SMH 或普通 runtime。
+
+### 安全凭据通道
+
+- **REQ-CRED-001**：首个稳定 Secure Credential Channel 仅支持拥有当前 Host Profile 与证据的 macOS 路径。
+- **REQ-CRED-002**：凭据生成所需的浏览器步骤必须保留并呈现同一真实 Chrome `tabId`、session、history 与登录态；在任何 generate/reveal API key 动作前必须先取得已证明覆盖所有 Agent action/observation 路径的 credential-input lease，该动作只能由用户在真实页面执行；lease 必须持续到非秘密 verifier 证明一次性 key reveal surface 已关闭/遮蔽；禁止 Agent 先触发生成/显示，也禁止 clone、screenshot、裁剪或位置映射替代真实标签页。
+- **REQ-CRED-003**：凭据输入 UI 只能来自已签名、固定且 Hash 绑定的可信模板注册表；Agent、模型、网页与页面内容不得提供表单、字段、标题、HTML 或任意 instruction。
+- **REQ-CRED-004**：首版只接受 `API_KEY`；明文只允许存在于用户显式复制/粘贴到 enclave 确认清除之间的 macOS pasteboard、native credential enclave 的 secure field/短暂内存、macOS Keychain、enclave 内登记 adapter 以及绑定服务的 TLS 请求。
+- **REQ-CRED-005**：Agent、模型、Hook 与普通 Oxrail runtime 只能获得 opaque `credentialRef` 和非敏感状态；不得存在 reveal、read 或 export-secret API。
+- **REQ-CRED-006**：`credentialRef` 必须绑定 `service + provisioningOrigin + purpose + consumerId + grantTTL + generation + revocation`；引用本身不是 bearer authority。
+- **REQ-CRED-007**：禁止明文进入普通文件、环境变量、argv、stdin/stdout/stderr、shell、Hook、普通 IPC、日志、trace、诊断或 crash artifact。
+- **REQ-CRED-008**：只有身份与 Hash 匹配 Host Profile 的登记 adapter 才能在 credential enclave 内消费凭据；不得向任意 executable、脚本或通用 CLI 注入凭据。
+- **REQ-CRED-009**：Credential Channel 不可用或未验证时，该秘密消费路径必须 fail-closed 并显示 `INACTIVE`；Native Chrome Computer Use 仍 fail-open 正常工作。
+- **REQ-CRED-010**：helper identity 必须由独立签名 launcher/updater 使用 macOS code-signing API 对 release-pinned Apple Team ID、bundle ID、exact CodeDirectory Hash 与 designated requirement 验证；code-signed sealed manifest 必须绑定模板/consumer registry Hash 与单调版本。launcher/updater 使用不同 signing identifier 并独占 rollback-floor Keychain item，helper 不可写/降 floor；credential item ACL 绑定当前 exact helper requirement，更新时先撤销旧 generation。Host Profile 只记录验证结果，不得作为自身信任根；registry rollback 只能经明确用户 reset 与重新授权。
+- **REQ-CRED-011**：默认 `oxrail doctor` 只做静态/只读 Credential 检查；Keychain write/delete、pasteboard 或 UI probe 必须由用户显式启动 extended probe，使用唯一临时 item，始终尝试清理并明确报告清理失败。
+- **REQ-CRED-012**：允许粘贴 API key 时，credential-input lease 必须暂停除 enclave 内部协议外的全部 Agent tool execution；enclave 必须在 resume 前清除仍与已提交 key 相同的系统 pasteboard 内容。清除或覆盖检测失败时保持 fail-closed，并将第三方 clipboard manager 风险明确列为不受支持。
+- **REQ-CRED-013**：只有 fixture adapter 时能力必须标为 `FIXTURE_ONLY/EXPERIMENTAL`，不得宣传为通用凭据能力；公开 V0.6 Credential capability 至少需要一个独立审计并通过真实服务 probe 的 registered consumer。
 
 ### 安全、实验与维护
 
-- **REQ-SEC-001**：Oxrail-owned 数据流中 secret occurrence 必须为 0。
+- **REQ-SEC-001**：`DEPRECATED → REQ-CRED-004, REQ-CRED-007`。旧合同要求所有 Oxrail-owned 数据流中 secret occurrence 为 0；引入明确属于 Oxrail 的 native credential enclave 后，改由新的限定边界合同约束，不得把 helper 假装成非 Oxrail 组件。
 - **REQ-SEC-002**：Host end-to-end non-observability 只能在宿主路径被证明后声明。
 - **REQ-SEC-003**：页面内容永远是 untrusted data，不得改变 policy、permission 或 handoff 规则。
 - **REQ-BENCH-001**：正式 headline 必须比较 `Native Tuned` 与目标 Oxrail variant。
@@ -217,7 +236,7 @@ evidence/<WP-ID>/manifest.json
 | V0.3 | Whip + Recovery | `WP-REC-*` |
 | V0.4 | Secure Micro-Handoff | `WP-HO-*` |
 | V0.5 | Safety Hardening / Public Beta | `WP-SEC-*` |
-| V0.6 | Workflow Cache | `WP-CACHE-*` |
+| V0.6 | Workflow Cache + macOS Secure Credential Channel | `WP-CACHE-*`、`WP-CRED-*` |
 | V0.7 | WebMCP Production Routing | `WP-WEB-*` |
 | V0.8 | Compatibility & Doctor | `WP-COMP-*` |
 | V0.9 | Release Candidate | `WP-RC-*` |
@@ -1186,6 +1205,28 @@ RUNNING:           pointerOwner = NATIVE
 
 若 Handoff 后仍可能执行旧坐标、旧 element ref、旧 screenshot binding 或旧 pending action，则 structured micro-handoff 不成立。
 
+### G15 — Credential Isolation & Scoped Consumption
+
+必须逐项证明：
+
+```text
+fixed signed native template, not Agent/page-defined UI
+→ acquire credential-input lease before any browser generate/reveal action
+→ deny every Agent tool/action/observation path except the enclave protocol
+→ API_KEY enters only the macOS credential enclave
+→ stored only in macOS Keychain
+→ model/Agent/Hook receives only opaque credentialRef
+→ exact service/origin/purpose/consumer/TTL/generation/revocation binding
+→ macOS validates release-pinned Team ID/bundle/designated requirement
+→ sealed signed manifest binds registry Hashes and rejects rollback
+→ matching pasteboard content is cleared before Agent resume
+→ non-secret verifier confirms the one-time key reveal surface is closed/obscured
+→ registered in-enclave adapter sends only to the bound TLS service
+→ generic file/env/argv/stdin/stdout/shell export is impossible
+```
+
+任一环节未被当前 Host Profile、独立签名信任根与 SecretLeakBench 证明时，Credential Channel 必须显示 `INACTIVE`；不得回退到聊天或普通本地秘密存储。只有 fixture consumer 时只能显示 `FIXTURE_ONLY/EXPERIMENTAL`，不能显示公开可用的 Credential protection `ACTIVE`。
+
 ## 6.10 Gate 输出
 
 `oxrail doctor` 必须输出以下之一：
@@ -1486,6 +1527,28 @@ sameTabBinding = true
 
 `CHAT_MESSAGE_REQUIRED` 只能作为实验/不支持路径的显式限制，不能成为 V1.0 Chrome 支持路径。
 
+### 8.4A Secure Credential Channel 能力维度
+
+Credential Channel 与浏览器 Handoff 正交：前者只负责把 API key 从固定 macOS native secure field 存入 Keychain，并由登记 adapter 消费；后者只负责让渡同一真实 tab 的控制。Credential popup 不是 `HandoffSurface`，也不能替代真实 Chrome 标签页。
+
+```ts
+export interface CredentialChannelCapability {
+  platform: "macos" | "unsupported";
+  surface: "MACOS_NATIVE_SECURE_PROMPT" | "NONE";
+  storage: "MACOS_KEYCHAIN" | "NONE";
+  acceptedKinds: readonly ["API_KEY"] | readonly [];
+  consumerMode: "REGISTERED_IN_ENCLAVE_ADAPTER_ONLY" | "NONE";
+  consumerReadiness:
+    | "AUDITED_REAL_CONSUMER"
+    | "FIXTURE_ONLY"
+    | "UNSUPPORTED";
+  opaqueReferenceOnly: boolean;
+  genericSecretExport: "DENIED";
+}
+```
+
+首版不支持 Password/OTP native popup、Private key、任意 CLI 或 Windows credential storage。Password、OTP、Passkey 与 CAPTCHA 继续使用同一真实网页/浏览器原生 UI。
+
 ## 8.5 HookCoverage
 
 ```ts
@@ -1708,7 +1771,9 @@ Mode: ADVISORY_ONLY
 
 ```text
 Oxrail keeps Native Computer Use as the browser writer.
-Oxrail does not need your passwords, OTPs, cookies, or tokens.
+Browser passwords, OTPs, cookies and tokens never enter Oxrail.
+When Secure Credential Channel is explicitly enabled, only its signed macOS
+native helper may transiently handle an API key and store it in Keychain.
 
 Required for Codex Guard:
 [✓/✗] Oxrail plugin installed
@@ -1725,18 +1790,28 @@ Required only for Secure Micro-Handoff on the supported Chrome path:
 [✓/✗] tab/window control permission
 [✓/✗] narrow handoff-state verifier
 
+Required only for Secure Credential Channel on macOS:
+[✓/✗] native credential helper installed and signature valid
+[✓/✗] fixed template registry hash valid
+[✓/✗] consumer registry hash valid
+[✓/✗] Keychain entitlement/access and synthetic round-trip
+[✓/✗] opaque-ref-only path
+[✓/✗] service/origin/purpose/consumer/TTL/revocation enforcement
+[✓/✗] generic file/env/argv/stdin/stdout/shell export unavailable
+
 Result:
 Lifecycle: INSTALLED | CONFIGURED | VERIFIED
 Oxrail mode: <derived mode>
 Optimization: ACTIVE | BYPASSED
 Safety: ACTIVE | INACTIVE
 Handoff: ACTIVE | INACTIVE
+Credential protection: ACTIVE | INACTIVE
 
 Optional and disabled by default:
 [ ] General Read-only Observer Bridge
 ```
 
-额外浏览器权限必须单独解释、单独授权。任一 Safety/Handoff 前置条件缺失时，UI 必须显示 `INACTIVE` 和缺失项，不得用“installed”“ready”或 Skill 可见性暗示保护已生效。
+额外浏览器权限必须单独解释、单独授权。任一 Safety/Handoff/Credential 前置条件缺失时，对应能力必须显示 `INACTIVE` 和缺失项，不得用“installed”“ready”、helper 存在或 Skill 可见性暗示保护已生效。Credential Channel `INACTIVE` 不影响 Native Chrome；需要秘密消费的单条路径则 fail-closed，且不得回退到聊天、环境变量或普通文件。
 
 ## 9.4 安装生命周期与首次验证
 
@@ -1880,7 +1955,7 @@ pauseAgentGuaranteed()
 
 ```ts
 export interface HostProfile {
-  schemaVersion: 3;
+  schemaVersion: 4;
   profileId: string;
 
   setup: {
@@ -1930,6 +2005,13 @@ export interface HostProfile {
       | "opaque";
     canonicalToolMatchers: string[];
     matcherEvidenceHash: string;
+    toolSchemaRegistryHash?: string;
+    toolSchemaRegistryEvidenceId?: string;
+    browserTools: Array<{
+      canonicalToolName: string;
+      inputSchemaHash: string;
+      registryManifestBinding: string;
+    }>;
   };
 
   action: {
@@ -2038,6 +2120,8 @@ export interface HostProfile {
     chatMessageRequired: ProbeVerdict;
   };
 
+  credentialChannel: CredentialChannelProfile;
+
   evidence: {
     probeSuiteVersion: string;
     fixtureRevision: string;
@@ -2051,10 +2135,59 @@ export interface HostProfile {
     mode: HostMode;
     safety: "ACTIVE" | "INACTIVE";
     handoff: "ACTIVE" | "INACTIVE";
+    credentialProtection: "ACTIVE" | "INACTIVE";
     allowedClaims: string[];
     forbiddenClaims: string[];
   };
 }
+
+export type CredentialChannelProfile =
+  | {
+      activation: "INACTIVE";
+      inactiveReasons: [string, ...string[]];
+      capability: CredentialChannelCapability & {
+        platform: "unsupported";
+        surface: "NONE";
+        storage: "NONE";
+        acceptedKinds: readonly [];
+        consumerMode: "NONE";
+        consumerReadiness: "UNSUPPORTED";
+      };
+    }
+  | {
+      activation: "ACTIVE" | "INACTIVE";
+      inactiveReasons: string[];
+      capability: CredentialChannelCapability & { platform: "macos" };
+      helperIdentity: ProbeVerdict;
+      helperBundleId?: string;
+      helperBuild?: string;
+      helperSignatureHash?: string;
+      helperTeamId?: string;
+      helperDesignatedRequirement?: string;
+      launcherIdentity: ProbeVerdict;
+      launcherBundleId?: string;
+      launcherBuild?: string;
+      launcherSignatureHash?: string;
+      launcherTeamId?: string;
+      launcherDesignatedRequirement?: string;
+      secureInput: ProbeVerdict;
+      agentExecutionIsolation: ProbeVerdict;
+      pasteboardHygiene: ProbeVerdict;
+      templateRegistryHash?: string;
+      consumerRegistryHash?: string;
+      registryManifestHash?: string;
+      registryManifestVerification: ProbeVerdict;
+      registryVersion?: number;
+      registryRollbackFloor?: number;
+      credentialEvidenceManifestHash?: string;
+      secretLeakBench: ProbeVerdict;
+      realConsumerProbe: ProbeVerdict;
+      keychainRoundTrip: ProbeVerdict;
+      opaqueRefOnly: ProbeVerdict;
+      scopeBinding: ProbeVerdict;
+      expiryAndRevocation: ProbeVerdict;
+      genericExportDenied: ProbeVerdict;
+    };
 
 export type ProbeVerdict =
   | "passed"
@@ -2073,6 +2206,14 @@ export type NativePrimitive =
   | "handoff_resume";
 ```
 
+`HostProfileSchema` 与生成 JSON Schema 只验证交换结构和跨字段不变量，都不是 Credential activation 授权器。只有独立 macOS activation verifier 实时核对 Security.framework code-signing attestation、sealed evidence manifest、launcher-owned rollback floor 与当前 Host trust binding 后，runtime 才能采用 `ACTIVE`；该 verifier 尚未实现或任一核对不可用时，即使输入 profile 自报 `ACTIVE/passed` 也必须拒绝并降为 `INACTIVE`。
+
+`toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
+
+每个 `registryManifestBinding` 必须按 domain `oxrail-tool-registry-manifest-binding-v1` 对 canonical `{ profileId, definitionHash, matcherEvidenceHash, toolSchemaRegistryHash, toolSchemaRegistryEvidenceId, canonicalToolName, inputSchemaHash }` 计算，不能是 profile 与 manifest 共同携带但无法重算的任意值。bundle loader 还必须校验有界读取的 `profile.json` 原始字节 Hash 等于 manifest `profileSha256`；manifest 只是把本地文件绑定成一个漂移检测单元，外部 evidence pins 才是授权输入。
+
+非 macOS profile 必须使用 `platform = unsupported` 的 `INACTIVE` 分支，不得填空 Hash 假装已探测。macOS `credentialChannel.activation = ACTIVE` 要求 `GATE-G15`、当前独立 launcher/updater 与 helper identity、release-pinned Team ID/bundle/exact CodeDirectory Hash/designated requirement、sealed registry manifest、launcher-owned registry rollback floor、verified same-tab Chrome Handoff、agent execution isolation、pasteboard hygiene、Keychain extended synthetic round-trip、scope/expiry/revocation probes、至少一个 audited real consumer 与对应 SecretLeakBench 全部通过并绑定 `credentialEvidenceManifestHash`；所有 ACTIVE 身份/Hash/版本字段都必须存在，`inactiveReasons` 必须为空。仅安装 helper、创建 Keychain item 或通过 fixture adapter 不足以激活公开能力。
+
 ## 10.4 `oxrail doctor` 的探测层级
 
 默认 `oxrail doctor` 是无副作用 setup verification。它 MUST 检查并逐项显示：
@@ -2087,10 +2228,21 @@ PostToolUse available
 Chrome Computer Use detectable
 matcher/profile valid
 Handoff capabilities and activation
+macOS credential helper identity/signature and release-pinned designated requirement
+independent launcher/updater identity/signature and rollback-floor ownership
+sealed credential registry manifest hashes/version/rollback floor
+fixed credential template and consumer registry hashes
+Keychain entitlement/access (read-only static check by default)
+agent-execution isolation and pasteboard hygiene evidence
+opaque-ref scope/TTL/revocation enforcement
+generic file/env/argv/stdin/stdout/shell export unavailable
+Credential protection ACTIVE/INACTIVE and reasons
 resulting Oxrail mode
 ```
 
-该默认命令不得发起真实 click/type/navigation，不得把用户下一次真实任务登记为 installation test，也不得绕过宿主 Hook trust。
+该默认命令不得发起真实 click/type/navigation，不得打开 credential prompt、写删 Keychain item、读写 pasteboard，不得把用户下一次真实任务登记为 installation test，也不得绕过宿主 Hook trust。
+
+`oxrail doctor --extended-credential-probe` 是独立的显式 opt-in。它必须在运行前说明可能出现的 macOS 授权 UI，使用不可与真实 credential 混淆的唯一临时 Keychain item，测试完成或失败后都尝试删除，绝不使用用户真实 API key；删除失败必须以醒目错误和 item 的非敏感 locator 报告，且 Credential protection 保持 `INACTIVE`。
 
 ### Layer 0 — Static public contract
 
@@ -3429,6 +3581,8 @@ max_safe_navigation_attempts = 1
 
 本节定义用户要求的核心体验：**Agent 不结束原任务，用户不需要回聊天发送“继续”；只把浏览器控制短暂交给用户，并把当前同一真实页面直接呈现出来。**
 
+本节的 SMH 只指浏览器控制让渡；它不接收 secret。用于 API key 的 macOS native secure prompt 属于 `SEC-20` 定义的正交 Secure Credential Channel，不是 `HandoffSurface`、网页镜像或 Browser SMH 的例外。两者可以在同一 pending task 中顺序组合，但能力、状态和证据必须分别报告。
+
 ## 19.1 正式定义
 
 Secure Micro-Handoff（SMH）是：
@@ -3514,6 +3668,8 @@ Agent 自动继续原任务
 move/focus the real tab
 not mirror/clone/proxy the form
 ```
+
+所谓“对应位置映射”、裁剪画面或独立复刻控件都不满足该原则。支持路径必须显示正常真实 Chrome 窗口及其地址栏/origin；可以移动、缩放或聚焦同一 tab，但不能用映射替代它。
 
 ## 19.4 Surface 优先级
 
@@ -3911,14 +4067,14 @@ ChatGPT Work lifecycle parity with Codex: UNKNOWN
 
 ## 19.15 Handoff 验收需求
 
-- **REQ-HO-009**：用户必须在真实网页/浏览器 UI 中输入 secret。
+- **REQ-HO-009**：Browser SMH 中的 Password、OTP、Cookie、Passkey、支付字段及其它网页认证 secret 必须由用户在真实网页/浏览器 UI 中输入；macOS API key secure prompt 仅是 `REQ-CRED-*` 限定的正交例外，不属于 Browser Handoff surface。
 - **REQ-HO-010**：支持路径的 `chat_message_required_rate = 0`。
 - **REQ-HO-011**：同一 tab/session 绑定成功率 `>=99.5%`。
 - **REQ-HO-012**：标签页恢复成功率 `>=99.5%`；失败时 tab 不丢失。
 - **REQ-HO-013**：controlled fixtures 的 auto/one-click resume 成功率 `>=95%`。
 - **REQ-HO-014**：user lease 期间已支持路径的 Agent browser action/observation occurrence = 0。
 - **REQ-HO-015**：Handoff activation P95 `<750 ms`，不含用户操作时间。
-- **REQ-HO-016**：任何 secret canary occurrence = 0。
+- **REQ-HO-016**：Browser SMH 与普通 Oxrail 数据流中任何 secret canary occurrence = 0；Credential Channel 只适用 `SEC-21.2B` 的限定 occurrence，不得扩大到 Browser SMH。
 
 ---
 
@@ -4044,7 +4200,50 @@ export type SensitiveFieldKind =
 
 发现敏感字段不等于读取其值。
 
-## 20.8 验收需求
+## 20.8 Secure Credential Channel（macOS-first）
+
+当 Agent 需要 API key 供已登记的非浏览器 adapter 使用时，Browser SMH 与 Credential Channel 按以下固定流程组合：
+
+```text
+existing valid Keychain item
+→ issue scoped opaque credentialRef
+→ registered in-enclave adapter consumes it
+
+missing/expired/revoked item
+→ keep the original task pending
+→ acquire a credential-input lease across every proven Agent tool/action/observation path
+→ use Browser SMH to show the exact same real Chrome tab for key creation
+→ only the user performs the generate/reveal/copy action in that real tab
+→ present a separately signed macOS native secure prompt from a fixed template
+→ user pastes/types API_KEY into NSSecureTextField
+→ the same credential-enclave process writes it through Security.framework to Keychain
+→ clear matching system pasteboard content and verify no Agent tool ran during the lease
+→ user closes/obscures the one-time key reveal in the same real tab
+→ a non-secret allowlisted verifier confirms only that the reveal surface is absent
+→ return only stored/ready/cancelled/error plus opaque credentialRef
+→ registered in-enclave adapter sends the bound request
+→ sanitized outcome resumes the original task
+```
+
+首版固定边界：
+
+- 仅 `API_KEY`，不接受 Password、OTP、Cookie、Session token、Private key 或支付字段；
+- 独立签名 launcher/updater 必须先由 macOS code-signing API 对 release-pinned Apple Team ID、bundle ID、exact CodeDirectory Hash 与 designated requirement 验证，再以同样方式验证 helper；其 code-signed sealed manifest 必须绑定模板/consumer registry Hash 和单调 registry version。launcher/updater 使用不同 signing identifier 并独占 rollback-floor Keychain item，helper 不可写/降 floor；credential item ACL 绑定当前 exact helper requirement，升级时先撤销旧 generation；Host Profile 只记录结果而不是信任根；
+- UI 的站点名、canonical origin、purpose、consumer、保存时长和授权时长来自可信 registry；Agent 只能提交被 allowlist 接受的 ID/枚举，不能提交用户可见任意文本或构造表单；
+- 用户直接键入时不接触 pasteboard。用户主动粘贴时，secure-field value 只在同一 enclave 进程内短暂存在，不经普通 broker/XPC/Hook；enclave 可且只可为提交后的 hygiene 检查读取系统 pasteboard，并在内容仍与已提交 key 完全相同时立即清空。清理确认前不恢复 Agent；第三方 clipboard manager 不在支持边界内且必须在 UI 中明确告知；
+- `credentialRef` 是无明文的索引与 scope handle，不提供独立授权；helper 必须再次验证 service、provisioningOrigin、purpose、consumerId、grant TTL、generation 与 revocation；
+- 登记 adapter 在 enclave 内完成 secret-bearing TLS request，只向 Agent 返回经过白名单的状态/业务结果；不得返回 request header、credential、可逆派生值或未经清洗的错误；
+- 不提供普通文件、环境变量、argv、stdin/stdout/stderr、shell 或任意 executable/CLI 注入。若 consumer 只能从这些通道读取，首版明确 `UNSUPPORTED`；
+- Keychain item 必须可列出其非敏感 scope metadata、撤销与删除；过期、撤销、helper/registry Hash 改变后旧 grant 立即失效。
+- credential-input lease 从任何 generate/reveal 动作之前开始，到 pasteboard hygiene、Keychain commit、prompt teardown，以及 allowlisted non-secret verifier 证明真实页面的一次性 key reveal surface 已关闭/遮蔽后才结束；除同一 enclave 的固定协议外，期间任何 Agent tool call 必须拒绝。verifier 不能读取 key value；无法证明 surface 已消失或覆盖率无法证明时 Credential Channel 不得 ACTIVE，且 Agent 不恢复。
+- release-pinned launcher/helper signing requirements 与 exact CodeDirectory Hash 的 `credentialTrustRootDigest` 必须作为 literal 进入宿主实际 review/hash 的 Hook definition，并由 Host probe 证明当前 trust 决定确实绑定该 exact definition。修改任一 release pin 必须同时改变该 literal；只有 Host probe 证明宿主重新授权后才能恢复 `ACTIVE`。在此绑定尚未实现或无法证明时，pin 改变只允许令 profile stale/Credential `INACTIVE`，不得承诺宿主一定重新弹出授权。launcher 验证失败、helper/registry/profile 同时替换或旧完整签名 bundle rollback 都不能进入 credential path。
+- fixture consumer 只用于安全验收；公开 capability 至少包含一个签名 registry 中的独立审计真实 consumer。每个 consumer 固定 TLS origin/path/method、credential placement、非敏感参数 schema 与输出白名单，不存在通用 HTTP、shell 或 reveal 通道。
+
+普通环境变量或用户私有文件不构成安全通道：Agent 可以读取文件、执行 `env/printenv`、令子进程继承并输出值，且这些值可能进入 shell history、错误、诊断或 crash artifact。类似环境变量的易用性只能由 opaque `credentialRef` 提供，明文不得进入 Agent 可读取的命名空间。
+
+macOS helper 自身明确属于 Oxrail trusted computing base；它不是通过改名规避 `REQ-SEC-001` 的“外部组件”。Windows storage、ACL、UI 与 consumer identity 需要新的 Host Profile 和完整 `GATE-G15` 证据，在此之前为 `UNSUPPORTED`。
+
+## 20.9 验收需求
 
 - **REQ-AUTH-001**：所有 auth/MFA/CAPTCHA fixtures 必须使用安全微接管或明确不支持。
 - **REQ-AUTH-002**：密码/OTP 不得进入 model-visible payload。
@@ -4068,21 +4267,38 @@ Website/page content                 = UNTRUSTED DATA
 Native browser state                 = SENSITIVE
 Oxrail derived state                 = FILTERED
 Model-visible Oxrail payload         = LEAST PRIVILEGE
-Handoff user input                   = SECRET / OPAQUE TO OXRAIL
+Browser Handoff user input           = SECRET / OPAQUE TO ORDINARY OXRAIL
 Extension/broker                     = LOCAL PRIVILEGED COMPONENT
+Credential enclave                   = SECRET-HANDLING OXRAIL TCB (macOS only)
+macOS Keychain                       = DESIGNATED SECRET STORE
+User-controlled pasteboard           = TRANSIENT EXTERNAL INPUT; CLEAR BEFORE RESUME
+Registered in-enclave adapter        = DESIGNATED SCOPED SECRET CONSUMER
+Agent/model/Hook/runtime             = MUST REMAIN SECRET-OPAQUE
 ```
 
 ## 21.2 两级秘密保证
 
-### A. Oxrail Non-propagation Invariant
+### A. Browser Handoff Non-propagation Invariant
 
 Oxrail 必须保证：
 
-> Oxrail-owned code、state、trace、tool output、extension message、IPC、temp file 与 crash artifact 不保存、不传递、不回显任何检测到的 secret value。
+> Browser SMH、普通 Oxrail runtime、state、trace、tool output、extension message、IPC、temp file 与 crash artifact 不保存、不传递、不回显任何检测到的 secret value。
 
-这是项目可独立测试和承诺的要求。
+### B. Credential Channel Confinement Invariant
 
-### B. Host End-to-End Non-observability
+Secure Credential Channel 启用时，Oxrail 必须诚实承认 native credential enclave 会在 secure field 到 Keychain 的最短路径中短暂处理明文。允许 occurrence 只限：
+
+```text
+NSSecureTextField / credential-enclave volatile memory
+user-controlled macOS pasteboard during explicit copy/paste, until enclave-confirmed clearing
+macOS Keychain secret value
+registered in-enclave adapter
+the exact bound service TLS request
+```
+
+除此以外，尤其 model、Agent、Host Hook、普通 runtime/broker/IPC、文件、env、argv、stdio、shell、日志、trace、诊断、crash 与 benchmark evidence，secret occurrence 必须为 0。pasteboard 只因用户显式复制/粘贴成为短暂外部 occurrence；Oxrail 不得把它当存储或读取接口，enclave 只可比较并清除与刚提交 key 完全相同的内容，且在确认清除前不得恢复 Agent。该例外不得扩大为通用 secret broker、reveal API 或任意 consumer 注入。
+
+### C. Host End-to-End Non-observability
 
 > 在 Oxrail Hook/extension 之前，宿主原生 Computer Use、模型、transcript 或其它内部日志是否已经看到 secret。
 
@@ -4102,6 +4318,10 @@ Safe verifier enum        = ALLOW
 ```
 
 若覆盖率不是 100%，不得称 exclusive lock。
+
+### 21.3A Credential-input execution lease
+
+在任何网页 generate/reveal API-key 动作前，Oxrail 必须先取得比 Browser Handoff 更强的 credential-input lease：所有已探测 Agent tool、browser action、browser observation、shell/terminal、screen capture、clipboard access 与语义查询路径一律拒绝，唯一例外是签名 credential enclave 的固定内部协议。该 lease 必须持续到 secure field 清空、Keychain commit 或 cancel、pasteboard hygiene、prompt teardown、一次性 key reveal surface 经非秘密 verifier 证明已关闭/遮蔽，以及 sanitized result 完成；任一未知/bypass path、helper crash、reveal surface 仍可见或 cleanup 失败都保持 fail-closed，不得恢复 Agent 或宣称 Credential protection `ACTIVE`。Native Chrome 页面仍由用户正常操作；这里的 fail-closed 只针对 credential task 与 Agent resume，不得破坏普通 Native Chrome 可用性。
 
 ## 21.4 Origin Binding
 
@@ -4140,6 +4360,8 @@ no tabCapture/desktopCapture
 no debugger permission for handoff
 ```
 
+macOS credential helper 的 Keychain entitlement、App/bundle identity、code signature、hardened runtime、模板 registry 和 consumer registry 必须单独记录与验证；不得因 Browser Handoff extension 已获授权而隐式获得 Credential Channel 权限。
+
 一般 Observer Bridge 的 host permissions 必须单独 opt-in。
 
 ## 21.6 进程与文件安全
@@ -4153,6 +4375,9 @@ no debugger permission for handoff
 - trace 只存 hash、枚举、计数和经过白名单的短文本；
 - crash reporter 默认不上传 Oxrail state；
 - Hook spill/temp 目录纳入 canary scan 与清理。
+- credential enclave 与登记 adapter 默认禁用 raw request/header/error logging，不把 secret 送入普通 IPC，并禁止生成包含 secret memory 的自动 crash upload；
+- Keychain item、grant 与 `credentialRef` 分别有 generation/TTL/revocation；credential item ACL 绑定当前 exact helper requirement；独立 launcher/updater 独占 rollback floor 并在升级时撤销旧 generation，使旧 helper 或 registry Hash 不能继续消费；
+- `credentialRef` 可以进入 model-visible payload，但不得包含 Keychain persistent reference、secret-derived value 或独立消费 authority。
 
 ## 21.7 Threats
 
@@ -4171,6 +4396,12 @@ no debugger permission for handoff
 -用户在错误 tab 输入 secret；
 -自动恢复过早；
 -恢复 tab 时丢失 pinned/group/session。
+- Agent/页面伪造 credential template、service、purpose 或 consumer；
+- Agent 在 generate/reveal 前观察 key，或在 credential-input lease 中通过非浏览器 tool、shell、screenshot 或 pasteboard path 读取 key；
+- credentialRef replay、错误 origin/consumer 使用、过期/撤销后继续使用；
+- adapter 把 API key 放入 env/file/argv/stdio、错误或响应；
+- helper/code signature/template registry/consumer registry 被替换，或完整旧签名 bundle/registry 被 rollback；
+- 系统 pasteboard 清理失败或第三方 clipboard manager 留存；
 
 ## 21.7A 原生交互安全边界
 
@@ -4189,7 +4420,7 @@ no debugger permission for handoff
 - **REQ-SEC-005**：用户 lease 只能由匹配 handoffId/leaseEpoch 的验证流程释放。
 - **REQ-SEC-006**：未验证 origin 不得自动恢复 Agent。
 - **REQ-SEC-007**：安全组件默认无云遥测。
-- **REQ-SEC-008**：任何 canary occurrence > 0 都是 release fail。
+- **REQ-SEC-008**：除 `SEC-36` 明确列出的 Credential Channel 指定 enclave、用户显式粘贴期间的受控 pasteboard、Keychain 与 bound service occurrence 外，任何 canary occurrence > 0 都是 release fail；Browser SMH 仍无例外。
 - **REQ-SEC-009**：权限扩张必须有 ADR、用户提示与新 SecretLeakBench。
 
 ---
@@ -4768,7 +4999,7 @@ unavailable/insufficient/unsupported surface
 ## 27.1 默认配置
 
 ```toml
-spec_version = "0.5.0"
+spec_version = "1.0.0"
 mode = "auto"
 require_fresh_host_profile = true
 
@@ -5044,6 +5275,8 @@ contain: strict;
 同时 `tabindex=-1`、`aria-hidden=true`、零布局影响、默认关闭。Release build 的默认值必须为 `allow_runtime_overlay=false`。
 
 Human Handoff 的 Spotlight 应优先使用 Chrome 窗口、extension side panel、宿主 App surface 或浏览器 chrome，不得通过页面内 overlay 伪造登录/OTP 表单。
+
+Secure Credential Channel 的固定 macOS native prompt 是独立 App surface，不注入网页、不代替 Browser SMH，也不接受 Agent/page-defined UI。它只可在 `GATE-G15` 通过后接收 `API_KEY`。
 
 ## 28.6 Control-Critical Metadata
 
@@ -5404,6 +5637,7 @@ B2 Native + Skill Policy Only
 B3 Native + Oxrail Guard
 B4 Native + Oxrail Observation Path
 B5 Native + Oxrail Secure Micro-Handoff
+B5C Native + Oxrail Secure Credential Channel (macOS/API_KEY only)
 B6 Full Supported Oxrail
 ```
 
@@ -5772,6 +6006,10 @@ success >= Native Tuned - 2pp
 - malicious origin redirect；
 - completion detector ambiguous；
 - Handoff 后 DOM/viewport 大幅改变。
+- existing valid macOS Keychain API key reuse；
+- API key creation in the same authenticated tab → fixed native secure prompt；
+- wrong service/origin/purpose/consumer, expired grant and revoked generation；
+- credential helper/adapter crash, cancel and timeout。
 
 ## 35.2 必测要求
 
@@ -5792,6 +6030,13 @@ success >= Native Tuned - 2pp
 | `TEST-HO-013` | minimal safe re-observation + re-resolve 后才归还 Native |
 | `TEST-HO-014` | crash/timeout/cancel fail closed |
 | `TEST-HO-015` | Handoff resume 通过 `TEST-NIF-017` |
+| `TEST-HO-016` | API key 生成前后保持同一真实 tab/session/history/login state |
+| `TEST-HO-017` | 用户看到完整真实 Chrome/origin，不使用 clone、截图、裁剪或位置映射 |
+| `TEST-HO-018` | native secure prompt 完成后原 pending task 自动继续且只返回 opaque ref/status |
+| `TEST-HO-019` | 已有 Keychain credential 可无聊天、无终端秘密输入复用 |
+| `TEST-HO-020` | credential helper crash/cancel/timeout 不丢 tab、不泄漏且不错误恢复 |
+| `TEST-HO-021` | 在任何 generate/reveal 动作前取得 credential-input lease，期间全部 Agent tool/action/observation path 为 0 |
+| `TEST-HO-022` | pasteboard hygiene、Keychain commit/cancel、prompt teardown 与真实页 one-time key reveal surface 消失验证完成前不恢复 Agent |
 
 ## 35.3 指标与 Gate
 
@@ -5806,7 +6051,15 @@ chat_continue_required = 0 on supported path
 browser_reopen_required = 0
 Agent action/observation during lease = 0
 post-handoff stale target execution = 0
-secret occurrence = 0
+Browser SMH secret occurrence = 0
+Credential Channel secret occurrence outside designated enclave/Keychain/bound TLS service = 0
+same_tab_session_continuity for credential provisioning = 100%
+chat_or_terminal_secret_entry = 0
+wrong_scope_credential_use = 0
+generic_secret_export_success = 0
+credential_task_success_rate reported separately
+time_to_secure_prompt_ready P95 reported excluding user input time
+resume_after_credential_submit P95 reported separately
 ```
 
 用户实际输入时间不计入系统 latency。
@@ -5827,6 +6080,7 @@ PASSWORD_CANARY = oxrail_pw_7af91
 OTP_CANARY      = 831924
 COOKIE_CANARY   = oxrail_cookie_382k
 TOKEN_CANARY    = oxrail_token_91zz
+API_KEY_CANARY  = oxrail_api_key_6m2q
 CARD_CANARY     = 4111111111111111_fixture_only
 ```
 
@@ -5844,6 +6098,11 @@ CARD_CANARY     = 4111111111111111_fixture_only
 - exception、crash dump、diagnostics bundle；
 - source map/debug dump；
 - screenshot/frame cache（默认不存）。
+- credential helper secure-field boundary、ordinary IPC/XPC 与 Unified Log；
+- process environment/argv、shell history 与普通 local files；
+- credential adapter request construction、sanitized response/error；
+- Accessibility tree 与 pasteboard API static scan；除 enclave 内精确 compare-and-clear 外无 pasteboard 读取/导出；
+- Keychain ACL、scope metadata、expiry/revocation and cleanup（不得导出 `kSecValueData` 到 evidence）。
 
 ## 36.3 恶意页面
 
@@ -5851,15 +6110,37 @@ CARD_CANARY     = 4111111111111111_fixture_only
 
 ## 36.4 两级判定
 
-- `Oxrail-owned non-propagation`：Oxrail 自己控制的数据流 canary 必须为 0；
+- `Browser Handoff non-propagation`：Browser SMH 与普通 Oxrail 数据流 canary 必须为 0；
+- `Credential Channel confinement`：canary 只允许存在于指定 secure field/enclave、用户显式 paste 到清除确认之间的系统 pasteboard、Keychain secret value、登记 adapter 与绑定 TLS service；所有 Agent/model/Hook/普通 runtime 和导出面必须为 0；
 - `Host end-to-end non-observability`：只有 HostRealityBench 能观察并证明所有相关路径时才允许声明。
+
+Credential fixture 由目标服务验证 canary 并只返回布尔成功状态；仓库、报告和 evidence 不保存 secret 派生 hash 或导出的 Keychain value。用户主动 paste 只授权 credential enclave 在提交后比较当前 pasteboard 是否仍等于刚提交 key 并立即清空；不得通过该权限导出、记录或通用读取 clipboard。
+
+必测安全项：
+
+| Test ID | 要求 |
+|---|---|
+| `TEST-SEC-111` | model、Agent、Hook、普通 runtime、日志与 evidence 中 API key occurrence = 0 |
+| `TEST-SEC-112` | file/env/argv/stdin/stdout/stderr/shell generic export 全部不可用 |
+| `TEST-SEC-113` | 错误 service/origin/purpose/consumer、ref replay 被拒绝 |
+| `TEST-SEC-114` | grant TTL、Keychain item expiry、revocation 与 generation rotation 生效 |
+| `TEST-SEC-115` | 固定模板 provenance、Accessibility、clipboard API、adapter error 与 crash 泄漏检查通过 |
+| `TEST-SEC-116` | 错误 launcher/helper Team ID、exact CodeDirectory Hash、designated requirement，替换 binary/manifest/registry 与完整签名 registry rollback 全部拒绝 |
+| `TEST-SEC-117` | 默认 doctor 不写 Keychain/不触发 UI；显式 extended probe 使用唯一临时 item 并在成功/失败路径清理 |
+| `TEST-SEC-118` | paste 后匹配 pasteboard 在 Agent resume 前清空；清理失败或 clipboard manager 场景保持 fail-closed |
+| `TEST-SEC-119` | fixture-only profile 不能 ACTIVE；至少一个 audited real consumer 的 origin/path/method/schema/output binding 通过真实服务 probe |
 
 ## 36.5 Gate
 
 ```text
-canary occurrence in any Oxrail-owned surface = 0
+Browser SMH and ordinary Oxrail canary occurrence = 0
+Credential Channel occurrence outside designated enclave/controlled pasteboard window/Keychain/bound TLS service = 0
+credential occurrence visible/readable by model or Agent = 0
+unauthorized credential consumption or generic export = 0
 Agent browser observation during user lease = 0
 Agent browser action during user lease = 0
+Agent tool/action/observation during credential-input lease = 0
+matching pasteboard content at Agent resume = 0
 unauthorized origin resume = 0
 ```
 
@@ -5946,7 +6227,7 @@ N4 N3 + handoff resume
   "run_id": "r_...",
   "task_id": "nif-001",
   "variant": "native-plus-oxrail-pass-through",
-  "spec_version": "0.5.0",
+  "spec_version": "1.0.0",
   "work_package_ids": ["WP-NIF-002"],
   "host_profile_id": "hp_...",
   "host": {
@@ -6007,7 +6288,7 @@ N4 N3 + handoff resume
   "work_package": "WP-NIF-002",
   "status": "IN_REVIEW",
   "commit": "...",
-  "spec_version": "0.5.0",
+  "spec_version": "1.0.0",
   "host_profiles": ["hp_..."],
   "commands": ["pnpm bench:nif --profile hp_..."],
   "test_results": ["results/native-interaction.json"],
@@ -6486,6 +6767,11 @@ Kill Criteria 是强制决策，不是“值得关注”的风险描述。触发
 | `KILL-K26` | Host update 使 Profile stale，而运行仍继续用旧 enforcement claim | 立即禁用 affected mode，修复 Doctor/更新机制 |
 | `KILL-K27` | README 性能/安全数字无法从发布 evidence 重算 | 阻断发布并撤回数字 |
 | `KILL-K28` | Work Package 标 ACCEPTED 但缺少 hash、命令、环境或 reviewer | 降回 IN_REVIEW；里程碑 Gate 不计入 |
+| `KILL-K29` | API key 可被模型、Agent、Hook、普通 runtime、file/env/argv/stdio/shell 或非指定 artifact 读取 | Release fail；禁用 Credential Channel，撤销/轮换 fixture credential 并修复边界 |
+| `KILL-K30` | Agent、网页或页面内容能够构造/篡改 credential prompt、用户可见字段或可信 scope | 杀死该模板/请求路径；只保留固定签名 registry |
+| `KILL-K31` | 错误 service/origin/purpose/consumer、过期、撤销或旧 generation 的 credentialRef 仍可消费 | Release fail；撤销受影响 grants/items，Credential Channel 保持 INACTIVE |
+| `KILL-K32` | Agent 在 credential-input lease 生效前触发/观察 API key generate/reveal，lease 中任一 Agent path 可运行，或 key reveal surface 仍可见时恢复 Agent | Release fail；禁用 Credential Channel；该 Host 不得声称安全输入 |
+| `KILL-K33` | 错误 signer/designated requirement、替换或 rollback registry 被接受，或匹配 pasteboard 内容在 Agent resume 时仍存在 | Release fail；禁用 helper、撤销 grants/items，并保持 Credential Channel INACTIVE |
 
 ## 42.1 Pivot 决策
 
@@ -7022,7 +7308,8 @@ BLOCKED / REJECTED / KILLED may branch from any non-ACCEPTED state
 | [`WP-CACHE-003`](#wp-cache-003) | Recipe validation, invalidation and self-healing boundary | P0 | `PLANNED` |
 | [`WP-CACHE-004`](#wp-cache-004) | Opt-in persistent cache privacy and controls | P1 | `PLANNED` |
 | [`WP-CACHE-005`](#wp-cache-005) | Workflow-cache benchmark and go/no-go | P0 | `PLANNED` |
-| [`WP-RLS-060`](#wp-rls-060) | V0.6 Workflow Cache gate | P0 | `PLANNED` |
+| [`WP-CRED-001`](#wp-cred-001) | macOS Keychain Credential Channel vertical slice | P0 | `PLANNED` |
+| [`WP-RLS-060`](#wp-rls-060) | V0.6 Workflow Cache and macOS Credential Channel gate | P0 | `PLANNED` |
 
 ### V0.7
 
@@ -7678,7 +7965,7 @@ Test nested promise semantics, specialized bypasses, disabled hooks and managed-
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-HOST-004`, `WP-HOST-005`, `WP-HOST-006`, `WP-HOST-007` |
-| Related | `REQ-HOST-001`, `REQ-HOST-005`, `REQ-HOST-007`–`REQ-HOST-012`, `SEC-09`, `SEC-10` |
+| Related | `REQ-HOST-001`, `REQ-HOST-005`, `REQ-HOST-007`–`REQ-HOST-013`, `SEC-09`, `SEC-10` |
 
 **目标**
 
@@ -7692,10 +7979,12 @@ Generate an evidence-backed profile, present capabilities/limitations and requir
 - profile freshness/invalidator
 - acceptance record
 - setup lifecycle state and passive first-call evidence
+- HostProfile v4 external tool-registry/input-schema pins and Credential Channel fields
 
 **验收**
 
 - [ ] Profile key includes all required versions/routes.
+- [ ] Tool registry/input schema pins come from external Host probe/evidence, never self-validation.
 - [ ] Default doctor checks the complete setup matrix without issuing a real Browser action.
 - [ ] Doctor uses a harmless synthetic probe when supported; otherwise waits for passive first-call verification.
 - [ ] Passive first call records the route while preserving native input/result and side effects exactly once.
@@ -7703,6 +7992,7 @@ Generate an evidence-backed profile, present capabilities/limitations and requir
 - [ ] Mode, NIF, result contract, handoff and forbidden claims are shown.
 - [ ] Stale/drifted/untrusted profiles disable affected Oxrail capabilities but keep Native Computer Use available.
 - [ ] Safety/Handoff inactive state and reasons are always visible.
+- [ ] Credential protection is separately ACTIVE/INACTIVE with helper/template/consumer/Keychain/scope probe reasons.
 - [ ] User acceptance is not requested every task unless capability changes.
 
 **测试 / 证据**
@@ -9578,7 +9868,7 @@ Ensure page content cannot alter policy, request secrets, forge Handoff state or
 - [ ] Page instructions never modify Host Profile/permissions/lease.
 - [ ] Hidden/aria content retains data-only trust.
 - [ ] Forged Done/verified signal fails.
-- [ ] No secret prompt reaches user via Oxrail.
+- [ ] No page/Agent-defined or Browser-Handoff secret prompt reaches the user via Oxrail; only the fixed signed macOS `API_KEY` prompt governed by `REQ-CRED-*` is permitted.
 
 **测试 / 证据**
 
@@ -10008,8 +10298,8 @@ Measure first vs repeated runs and decide whether persistent caching deserves re
 
 ---
 
-<a id="wp-rls-060"></a>
-### WP-RLS-060 — V0.6 Workflow Cache gate
+<a id="wp-cred-001"></a>
+### WP-CRED-001 — macOS Keychain Credential Channel vertical slice
 <!-- wp-meta: MILESTONE=V0.6 PRIORITY=P0 STATUS=PLANNED -->
 
 | 字段 | 值 |
@@ -10017,18 +10307,77 @@ Measure first vs repeated runs and decide whether persistent caching deserves re
 | Milestone | `V0.6` |
 | Priority | `P0` |
 | Status | `PLANNED` |
-| Depends | `WP-CACHE-005`, `WP-NIF-005` |
+| Depends | `WP-RLS-050`, `WP-HOST-008`, `WP-HO-004` |
+| Related | `REQ-CRED-001`, `REQ-CRED-002`, `REQ-CRED-003`, `REQ-CRED-004`, `REQ-CRED-005`, `REQ-CRED-006`, `REQ-CRED-007`, `REQ-CRED-008`, `REQ-CRED-009`, `REQ-CRED-010`, `REQ-CRED-011`, `REQ-CRED-012`, `REQ-CRED-013`, `REQ-HOST-013`, `GATE-G15`, `SEC-20`, `SEC-21`, `SEC-35`, `SEC-36` |
+
+**目标**
+
+Prove one narrow macOS API-key path from the exact authenticated Chrome tab through a fixed native secure prompt and Keychain to one registered in-enclave fixture adapter, without exposing plaintext to the Agent/model.
+
+**产物**
+
+- signed macOS native credential helper with one fixed `API_KEY` template
+- Keychain save/reuse/revoke path
+- scoped opaque credentialRef protocol
+- one registered in-enclave HTTPS fixture adapter
+- at least one independently audited registered real-service consumer
+- release-pinned independent launcher/helper signing requirements, sealed registry manifest and launcher-owned rollback floor
+- credential-input lease and pasteboard hygiene path
+- HostProfile v4 and doctor capability evidence
+
+**验收**
+
+- [ ] API key creation retains the exact `tabId`/session/history/login state and full Chrome origin UI.
+- [ ] Credential-input lease is active before any generate/reveal action and blocks every Agent tool/action/observation path until safe resume.
+- [ ] The one-time key reveal surface in the real tab is closed/obscured and verified without reading its value before Agent resume.
+- [ ] Agent/page cannot define or alter secure prompt fields, labels, instructions or scope.
+- [ ] Only opaque credentialRef/status reaches Agent/model/Hook; no reveal/export API exists.
+- [ ] service/origin/purpose/consumer/TTL/generation/revocation bindings reject every mismatch and replay.
+- [ ] File/env/argv/stdin/stdout/stderr/shell and arbitrary executable/CLI injection are unavailable.
+- [ ] macOS rejects wrong launcher/helper Team ID, exact CodeDirectory Hash or designated requirement, binary/registry replacement and full signed-bundle rollback.
+- [ ] Matching pasteboard content is cleared before resume; cleanup failure remains fail-closed and third-party clipboard managers are explicitly unsupported.
+- [ ] Existing Keychain item reuse, user revoke/delete, expiry and helper/registry rotation work.
+- [ ] Default doctor is read-only; explicit extended probe cleans its unique temporary Keychain item on success and failure.
+- [ ] Fixture-only capability is marked experimental/inactive; one audited real consumer passes its bound live-service probe before public activation.
+- [ ] Doctor reports Credential protection `ACTIVE` only after `GATE-G15` and current evidence pass; every other state is explicit `INACTIVE`.
+- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`119` pass with sanitized evidence.
+
+**测试 / 证据**
+
+- HandoffBench Credential Channel subset
+- SecretLeakBench Credential Channel subset
+- HostProfile v4 contract and doctor probes
+- Full BENCH-NIF handoff subset
+
+**阻断 / Kill**
+
+- `KILL-K29`/`KILL-K30`/`KILL-K31` on any leak, untrusted UI or scope escape.
+- Password/OTP popup、Private key、Windows、任意 CLI、普通 env/file 注入与第三方 clipboard manager 支持不在首版范围；需要时另开 WP 与安全 Gate。
+
+---
+
+<a id="wp-rls-060"></a>
+### WP-RLS-060 — V0.6 Workflow Cache and macOS Credential Channel gate
+<!-- wp-meta: MILESTONE=V0.6 PRIORITY=P0 STATUS=PLANNED -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V0.6` |
+| Priority | `P0` |
+| Status | `PLANNED` |
+| Depends | `WP-CACHE-005`, `WP-CRED-001`, `WP-NIF-005` |
 | Related | `SEC-39`, `SEC-40` |
 
 **目标**
 
-Release only semantic, validated caching that preserves Native execution and privacy.
+Release only semantic, validated caching and a scoped macOS Credential Channel that preserve Native execution and privacy.
 
 **产物**
 
 - V0.6 report
 - cache scope/controls
 - evidence-backed claim
+- credential capability table and sanitized G15 evidence
 
 **验收**
 
@@ -10036,16 +10385,20 @@ Release only semantic, validated caching that preserves Native execution and pri
 - [ ] Persistent mode remains opt-in.
 - [ ] No coordinate/input replay.
 - [ ] NIF/Secret pass.
+- [ ] Credential Channel is macOS-only, API_KEY-only and passes `GATE-G15`; Windows remains `UNSUPPORTED`.
+- [ ] Public Credential capability includes an audited real-service consumer; fixture-only builds remain `EXPERIMENTAL/INACTIVE`.
+- [ ] Any unavailable or stale credential prerequisite displays `INACTIVE` without affecting Native Chrome.
 
 **测试 / 证据**
 
 - Cache benchmark
 - BENCH-NIF
 - SecretLeakBench
+- HandoffBench Credential Channel subset
 
 **阻断 / Kill**
 
-- Can release V0.6 without persistent cache if no-go ADR says so.
+- Can release V0.6 without persistent cache if no-go ADR says so; cannot advertise Credential Channel unless `WP-CRED-001` is ACCEPTED.
 
 ---
 
@@ -11223,7 +11576,7 @@ blocked_by: []
 
 一个里程碑只有其 `WP-RLS-*` 进入 `ACCEPTED` 才完成。某个功能 WP 完成但 release WP 未接受，不得发布该里程碑版本号。
 
-本总账共定义 **98 个工作包**。
+本总账共定义 **99 个工作包**。
 
 ---
 
@@ -11285,7 +11638,7 @@ Agent 默认使用以下顺序：
 
 ```json
 {
-  "spec_version": "0.5.0",
+  "spec_version": "1.0.0",
   "sections": {"SEC-28": {"anchor": "sec-28", "keywords": []}},
   "requirements": {"REQ-NIF-010": {"section": "SEC-28", "work_packages": ["WP-NIF-005"], "tests": ["BENCH-NIF"]}},
   "work_packages": {"WP-HO-007": {"anchor": "wp-ho-007", "depends": [], "status": "PLANNED"}},
@@ -11368,10 +11721,33 @@ no install/setup path auto-trusts Hooks or uses a trust bypass
 default doctor emits no real Browser action
 passive first-call verification preserves native input/result
 BYPASSED and Safety/Handoff INACTIVE states are explicit
+Credential protection ACTIVE/INACTIVE is explicit and independent
+HostProfile tool schema pins come from external probe/evidence, never self-validation
+credential helper trust anchors in macOS signature verification and sealed registry manifest, not HostProfile alone
+credentialTrustRootDigest is literal in the actual host-reviewed Hook definition and its trust binding is probed
+credential-input lease begins before any API-key generate/reveal action and blocks every Agent path
+matching pasteboard content is cleared before Agent resume; third-party clipboard managers are unsupported
+default doctor is credential-read-only; extended Keychain probe is explicit and cleanup-audited
+fixture-only credential adapters never activate or imply a public capability
+no generic file/env/argv/stdin/stdout/shell secret export exists
 NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.0 — 2026-09-04
+
+- 将首要支持范围收窄为 macOS + 用户真实 Chrome；Windows Secure Credential Channel 延后并默认 `UNSUPPORTED`；
+- 保留 Browser Secure Micro-Handoff 的同一真实 tab、独占 lease、非敏感验证和自动恢复合同，不允许 clone、截图、裁剪或位置映射替代真实页面；
+- 新增正交 macOS Secure Credential Channel，首版仅支持 `API_KEY`：固定签名 native template、Keychain、opaque credentialRef 和 enclave 内登记 adapter；
+- 明确 native credential helper 属于 Oxrail TCB；`REQ-SEC-001` 标记 `DEPRECATED`，用限定的 credential-enclave/Keychain/bound-service confinement 取代不真实的全面 zero-occurrence 声明；
+- 明文禁止进入普通 file/env/argv/stdin/stdout/stderr/shell/Hook/IPC/log/trace/diagnostic/crash，不支持任意 CLI 或 Agent 自定义 UI；
+- 在网页生成/显示 API key 前取得覆盖全部 Agent tool/action/observation path 的 credential-input lease；用户粘贴后须在恢复 Agent 前完成受限 pasteboard 清理并确认真实页 reveal surface 已消失；
+- 用 release-pinned 独立 launcher/helper Team ID、bundle、exact CodeDirectory Hash、designated requirement、sealed registry manifest 与 launcher-owned Keychain rollback floor 建立信任根；默认 doctor 保持只读，Keychain round-trip 改为显式 extended probe；
+- 明确 HostProfile/schema 不可自证 Credential `ACTIVE`；release trust-root digest 必须进入宿主实际审阅的 Hook definition，并由独立 macOS verifier 与 Host probe 实时验证；
+- fixture-only adapter 保持 `EXPERIMENTAL/INACTIVE`；公开能力至少需要一个独立审计并通过真实服务 probe 的 registered consumer；
+- Host Profile 升到 schema v4，新增 Credential Channel capability、独立 `ACTIVE/INACTIVE`、doctor probes，以及来自外部 Host probe/evidence 的 tool registry/input schema pins；
+- 新增 `REQ-CRED-001`–`013`、`REQ-HOST-013`、`GATE-G15`、`KILL-K29`–`33`、`TEST-HO-016`–`022`、`TEST-SEC-111`–`119` 与 V0.6 `WP-CRED-001`。
 
 ### v0.5.0 — 2026-09-04
 
