@@ -12389,6 +12389,21 @@ var CredentialPublicResultSchema = external_exports.union([
     ])
   })
 ]);
+var credentialKeychainProbeBase = {
+  schemaVersion: external_exports.literal(1),
+  probe: external_exports.literal("KEYCHAIN_ROUND_TRIP")
+};
+var CredentialKeychainProbeResultSchema = external_exports.union([
+  external_exports.strictObject({
+    ...credentialKeychainProbeBase,
+    status: external_exports.enum(["PASSED", "FAILED", "USAGE"])
+  }),
+  external_exports.strictObject({
+    ...credentialKeychainProbeBase,
+    status: external_exports.literal("CLEANUP_FAILED"),
+    probeId: external_exports.string().regex(/^[a-f0-9]{32}$/)
+  })
+]);
 var UnsupportedCredentialChannelSchema = external_exports.strictObject({
   activation: external_exports.literal("INACTIVE"),
   inactiveReasons: external_exports.array(nonEmpty).min(1),

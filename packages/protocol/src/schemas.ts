@@ -296,6 +296,27 @@ export type CredentialPublicResult = z.infer<
   typeof CredentialPublicResultSchema
 >;
 
+const credentialKeychainProbeBase = {
+  schemaVersion: z.literal(1),
+  probe: z.literal("KEYCHAIN_ROUND_TRIP"),
+};
+
+/** Secret-free output from the explicit, fixture-only macOS extended probe. */
+export const CredentialKeychainProbeResultSchema = z.union([
+  z.strictObject({
+    ...credentialKeychainProbeBase,
+    status: z.enum(["PASSED", "FAILED", "USAGE"]),
+  }),
+  z.strictObject({
+    ...credentialKeychainProbeBase,
+    status: z.literal("CLEANUP_FAILED"),
+    probeId: z.string().regex(/^[a-f0-9]{32}$/),
+  }),
+]);
+export type CredentialKeychainProbeResult = z.infer<
+  typeof CredentialKeychainProbeResultSchema
+>;
+
 const UnsupportedCredentialChannelSchema = z.strictObject({
   activation: z.literal("INACTIVE"),
   inactiveReasons: z.array(nonEmpty).min(1),
@@ -1446,6 +1467,7 @@ export const ProtocolSchemas = {
   "action-envelope": ActionEnvelopeSchema,
   "action-digest": ActionDigestSchema,
   "credential-enclave-ticket": CredentialEnclaveTicketSchema,
+  "credential-keychain-probe-result": CredentialKeychainProbeResultSchema,
   "credential-provision-intent": CredentialProvisionIntentSchema,
   "credential-public-result": CredentialPublicResultSchema,
   "credential-use-registry-entry": CredentialUseRegistryEntrySchema,

@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.5
+# Oxrail — 唯一实现规范（SPEC）v1.0.6
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.5
+  spec_version: 1.0.6
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -4262,6 +4262,8 @@ missing/expired/revoked item
 - fixture consumer 只用于安全验收；公开 capability 至少包含一个签名 registry 中的独立审计真实 consumer。每个 consumer 固定 TLS origin/path/method、credential placement、非敏感参数 schema 与输出白名单，不存在通用 HTTP、shell 或 reveal 通道。
 
 Agent-visible provisioning intent 唯一允许的结构是严格的 `{ schemaVersion: 1, credentialUseId }`；页面没有直接调用权限，任何受页面内容影响而附加的字段也必须拒绝。`credentialUseId` 只能命中一次 sealed allowlist。template、service、provisioning origin、purpose、consumer、TTL、generation 与 registry Hash 全部由可信 registry 和当前 USER Handoff scope 派生，不能由 Agent 覆盖。Core 在 native verifier 可用前只能生成显式 `FIXTURE_ONLY_NON_AUTHORIZING` 的无秘密 ticket；该 ticket 不得启动 helper、授权 Keychain 或令 Credential protection 进入 `ACTIVE`。模型可见结果只允许固定 `READY/STORED/CANCELLED/ERROR` 状态、opaque `credentialRef` 与固定 error code，不允许自由文本错误、Keychain persistent ref 或任何 value/export 字段。
+
+macOS Keychain extended synthetic probe 必须由用户显式调用且不接受任何外部 secret 或动态输入；probe value 与唯一 item locator 由进程内 `SecRandomCopyBytes` 生成，只在同一 native 进程内执行 add/read/compare/delete。stdout 只允许带 schema version、固定 probe 名和固定状态枚举的单行 JSON；仅清理失败可附加非敏感随机 `probeId`，不得输出 OS error、value、persistent ref 或自由文本。该 probe 是 `FIXTURE_ONLY` 的存储/清理诊断，不验证 prompt、scope consumer、same-tab、全 Agent lease、签名或 G15，也不得单独令 Credential protection `ACTIVE`；默认 doctor 不执行它。
 
 普通环境变量或用户私有文件不构成安全通道：Agent 可以读取文件、执行 `env/printenv`、令子进程继承并输出值，且这些值可能进入 shell history、错误、诊断或 crash artifact。类似环境变量的易用性只能由 opaque `credentialRef` 提供，明文不得进入 Agent 可读取的命名空间。
 
@@ -11769,6 +11771,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.6 — 2026-09-04
+
+- 新增显式 opt-in、无外部输入的 macOS Keychain extended synthetic probe 合同：进程内随机值仅执行 add/read/compare/delete；
+- probe 输出限制为固定版本/名称/状态 JSON，只有清理失败附非敏感随机 locator，禁止 value、persistent ref、OS error 与自由文本；
+- 明确该 fixture probe 默认不由 doctor 执行，且不能证明 G15 或激活 Credential capability。
 
 ### v1.0.5 — 2026-09-04
 

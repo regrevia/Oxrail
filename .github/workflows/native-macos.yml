@@ -1,0 +1,53 @@
+name: Native macOS fixture probe
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - native/macos/**
+      - .github/workflows/native-macos.yml
+  pull_request:
+    paths:
+      - native/macos/**
+      - .github/workflows/native-macos.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keychain-round-trip:
+    runs-on: macos-14
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: native/macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: swift test
+      - run: swift build -c release
+      - name: Require explicit opt-in
+        run: |
+          if output="$(.build/release/oxrail-keychain-probe)"; then
+            exit 1
+          else
+            status=$?
+          fi
+          test "$status" -eq 64
+          test "$output" = '{"schemaVersion":1,"probe":"KEYCHAIN_ROUND_TRIP","status":"USAGE"}'
+      - name: Run isolated round trip twice
+        run: |
+          run_probe() {
+            if output="$(.build/release/oxrail-keychain-probe --extended-keychain-probe)"; then
+              status=0
+            else
+              status=$?
+            fi
+            printf '%s\n' "$output"
+            test "$status" -eq 0
+            test "$output" = '{"schemaVersion":1,"probe":"KEYCHAIN_ROUND_TRIP","status":"PASSED"}'
+          }
+          run_probe
+          run_probe
