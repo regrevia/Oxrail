@@ -13,6 +13,7 @@ import {
   actionIdentity,
   createActionDigest,
 } from "./policy.js";
+import { persistentToolUseId } from "./safe-state.js";
 
 export class StateVersionConflictError extends Error {
   constructor(expected: number, actual: number) {
@@ -60,6 +61,53 @@ export function stateFingerprintDigest(fingerprint: StateFingerprint): string {
     "oxrail-state-fingerprint-v1",
     fingerprint,
   );
+}
+
+export function stageToolDecision(
+  state: BrowserTaskState,
+  action: ActionEnvelope,
+  decision: PolicyDecision,
+): BrowserTaskState {
+  const toolUseId = persistentToolUseId(action.toolUseId);
+  const executed =
+    decision.disposition === "PASS_THROUGH_ORIGINAL" ||
+    decision.disposition === "SEMANTIC_HINT_ONLY";
+  const pendingNativeActionIds = [
+    ...new Set(state.pendingNativeActionIds.map(persistentToolUseId)),
+  ];
+  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
+    pendingNativeActionIds.push(toolUseId);
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    lastAction: {
+      ...createActionDigest(action, decision),
+      toolUseId,
+    },
+    pendingNativeActionIds,
+    stateVersion: state.stateVersion + 1,
+  });
+}
+
+export function completePendingTool(
+  state: BrowserTaskState,
+  toolUseId: string,
+): BrowserTaskState {
+  const persistentId = persistentToolUseId(toolUseId);
+  if (
+    !state.pendingNativeActionIds.some(
+      (pendingId) => persistentToolUseId(pendingId) === persistentId,
+    )
+  ) {
+    return state;
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    pendingNativeActionIds: state.pendingNativeActionIds
+      .map(persistentToolUseId)
+      .filter((pendingId) => pendingId !== persistentId),
+    stateVersion: state.stateVersion + 1,
+  });
 }
 
 export interface ActionOutcome {

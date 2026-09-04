@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   activateUserLease,
   beginResume,
+  completePendingTool,
   createActionDigest,
   createBrowserTaskState,
   evaluateAction,
   finishResume,
   recordActionOutcome,
+  stageToolDecision,
   stateFingerprintDigest,
   StateVersionConflictError,
 } from "../packages/core/src/index.js";
@@ -46,6 +48,122 @@ function state() {
 }
 
 describe("v0.1 core policy", () => {
+  it("stages an executed tool decision without retaining opaque ids or changing progress", () => {
+    const before = {
+      ...state(),
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      recoveryTransitions: 4,
+    };
+    const toolAction = action({
+      toolUseId: "raw-call-secret",
+      target: { ...action().target!, text: "sensitive fixture value" },
+    });
+    const decision = evaluateAction({ action: toolAction, state: before });
+
+    const staged = stageToolDecision(before, toolAction, decision);
+
+    expect(staged).toMatchObject({
+      lastAction: {
+        toolUseId:
+          "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
+        decision: "ALLOW",
+      },
+      pendingNativeActionIds: [
+        "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
+      ],
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      recoveryTransitions: 4,
+      stateVersion: 1,
+    });
+    expect(JSON.stringify(staged)).not.toContain("raw-call-secret");
+    expect(JSON.stringify(staged)).not.toContain("sensitive fixture value");
+  });
+
+  it("normalizes and deduplicates pending tool ids when staging repeats", () => {
+    const before = {
+      ...state(),
+      pendingNativeActionIds: ["raw-call-secret"],
+      stateVersion: 5,
+    };
+    const toolAction = action({ toolUseId: "raw-call-secret" });
+    const decision = evaluateAction({ action: toolAction, state: before });
+
+    const staged = stageToolDecision(before, toolAction, decision);
+    const repeated = stageToolDecision(staged, toolAction, decision);
+
+    expect(staged.pendingNativeActionIds).toEqual([
+      "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
+    ]);
+    expect(repeated.pendingNativeActionIds).toEqual(
+      staged.pendingNativeActionIds,
+    );
+    expect(repeated.stateVersion).toBe(7);
+  });
+
+  it("records denied decisions without adding a pending tool", () => {
+    const before = { ...state(), noProgressCount: 2, recoveryLevel: 3 };
+    const toolAction = action({ toolUseId: "denied-call" });
+    const decision = {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+      recoverable: true,
+    } as const;
+
+    const staged = stageToolDecision(before, toolAction, decision);
+
+    expect(staged).toMatchObject({
+      lastAction: { decision: "DENY" },
+      pendingNativeActionIds: [],
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      stateVersion: 1,
+    });
+    expect(JSON.stringify(staged)).not.toContain("denied-call");
+  });
+
+  it("stages a semantic hint as a pending native action", () => {
+    const toolAction = action({ toolUseId: "hint-call" });
+    const staged = stageToolDecision(state(), toolAction, {
+      disposition: "SEMANTIC_HINT_ONLY",
+      reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+      recoverable: true,
+    });
+
+    expect(staged).toMatchObject({
+      lastAction: { decision: "REWRITE" },
+      pendingNativeActionIds: [
+        expect.stringMatching(/^oxrail-id:[a-f0-9]{64}$/),
+      ],
+      noProgressCount: 0,
+      stateVersion: 1,
+    });
+    expect(JSON.stringify(staged)).not.toContain("hint-call");
+  });
+
+  it("completes only a matching pending tool without treating it as progress", () => {
+    const toolAction = action({ toolUseId: "raw-call-secret" });
+    const before = { ...state(), noProgressCount: 2, recoveryLevel: 3 };
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      evaluateAction({ action: toolAction, state: before }),
+    );
+
+    const completed = completePendingTool(staged, "raw-call-secret");
+    const missing = completePendingTool(completed, "unknown-call");
+
+    expect(completed).toMatchObject({
+      lastAction: staged.lastAction,
+      pendingNativeActionIds: [],
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      stateVersion: 2,
+    });
+    expect(missing).toBe(completed);
+  });
+
   it("passes ordinary actions through unchanged and blocks the third proven no-progress attempt", () => {
     const firstAction = action();
     const firstDecision = evaluateAction({
