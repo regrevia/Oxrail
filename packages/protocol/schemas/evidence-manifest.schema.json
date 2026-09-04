@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accepted_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+          "type": "string"
+        },
+        { "type": "null" }
+      ]
+    },
+    "blockers": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "commands": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "commit": { "minLength": 1, "type": "string" },
+    "dependency_manifests": {
+      "default": [],
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "path": { "minLength": 1, "type": "string" },
+          "work_package": {
+            "minLength": 1,
+            "pattern": "^WP-[A-Z0-9]+-\\d{3}$",
+            "type": "string"
+          }
+        },
+        "required": ["work_package", "path"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "environment": {
+      "additionalProperties": { "minLength": 1, "type": "string" },
+      "propertyNames": { "minLength": 1, "type": "string" },
+      "type": "object"
+    },
+    "experiment_protocol": {
+      "additionalProperties": false,
+      "properties": {
+        "coordinator_result_sharing": {
+          "const": "NONE_BEFORE_PAIR_COMPLETE",
+          "type": "string"
+        },
+        "runner_isolation": {
+          "const": "ISOLATED_SUBAGENT_PER_ARM",
+          "type": "string"
+        }
+      },
+      "required": ["runner_isolation", "coordinator_result_sharing"],
+      "type": "object"
+    },
+    "host_profiles": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "reviewers": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "schema_hashes": {
+      "additionalProperties": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+      "propertyNames": { "minLength": 1, "type": "string" },
+      "type": "object"
+    },
+    "sha256_manifest": {
+      "anyOf": [
+        { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "spec_version": { "const": "0.5.0", "type": "string" },
+    "status": {
+      "enum": [
+        "PLANNED",
+        "READY",
+        "IN_PROGRESS",
+        "IN_REVIEW",
+        "ACCEPTED",
+        "BLOCKED",
+        "REJECTED",
+        "KILLED"
+      ],
+      "type": "string"
+    },
+    "test_results": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "work_package": {
+      "minLength": 1,
+      "pattern": "^WP-[A-Z0-9]+-\\d{3}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_package",
+    "status",
+    "commit",
+    "spec_version",
+    "environment",
+    "schema_hashes",
+    "host_profiles",
+    "commands",
+    "test_results",
+    "reviewers",
+    "sha256_manifest",
+    "accepted_at",
+    "blockers",
+    "dependency_manifests"
+  ],
+  "type": "object"
+}

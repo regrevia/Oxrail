@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chromeComputerUseDetectable": {
+      "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+      "type": "string"
+    },
+    "firstBrowserHookSeen": { "type": "boolean" },
+    "handoffCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "conversationContextPreserved": { "type": "boolean" },
+        "lease": {
+          "enum": ["EXCLUSIVE_USER_LEASE", "BEST_EFFORT_LOCK", "NONE"],
+          "type": "string"
+        },
+        "originalPlacementRestorable": { "type": "boolean" },
+        "resume": {
+          "enum": [
+            "AUTO_VERIFIED",
+            "ONE_CLICK_VERIFIED",
+            "CHAT_MESSAGE_REQUIRED",
+            "NONE"
+          ],
+          "type": "string"
+        },
+        "sameTabBinding": { "type": "boolean" },
+        "surface": {
+          "enum": [
+            "DETACHED_REAL_TAB_WINDOW",
+            "FOCUSED_REAL_TAB",
+            "HOST_NATIVE_SAME_SESSION_VIEW",
+            "NOTICE_ONLY",
+            "NONE"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "lease",
+        "resume",
+        "conversationContextPreserved",
+        "sameTabBinding",
+        "originalPlacementRestorable"
+      ],
+      "type": "object"
+    },
+    "handoffProtectionActive": { "type": "boolean" },
+    "hooksRegistered": { "type": "boolean" },
+    "hooksTrusted": { "type": "boolean" },
+    "matcherProfileValid": { "type": "boolean" },
+    "optimization": { "enum": ["ACTIVE", "BYPASSED"], "type": "string" },
+    "pluginInstalled": { "type": "boolean" },
+    "postToolUseAvailable": {
+      "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+      "type": "string"
+    },
+    "preToolUseAvailable": {
+      "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+      "type": "string"
+    },
+    "resultingMode": {
+      "enum": [
+        "FULL_INTERPOSE",
+        "MICRO_ACTION_GUARD",
+        "TRANSACTION_GUARD",
+        "ADVISORY_ONLY",
+        "UNSUPPORTED"
+      ],
+      "type": "string"
+    },
+    "safetyProtectionActive": { "type": "boolean" },
+    "schemaVersion": { "const": 1, "type": "number" },
+    "skillAvailable": { "type": "boolean" },
+    "stage": {
+      "enum": ["INSTALLED", "CONFIGURED", "VERIFIED"],
+      "type": "string"
+    },
+    "syntheticProbeUsed": { "type": "boolean" },
+    "verificationSource": {
+      "enum": ["synthetic-probe", "passive-first-browser-call", "none"],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "stage",
+    "pluginInstalled",
+    "skillAvailable",
+    "hooksRegistered",
+    "hooksTrusted",
+    "preToolUseAvailable",
+    "postToolUseAvailable",
+    "chromeComputerUseDetectable",
+    "matcherProfileValid",
+    "handoffCapability",
+    "syntheticProbeUsed",
+    "firstBrowserHookSeen",
+    "verificationSource",
+    "optimization",
+    "safetyProtectionActive",
+    "handoffProtectionActive",
+    "resultingMode"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actionType": { "minLength": 1, "type": "string" },
+    "granularity": {
+      "enum": ["MICRO_ACTION", "TRANSACTION", "SCRIPT_WRAPPER", "NONE"],
+      "type": "string"
+    },
+    "impact": {
+      "enum": ["read", "reversible", "high-impact"],
+      "type": "string"
+    },
+    "inputDigest": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "origin": { "minLength": 1, "type": "string" },
+    "revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "route": {
+      "enum": [
+        "direct-mcp",
+        "code-mode-nested-mcp",
+        "outer-transaction",
+        "script-wrapper",
+        "local-function",
+        "specialized",
+        "opaque"
+      ],
+      "type": "string"
+    },
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "bbox": {
+          "additionalProperties": false,
+          "properties": {
+            "height": { "minimum": 0, "type": "number" },
+            "width": { "minimum": 0, "type": "number" },
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          },
+          "required": ["x", "y", "width", "height"],
+          "type": "object"
+        },
+        "confidence": { "maximum": 1, "minimum": 0, "type": "number" },
+        "documentBinding": { "minLength": 1, "type": "string" },
+        "fingerprint": { "minLength": 1, "type": "string" },
+        "label": { "minLength": 1, "type": "string" },
+        "name": { "minLength": 1, "type": "string" },
+        "regionPath": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "risk": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "role": { "minLength": 1, "type": "string" },
+        "semanticRef": { "minLength": 1, "type": "string" },
+        "source": {
+          "enum": [
+            "SITE_TOOL_WEBMCP",
+            "NATIVE_STRUCTURED",
+            "NATIVE_READONLY_DEVTOOLS",
+            "READONLY_COMPANION",
+            "NATIVE_VISUAL",
+            "NONE"
+          ],
+          "type": "string"
+        },
+        "sourceRevision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": { "minLength": 1, "type": "string" }
+      },
+      "required": ["source", "sourceRevision", "confidence", "risk"],
+      "type": "object"
+    },
+    "toolUseId": { "minLength": 1, "type": "string" }
+  },
+  "required": ["toolUseId", "route", "granularity", "actionType", "impact"],
+  "type": "object"
+}

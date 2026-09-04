@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "activeHandoffId": { "minLength": 1, "type": "string" },
+    "authState": {
+      "enum": [
+        "UNKNOWN",
+        "AUTHENTICATED",
+        "UNAUTHENTICATED",
+        "CHALLENGE",
+        "MANUAL_BOUNDARY"
+      ],
+      "type": "string"
+    },
+    "currentOrigin": { "minLength": 1, "type": "string" },
+    "currentUrlKey": { "minLength": 1, "type": "string" },
+    "documentBinding": { "minLength": 1, "type": "string" },
+    "goalSummary": { "maxLength": 500, "type": "string" },
+    "hostProfileId": { "minLength": 1, "type": "string" },
+    "hostProfileStatus": {
+      "enum": ["VALID", "STALE", "DRIFTED", "UNSUPPORTED"],
+      "type": "string"
+    },
+    "lastAction": {
+      "additionalProperties": false,
+      "properties": {
+        "actionType": { "minLength": 1, "type": "string" },
+        "decision": {
+          "enum": ["ALLOW", "DENY", "REWRITE", "REQUERY", "HANDOFF"],
+          "type": "string"
+        },
+        "granularity": {
+          "enum": ["MICRO_ACTION", "TRANSACTION", "SCRIPT_WRAPPER", "NONE"],
+          "type": "string"
+        },
+        "inputSignature": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "reasonCode": {
+          "enum": [
+            "OXRAIL_HOST_ROUTE_UNPROVEN",
+            "OXRAIL_HOST_PROFILE_STALE",
+            "OXRAIL_REDUNDANT_ACTION",
+            "OXRAIL_STALE_TARGET",
+            "OXRAIL_NO_PROGRESS",
+            "OXRAIL_OBSERVATION_BUDGET",
+            "OXRAIL_HUMAN_BOUNDARY",
+            "OXRAIL_USER_LEASE_ACTIVE",
+            "OXRAIL_UNSAFE_ORIGIN",
+            "OXRAIL_VERIFICATION_INCONCLUSIVE",
+            "OXRAIL_RECOVERY_EXHAUSTED",
+            "OXRAIL_NATIVE_FIDELITY_FAILED",
+            "OXRAIL_CONTROL_CRITICAL_UNKNOWN",
+            "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+            "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"
+          ],
+          "type": "string"
+        },
+        "route": {
+          "enum": [
+            "direct-mcp",
+            "code-mode-nested-mcp",
+            "outer-transaction",
+            "script-wrapper",
+            "local-function",
+            "specialized",
+            "opaque"
+          ],
+          "type": "string"
+        },
+        "sourceRevision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "targetSignature": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "timestamp": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "toolUseId": { "minLength": 1, "type": "string" }
+      },
+      "required": [
+        "toolUseId",
+        "route",
+        "granularity",
+        "actionType",
+        "decision",
+        "reasonCode",
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "lastObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "actionableHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "blockerType": { "minLength": 1, "type": "string" },
+        "controlCriticalFieldsRetained": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "documentBinding": { "minLength": 1, "type": "string" },
+        "omittedFields": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "payloadTokenEstimate": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "relevantRegionHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "revision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "screenshotFrameCorrelationId": { "minLength": 1, "type": "string" },
+        "source": {
+          "enum": [
+            "SITE_TOOL_WEBMCP",
+            "NATIVE_STRUCTURED",
+            "NATIVE_READONLY_DEVTOOLS",
+            "READONLY_COMPANION",
+            "NATIVE_VISUAL",
+            "NONE"
+          ],
+          "type": "string"
+        },
+        "stateHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "tier": {
+          "enum": ["O0", "O1", "O2", "O3", "O4", "O5"],
+          "type": "string"
+        },
+        "urlKey": { "minLength": 1, "type": "string" },
+        "viewportBinding": { "minLength": 1, "type": "string" }
+      },
+      "required": ["source", "tier", "stateHash", "revision"],
+      "type": "object"
+    },
+    "leaseEpoch": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mode": {
+      "enum": [
+        "FULL_INTERPOSE",
+        "MICRO_ACTION_GUARD",
+        "TRANSACTION_GUARD",
+        "ADVISORY_ONLY",
+        "UNSUPPORTED"
+      ],
+      "type": "string"
+    },
+    "noProgressCount": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pendingNativeActionIds": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "phase": {
+      "enum": [
+        "RUNNING",
+        "RECOVERING",
+        "HANDOFF_PREPARING",
+        "USER_LEASE_ACTIVE",
+        "HANDOFF_VERIFYING",
+        "RESTORING_TAB",
+        "RESUMING",
+        "DONE",
+        "FAILED",
+        "CANCELLED"
+      ],
+      "type": "string"
+    },
+    "pointerOwner": { "enum": ["NATIVE", "HUMAN", "NONE"], "type": "string" },
+    "recoveryLevel": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "recoveryTransitions": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schemaVersion": { "const": 3, "type": "number" },
+    "sessionId": { "minLength": 1, "type": "string" },
+    "stateVersion": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "targetCacheEpoch": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "taskId": { "minLength": 1, "type": "string" },
+    "turnId": { "minLength": 1, "type": "string" }
+  },
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "taskId",
+    "goalSummary",
+    "hostProfileId",
+    "hostProfileStatus",
+    "mode",
+    "phase",
+    "revision",
+    "noProgressCount",
+    "recoveryLevel",
+    "recoveryTransitions",
+    "authState",
+    "leaseEpoch",
+    "pointerOwner",
+    "targetCacheEpoch",
+    "pendingNativeActionIds",
+    "stateVersion"
+  ],
+  "type": "object"
+}

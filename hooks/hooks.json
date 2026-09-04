@@ -1,0 +1,71 @@
+{
+  "description": "Oxrail native-preserving lifecycle hooks. Review and trust these hooks in the host UI before use.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "timeout": 3,
+            "statusMessage": "Checking Oxrail configuration"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "timeout": 3,
+            "statusMessage": "Observing the Oxrail browser path"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/post-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\post-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "timeout": 3,
+            "statusMessage": "Observing the Oxrail browser result"
+          }
+        ]
+      }
+    ]
+  }
+}

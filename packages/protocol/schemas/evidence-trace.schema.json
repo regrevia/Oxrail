@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_hashes": {
+      "additionalProperties": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+      "propertyNames": { "minLength": 1, "type": "string" },
+      "type": "object"
+    },
+    "capabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "action_control": {
+          "enum": ["MICRO_ACTION", "TRANSACTION", "SCRIPT_WRAPPER", "NONE"],
+          "type": "string"
+        },
+        "control_critical_contract_id": { "minLength": 1, "type": "string" },
+        "handoff": { "minLength": 1, "type": "string" },
+        "interaction_fidelity": {
+          "enum": ["PROVEN_PASS_THROUGH", "PARTIAL", "FAILED", "UNKNOWN"],
+          "type": "string"
+        },
+        "result_control": {
+          "enum": [
+            "NATIVE_TYPED_REWRITE",
+            "HOOK_FEEDBACK_SUBSTITUTION",
+            "NATIVE_TRUNCATION_ONLY",
+            "OBSERVE_ONLY",
+            "NONE"
+          ],
+          "type": "string"
+        },
+        "tool_route": { "minLength": 1, "type": "string" }
+      },
+      "required": [
+        "tool_route",
+        "action_control",
+        "result_control",
+        "interaction_fidelity",
+        "control_critical_contract_id",
+        "handoff"
+      ],
+      "type": "object"
+    },
+    "context_isolation_id": {
+      "description": "Salted SHA-256 digest of the isolated runner's parent Hook session_id",
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "control_hash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "host": {
+      "additionalProperties": false,
+      "properties": {
+        "browser_path": { "minLength": 1, "type": "string" },
+        "browser_version": { "minLength": 1, "type": "string" },
+        "build": { "minLength": 1, "type": "string" },
+        "computer_use_plugin": { "minLength": 1, "type": "string" },
+        "os": { "minLength": 1, "type": "string" },
+        "surface": { "minLength": 1, "type": "string" }
+      },
+      "required": [
+        "surface",
+        "build",
+        "computer_use_plugin",
+        "browser_path",
+        "browser_version",
+        "os"
+      ],
+      "type": "object"
+    },
+    "host_profile_id": { "minLength": 1, "type": "string" },
+    "metrics": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_actions_during_user_lease": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "agent_observations_during_user_lease": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "browser_invocations": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "browser_observation_payload_tokens": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deny_side_effect_failures": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ms": { "minimum": 0, "type": "number" },
+        "focus_interference": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hook_overhead_ms": { "minimum": 0, "type": "number" },
+        "incorrect_normal_blocks": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "known_supported_path_hook_bypasses": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "native_primitive_parity": { "type": "boolean" },
+        "oxrail_context_tokens": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "oxrail_generated_page_write_events": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pointer_interference": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "post_handoff_stale_target_executions": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "redundant_actions": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scroll_interference": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secret_exposure": { "const": false, "type": "boolean" },
+        "secret_occurrences": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "success": { "type": "boolean" },
+        "token_measurement_source": {
+          "enum": ["HOST_EXACT", "PAYLOAD_ONLY", "UNAVAILABLE"],
+          "type": "string"
+        },
+        "total_model_input_tokens": {
+          "anyOf": [
+            { "maximum": 9007199254740991, "minimum": 0, "type": "integer" },
+            { "type": "null" }
+          ]
+        },
+        "total_model_output_tokens": {
+          "anyOf": [
+            { "maximum": 9007199254740991, "minimum": 0, "type": "integer" },
+            { "type": "null" }
+          ]
+        },
+        "unapproved_high_impact_actions": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "success",
+        "duration_ms",
+        "browser_invocations",
+        "redundant_actions",
+        "browser_observation_payload_tokens",
+        "oxrail_context_tokens",
+        "total_model_input_tokens",
+        "total_model_output_tokens",
+        "token_measurement_source",
+        "native_primitive_parity",
+        "pointer_interference",
+        "focus_interference",
+        "scroll_interference",
+        "incorrect_normal_blocks",
+        "oxrail_generated_page_write_events",
+        "post_handoff_stale_target_executions",
+        "known_supported_path_hook_bypasses",
+        "deny_side_effect_failures",
+        "unapproved_high_impact_actions",
+        "agent_actions_during_user_lease",
+        "agent_observations_during_user_lease",
+        "secret_occurrences",
+        "hook_overhead_ms",
+        "secret_exposure"
+      ],
+      "type": "object"
+    },
+    "model_id": { "minLength": 1, "type": "string" },
+    "model_settings_hash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "pair_id": { "minLength": 1, "type": "string" },
+    "run_id": { "minLength": 1, "type": "string" },
+    "run_index": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "runner_id": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "schema_version": { "const": 4, "type": "number" },
+    "seed": { "minLength": 1, "type": "string" },
+    "spec_version": { "const": "0.5.0", "type": "string" },
+    "suite": {
+      "enum": [
+        "HOST_REALITY",
+        "NATIVE_INTERACTION",
+        "OXRAIL",
+        "STALL",
+        "SECRET_LEAK"
+      ],
+      "type": "string"
+    },
+    "task_id": { "minLength": 1, "type": "string" },
+    "test_id": { "minLength": 1, "type": "string" },
+    "variant": { "enum": ["NATIVE_TUNED", "OXRAIL_GUARD"], "type": "string" },
+    "work_package_ids": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "task_id",
+    "suite",
+    "test_id",
+    "model_id",
+    "variant",
+    "pair_id",
+    "run_index",
+    "seed",
+    "control_hash",
+    "model_settings_hash",
+    "context_isolation_id",
+    "runner_id",
+    "spec_version",
+    "work_package_ids",
+    "host_profile_id",
+    "host",
+    "capabilities",
+    "metrics",
+    "artifact_hashes"
+  ],
+  "type": "object"
+}

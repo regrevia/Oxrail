@@ -1,0 +1,8 @@
+/dist/
+/docs/generated/
+/evidence/
+/icon/
+/spec/
+LICENSE
+SPEC.md
+pnpm-lock.yaml

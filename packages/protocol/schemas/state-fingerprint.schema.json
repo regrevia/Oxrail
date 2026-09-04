@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actionableHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "blockerHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "dialogHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "goalSignalHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "originKey": { "minLength": 1, "type": "string" },
+    "relevantRegionHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "routeKey": { "minLength": 1, "type": "string" },
+    "taskPhase": { "minLength": 1, "type": "string" }
+  },
+  "required": ["originKey", "revision"],
+  "type": "object"
+}

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Oxrail Native Interaction Fixture</title>
+    <style>
+      :root {
+        font:
+          16px/1.4 system-ui,
+          sans-serif;
+        color-scheme: light;
+      }
+      body {
+        margin: 24px;
+        max-width: 900px;
+      }
+      main {
+        display: grid;
+        gap: 16px;
+      }
+      section {
+        border: 1px solid #bbb;
+        padding: 12px;
+      }
+      button,
+      input,
+      select {
+        margin: 4px;
+      }
+      #hover-menu {
+        display: none;
+      }
+      #hover-zone:hover #hover-menu {
+        display: block;
+      }
+      #vscroll {
+        height: 90px;
+        overflow-y: scroll;
+      }
+      #vscroll > div {
+        height: 500px;
+        padding-top: 430px;
+      }
+      #hscroll {
+        overflow-x: scroll;
+        white-space: nowrap;
+        width: 260px;
+      }
+      #hscroll > div {
+        width: 900px;
+      }
+      #drag-source,
+      #drop-target {
+        display: inline-grid;
+        margin: 4px;
+        min-height: 50px;
+        min-width: 120px;
+        place-items: center;
+      }
+      #drag-source {
+        background: #dceeff;
+      }
+      #drop-target {
+        border: 2px dashed #555;
+      }
+      canvas {
+        border: 1px solid #333;
+      }
+      dialog {
+        min-width: 240px;
+      }
+      .offscreen-end {
+        margin-left: 820px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Native Interaction Fixture</h1>
+    <p>
+      Controlled, local, non-secret fixture. It does not represent a real
+      HostRealityBench run.
+    </p>
+    <main>
+      <section>
+        <button id="click">Click</button><output id="click-count">0</output>
+        <button id="double">Double click</button
+        ><output id="double-count">0</output>
+        <button id="no-progress">No progress</button
+        ><output id="no-progress-attempts">0</output
+        ><output id="no-progress-state">unchanged</output>
+        <div id="hover-zone" tabindex="0">
+          Hover zone <button id="hover-menu">Menu item</button>
+        </div>
+      </section>
+
+      <section>
+        <div id="vscroll">
+          <div><span id="v-end">vertical end</span></div>
+        </div>
+        <div id="hscroll">
+          <div>
+            <span class="offscreen-end" id="h-end">horizontal end</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <label
+          >Slider <input id="slider" type="range" min="0" max="100" value="10"
+        /></label>
+        <output id="slider-value">10</output>
+        <div id="drag-source" draggable="true">drag source</div>
+        <div id="drop-target">drop target</div>
+      </section>
+
+      <section>
+        <label>Typing <input id="typing" autocomplete="off" /></label>
+        <output id="typed"></output>
+        <button id="shortcut">Focus then Ctrl+S</button
+        ><output id="shortcut-state">idle</output>
+        <button id="focus-a">Focus A</button
+        ><button id="focus-b">Focus B</button>
+        <select id="select">
+          <option value="a">Alpha</option>
+          <option value="b">Beta</option>
+        </select>
+        <output id="selected">a</output>
+      </section>
+
+      <section>
+        <iframe
+          id="frame"
+          title="fixture frame"
+          srcdoc="<!doctype html><button id='frame-button'>Frame click</button><output id='frame-output'>0</output><script>document.querySelector('#frame-button').onclick=()=>document.querySelector('#frame-output').value=String(Number(document.querySelector('#frame-output').value||0)+1)</script>"
+        ></iframe>
+        <canvas
+          id="canvas"
+          width="240"
+          height="100"
+          aria-label="two visual targets"
+        ></canvas>
+        <output id="canvas-zone">none</output>
+      </section>
+
+      <section>
+        <div id="rerender">
+          <button id="rerender-button" data-generation="1">
+            Rerender generation 1
+          </button>
+        </div>
+        <output id="rerender-generation">1</output>
+        <a id="new-tab" href="/?tab=child" target="_blank" rel="opener"
+          >Open controlled tab</a
+        >
+        <button id="open-modal">Open modal</button>
+        <dialog id="modal">
+          <p>Native modal</p>
+          <button id="close-modal">Close</button>
+        </dialog>
+      </section>
+
+      <section>
+        <button id="takeover">Human takeover</button
+        ><button id="resume">Resume agent</button>
+        <output id="lease">agent</output
+        ><output id="target-generation">1</output>
+        <button id="frame-feedback">Next frame</button
+        ><output id="frame-id">frame-1</output>
+        <output id="dpr"></output>
+        <output id="reset-receipt"></output>
+      </section>
+    </main>
+
+    <script>
+      const byId = (id) => document.getElementById(id);
+      const state = {
+        events: [],
+        disposition: "PASS_THROUGH",
+        reasonCode: "NORMAL_ACTION",
+        frame: 1,
+      };
+      const safeTarget = (target) =>
+        target instanceof Element
+          ? target.id || target.tagName.toLowerCase()
+          : "document";
+      const record = (event) =>
+        state.events.push({
+          type: event.type,
+          target: safeTarget(event.target),
+          key: event.key || undefined,
+          button: "button" in event ? event.button : undefined,
+        });
+      for (const type of [
+        "pointerdown",
+        "pointerup",
+        "click",
+        "dblclick",
+        "mouseover",
+        "keydown",
+        "keyup",
+        "focusin",
+        "dragstart",
+        "drop",
+        "input",
+        "change",
+        "scroll",
+      ]) {
+        document.addEventListener(type, record, true);
+      }
+
+      byId("click").addEventListener(
+        "click",
+        () =>
+          (byId("click-count").value = String(
+            Number(byId("click-count").value || 0) + 1,
+          )),
+      );
+      byId("double").addEventListener(
+        "dblclick",
+        () =>
+          (byId("double-count").value = String(
+            Number(byId("double-count").value || 0) + 1,
+          )),
+      );
+      byId("no-progress").addEventListener("click", () => {
+        byId("no-progress-attempts").value = String(
+          Number(byId("no-progress-attempts").value || 0) + 1,
+        );
+      });
+      byId("slider").addEventListener(
+        "input",
+        (event) => (byId("slider-value").value = event.target.value),
+      );
+      byId("drag-source").addEventListener("dragstart", (event) =>
+        event.dataTransfer.setData("text/plain", "controlled-token"),
+      );
+      byId("drop-target").addEventListener("dragover", (event) =>
+        event.preventDefault(),
+      );
+      byId("drop-target").addEventListener("drop", (event) => {
+        event.preventDefault();
+        byId("drop-target").textContent =
+          event.dataTransfer.getData("text/plain") === "controlled-token"
+            ? "dropped"
+            : "rejected";
+      });
+      byId("typing").addEventListener(
+        "input",
+        (event) => (byId("typed").value = event.target.value),
+      );
+      byId("shortcut").addEventListener("keydown", (event) => {
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key.toLowerCase() === "s"
+        ) {
+          event.preventDefault();
+          byId("shortcut-state").value = "saved";
+        }
+      });
+      byId("select").addEventListener(
+        "change",
+        (event) => (byId("selected").value = event.target.value),
+      );
+
+      const canvas = byId("canvas");
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#2774d8";
+      context.fillRect(0, 0, 120, 100);
+      context.fillStyle = "#e09a24";
+      context.fillRect(120, 0, 120, 100);
+      canvas.addEventListener("click", (event) => {
+        const bounds = canvas.getBoundingClientRect();
+        byId("canvas-zone").value =
+          event.clientX - bounds.left < bounds.width / 2 ? "left" : "right";
+      });
+
+      byId("rerender").addEventListener("click", (event) => {
+        const generation = Number(event.target.dataset.generation || 1) + 1;
+        byId("rerender").innerHTML =
+          `<button id="rerender-button" data-generation="${generation}">Rerender generation ${generation}</button>`;
+        byId("rerender-generation").value = String(generation);
+      });
+      byId("open-modal").addEventListener("click", () =>
+        byId("modal").showModal(),
+      );
+      byId("close-modal").addEventListener("click", () =>
+        byId("modal").close(),
+      );
+      byId("takeover").addEventListener("click", () => {
+        byId("lease").value = "human";
+        byId("target-generation").value = String(
+          Number(byId("target-generation").value || 1) + 1,
+        );
+      });
+      byId("resume").addEventListener(
+        "click",
+        () => (byId("lease").value = "agent"),
+      );
+      byId("frame-feedback").addEventListener("click", () => {
+        state.frame += 1;
+        byId("frame-id").value = `frame-${state.frame}`;
+      });
+      byId("dpr").value = String(window.devicePixelRatio);
+      const resetReceiptId = new URL(location.href).searchParams.get("reset");
+      if (resetReceiptId && /^[a-f0-9]{64}$/.test(resetReceiptId)) {
+        byId("reset-receipt").value = resetReceiptId;
+      }
+
+      const eventCount = (type, target) =>
+        state.events.filter(
+          (event) =>
+            event.type === type && (!target || event.target === target),
+        ).length;
+      const visibleWithin = (containerId, targetId) => {
+        const container = byId(containerId).getBoundingClientRect();
+        const target = byId(targetId).getBoundingClientRect();
+        return (
+          target.left >= container.left &&
+          target.right <= container.right &&
+          target.top >= container.top &&
+          target.bottom <= container.bottom
+        );
+      };
+
+      window.fixture = {
+        state,
+        snapshot() {
+          const frameOutput =
+            byId("frame").contentDocument?.getElementById("frame-output");
+          return {
+            activeElement: safeTarget(document.activeElement),
+            disposition: state.disposition,
+            events: structuredClone(state.events),
+            frameId: byId("frame-id").value,
+            horizontalScroll: byId("hscroll").scrollLeft,
+            lease: byId("lease").value,
+            postconditions: {
+              click_count: Number(byId("click-count").value || 0),
+              click_target_clicks: eventCount("click", "click"),
+              dragstart_events: eventCount("dragstart", "drag-source"),
+              drop_events: eventCount("drop", "drop-target"),
+              drop_state: byId("drop-target").textContent.trim(),
+              frame_click_count: Number(frameOutput?.value || 0),
+              horizontal_end_visible: visibleWithin("hscroll", "h-end"),
+              horizontal_scroll: byId("hscroll").scrollLeft,
+              no_progress_attempts: Number(
+                byId("no-progress-attempts").value || 0,
+              ),
+              no_progress_state: byId("no-progress-state").value,
+              no_progress_target_clicks: eventCount("click", "no-progress"),
+              rerender_generation: Number(
+                byId("rerender-generation").value || 1,
+              ),
+              rerender_target_clicks: eventCount("click", "rerender-button"),
+              typed_length: byId("typing").value.length,
+              typed_matches_fixture_token: byId("typing").value === "rail-42",
+              typing_input_events: eventCount("input", "typing"),
+              vertical_end_visible: visibleWithin("vscroll", "v-end"),
+              vertical_scroll: byId("vscroll").scrollTop,
+            },
+            resetReceiptId: byId("reset-receipt").value,
+            verticalScroll: byId("vscroll").scrollTop,
+          };
+        },
+      };
+    </script>
+  </body>
+</html>

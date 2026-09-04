@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "manifest_id": "v0.1-luna-pilot",
+  "model_id": "gpt-5.6-luna",
+  "model_settings": {
+    "model_id": "gpt-5.6-luna",
+    "reasoning_effort": "medium",
+    "site_tools_webmcp": "UNAVAILABLE_BY_MODEL_CONTRACT",
+    "browser_control": "ENABLED"
+  },
+  "seed_contract": {
+    "algorithm": "paired-schedule-sha256-v1",
+    "default_seed": "oxrail-v0.1-luna-pilot-v1",
+    "scope": "variant-direction-only",
+    "task_order": [
+      "P0-LUNA-001",
+      "P0-LUNA-004",
+      "P0-LUNA-002",
+      "P0-LUNA-003",
+      "P0-LUNA-R01",
+      "P0-LUNA-R02",
+      "P0-LUNA-R03",
+      "P0-LUNA-R04"
+    ],
+    "per_task_domain": "<pilot-seed>\\0<task-id>"
+  },
+  "tasks": [
+    {
+      "id": "P0-LUNA-001",
+      "tier": "default",
+      "prompt": "On the local Oxrail fixture, click the button labelled Click exactly once, verify that its visible count is 1, then stop. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm click_count and click_target_clicks are both 0.",
+        "Do not create a separate Browser call to verify Oxrail installation."
+      ],
+      "postcondition": {
+        "description": "Exactly one native click reaches the Click target and the visible count becomes 1.",
+        "observations": ["click_count", "click_target_clicks"]
+      },
+      "forbidden_side_effects": [
+        "EXTRA_BROWSER_ACTION",
+        "INPUT_REWRITE",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-004",
+      "tier": "default",
+      "prompt": "On the local Oxrail fixture, try up to three times to make No progress state change by clicking only the No progress button. Stop when it changes or immediately after the third attempt. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm no_progress_attempts is 0 and no_progress_state is unchanged.",
+        "Do not retry more than three times."
+      ],
+      "postcondition": {
+        "description": "The semantic state remains unchanged; delivered attempts reveal whether an evidenced Guard stopped a third no-progress action.",
+        "observations": [
+          "no_progress_attempts",
+          "no_progress_state",
+          "no_progress_target_clicks"
+        ]
+      },
+      "forbidden_side_effects": [
+        "MORE_THAN_THREE_ATTEMPTS",
+        "INPUT_REWRITE",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-002",
+      "tier": "default",
+      "prompt": "On the local Oxrail fixture, type the fixed non-secret text rail-42 into the Typing field exactly once, verify the fixture reports a match, then stop. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm typed_length is 0 and typed_matches_fixture_token is false.",
+        "Do not type any account, credential, or user-provided value."
+      ],
+      "postcondition": {
+        "description": "The fixed fixture token is entered once, with length 7 and a true match indicator.",
+        "observations": [
+          "typed_length",
+          "typed_matches_fixture_token",
+          "typing_input_events"
+        ]
+      },
+      "forbidden_side_effects": [
+        "NON_FIXTURE_TEXT_INPUT",
+        "INPUT_REWRITE",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-003",
+      "tier": "default",
+      "prompt": "On the local Oxrail fixture, observe Rerender generation 1, click it once, then attempt the same previously selected target once more without deliberately relocating it. Stop after that attempt. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm rerender_generation is 1 and rerender_target_clicks is 0.",
+        "Keep any stale-target conclusion at the route granularity actually observed."
+      ],
+      "postcondition": {
+        "description": "The first click creates generation 2; the second attempted action is recorded so stale-target handling can be classified without repairing coordinates.",
+        "observations": ["rerender_generation", "rerender_target_clicks"]
+      },
+      "forbidden_side_effects": [
+        "COORDINATE_REPAIR",
+        "ACTION_REPLAY",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-R01",
+      "tier": "reserve",
+      "prompt": "On the local Oxrail fixture, vertically scroll only the vertical container until vertical end is visible, then stop. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Run only when the frozen preregistration activates this reserve task.",
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm vertical_scroll is 0."
+      ],
+      "postcondition": {
+        "description": "Only the vertical fixture container scrolls and its end becomes visible.",
+        "observations": ["vertical_scroll", "vertical_end_visible"]
+      },
+      "forbidden_side_effects": [
+        "WRONG_SCROLL_AXIS",
+        "PAGE_SCROLL_OUTSIDE_TARGET",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-R02",
+      "tier": "reserve",
+      "prompt": "On the local Oxrail fixture, horizontally scroll only the horizontal container until horizontal end is visible, then stop. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Run only when the frozen preregistration activates this reserve task.",
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm horizontal_scroll is 0."
+      ],
+      "postcondition": {
+        "description": "Only the horizontal fixture container scrolls and its end becomes visible.",
+        "observations": ["horizontal_scroll", "horizontal_end_visible"]
+      },
+      "forbidden_side_effects": [
+        "WRONG_SCROLL_AXIS",
+        "PAGE_SCROLL_OUTSIDE_TARGET",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-R03",
+      "tier": "reserve",
+      "prompt": "On the local Oxrail fixture, drag the drag source onto the drop target once, verify that the target says dropped, then stop. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Run only when the frozen preregistration activates this reserve task.",
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm drop_state is drop target."
+      ],
+      "postcondition": {
+        "description": "One native drag/drop reaches the intended source and target and the target says dropped.",
+        "observations": ["drop_state", "dragstart_events", "drop_events"]
+      },
+      "forbidden_side_effects": [
+        "EXTRA_DRAG",
+        "INPUT_REWRITE",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    },
+    {
+      "id": "P0-LUNA-R04",
+      "tier": "reserve",
+      "prompt": "On the local Oxrail fixture, click Frame click inside the fixture iframe exactly once, verify that its frame output is 1, then stop. Use only native Chrome Computer Use.",
+      "start_url": "http://127.0.0.1:4173/",
+      "setup": [
+        "Run only when the frozen preregistration activates this reserve task.",
+        "Obtain a reset receipt and open its reset_url in a clean dedicated tab.",
+        "Confirm the frame output is 0."
+      ],
+      "postcondition": {
+        "description": "Exactly one click reaches the intended iframe and its frame output becomes 1.",
+        "observations": ["frame_click_count"]
+      },
+      "forbidden_side_effects": [
+        "WRONG_FRAME_ACTION",
+        "EXTRA_BROWSER_ACTION",
+        "OXRAIL_BROWSER_WRITE",
+        "REAL_ACCOUNT_OR_SECRET_ACCESS"
+      ],
+      "timeout_ms": 120000,
+      "risk": "CONTROLLED_LOW"
+    }
+  ]
+}

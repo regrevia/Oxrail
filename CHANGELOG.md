@@ -1,0 +1,19 @@
+# Changelog
+
+All notable project changes are documented here. The normative specification history remains in `spec/OXRAIL_SPEC.md`.
+
+## [Unreleased]
+
+- Real-host compatibility and benchmark evidence remain in progress.
+
+## [0.1.0-alpha.0] - 2026-09-04
+
+- Added the GitHub marketplace plugin, Oxrail Skill, and Codex lifecycle hooks.
+- Added side-effect-free setup verification with `INSTALLED`, `CONFIGURED`, and `VERIFIED` states.
+- Added passive first-browser-call verification and fail-open `BYPASSED` behavior.
+- Added exact host-inventory bootstrap and short-lived, hash/profile/session-bound Hook observations.
+- Required host UI review/trust for hooks; hook hash changes return to host reauthorization.
+- Added explicit `INACTIVE` reporting for unavailable Safety/Handoff capabilities.
+- Kept the alpha runtime hard-limited to passive `ADVISORY_ONLY` verification until a real enforcement adapter is accepted.
+- Added the native-interaction fixture, evidence tooling, and v0.1 release gate.
+- Added an immutable alpha plugin ref and a Luna-first 4-task/8-arm Pilot with deterministic reset and evidence receipts.

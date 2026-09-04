@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "contractId": { "minLength": 1, "type": "string" },
+    "hostProfileId": { "minLength": 1, "type": "string" },
+    "matrixHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "originalResultTiming": {
+      "enum": ["PRE_MODEL_PROVEN", "UNKNOWN"],
+      "type": "string"
+    },
+    "resultMedia": {
+      "enum": ["text", "structured", "image", "error", "attachment"],
+      "type": "string"
+    },
+    "rules": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "conditions": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array"
+          },
+          "criticality": {
+            "enum": ["REQUIRED", "CONDITIONAL", "OPTIMIZABLE", "UNKNOWN"],
+            "type": "string"
+          },
+          "evidenceIds": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array"
+          },
+          "fieldPath": { "minLength": 1, "type": "string" },
+          "hostProfileId": { "minLength": 1, "type": "string" },
+          "nextPrimitivesTested": {
+            "items": {
+              "enum": [
+                "move_click",
+                "double_click",
+                "hover",
+                "scroll_vertical",
+                "scroll_horizontal",
+                "drag_slider",
+                "drag_drop",
+                "typing",
+                "keyboard_shortcut",
+                "focus_switch",
+                "dropdown_combobox",
+                "iframe",
+                "canvas_target",
+                "rerender_after_click",
+                "new_tab",
+                "modal",
+                "handoff_resume"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rationale": { "minLength": 1, "type": "string" }
+        },
+        "required": [
+          "fieldPath",
+          "criticality",
+          "nextPrimitivesTested",
+          "hostProfileId",
+          "evidenceIds",
+          "rationale"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "verdict": { "enum": ["PASS", "FAIL", "INCOMPLETE"], "type": "string" }
+  },
+  "required": [
+    "contractId",
+    "hostProfileId",
+    "resultMedia",
+    "rules",
+    "originalResultTiming",
+    "verdict",
+    "matrixHash"
+  ],
+  "type": "object"
+}

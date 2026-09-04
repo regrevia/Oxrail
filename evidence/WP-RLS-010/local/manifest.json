@@ -1,0 +1,29 @@
+{
+  "work_package": "WP-RLS-010",
+  "status": "BLOCKED",
+  "commit": "WORKTREE",
+  "spec_version": "0.5.0",
+  "environment": {},
+  "schema_hashes": {},
+  "host_profiles": [],
+  "commands": [
+    "pnpm check",
+    "pnpm test:fixture",
+    "pnpm release:gate"
+  ],
+  "test_results": [],
+  "reviewers": [],
+  "sha256_manifest": null,
+  "accepted_at": null,
+  "dependency_manifests": [],
+  "experiment_protocol": {
+    "runner_isolation": "ISOLATED_SUBAGENT_PER_ARM",
+    "coordinator_result_sharing": "NONE_BEFORE_PAIR_COMPLETE"
+  },
+  "blockers": [
+    "WP-HOST-003: no real ChatGPT Desktop Chrome Computer Use route is available in this Linux development host",
+    "WP-NIF-002/WP-NIF-005: fixture self-tests do not prove Native Computer Use semantic parity",
+    "WP-RLS-010: HostRealityBench, full BENCH-NIF, OxrailBench, and StallBench release samples are not yet accepted",
+    "v0.1-alpha passive-only runtime; real Guard/Handoff adapter not connected/accepted"
+  ]
+}

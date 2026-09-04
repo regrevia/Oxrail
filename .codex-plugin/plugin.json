@@ -1,0 +1,31 @@
+{
+  "name": "oxrail",
+  "version": "0.1.0-alpha.0",
+  "description": "Gate-first guidance and lifecycle hooks for native Computer Use.",
+  "author": {
+    "name": "regrevia",
+    "url": "https://github.com/regrevia"
+  },
+  "homepage": "https://github.com/regrevia/Oxrail",
+  "repository": "https://github.com/regrevia/Oxrail",
+  "license": "Apache-2.0",
+  "keywords": ["computer-use", "browser", "guardrails", "hooks"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Oxrail",
+    "shortDescription": "A short leash for native Computer Use",
+    "longDescription": "Verify the native browser Hook path while keeping unimplemented Guard and Handoff capabilities explicitly inactive.",
+    "developerName": "regrevia",
+    "category": "Productivity",
+    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "websiteURL": "https://github.com/regrevia/Oxrail",
+    "defaultPrompt": [
+      "Use Oxrail for this browser task.",
+      "Check the active Oxrail mode before browsing.",
+      "Run Oxrail setup verification."
+    ],
+    "brandColor": "#111111",
+    "composerIcon": "./icon/oxrail.png",
+    "logo": "./icon/oxrail.png"
+  }
+}

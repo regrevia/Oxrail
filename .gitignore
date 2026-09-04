@@ -1,0 +1,17 @@
+node_modules/
+coverage/
+playwright-report/
+test-results/
+.oxrail/
+*.tmp
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Host evidence is local until sanitized and explicitly selected for commit.
+evidence/**/raw/
+benchmarks/results/local/

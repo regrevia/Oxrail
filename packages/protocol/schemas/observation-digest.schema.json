@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actionableHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "blockerType": { "minLength": 1, "type": "string" },
+    "controlCriticalFieldsRetained": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "documentBinding": { "minLength": 1, "type": "string" },
+    "omittedFields": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "payloadTokenEstimate": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "relevantRegionHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "screenshotFrameCorrelationId": { "minLength": 1, "type": "string" },
+    "source": {
+      "enum": [
+        "SITE_TOOL_WEBMCP",
+        "NATIVE_STRUCTURED",
+        "NATIVE_READONLY_DEVTOOLS",
+        "READONLY_COMPANION",
+        "NATIVE_VISUAL",
+        "NONE"
+      ],
+      "type": "string"
+    },
+    "stateHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+    "tier": { "enum": ["O0", "O1", "O2", "O3", "O4", "O5"], "type": "string" },
+    "urlKey": { "minLength": 1, "type": "string" },
+    "viewportBinding": { "minLength": 1, "type": "string" }
+  },
+  "required": ["source", "tier", "stateHash", "revision"],
+  "type": "object"
+}

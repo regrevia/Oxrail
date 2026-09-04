@@ -1,0 +1,715 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "enum": ["MICRO_ACTION", "TRANSACTION", "SCRIPT_WRAPPER", "NONE"],
+          "type": "string"
+        },
+        "denyPreventedSideEffect": {
+          "anyOf": [
+            { "type": "boolean" },
+            { "const": "unknown", "type": "string" }
+          ]
+        },
+        "preToolCoverage": {
+          "additionalProperties": false,
+          "properties": {
+            "bypassCases": {
+              "items": { "minLength": 1, "type": "string" },
+              "type": "array"
+            },
+            "confidence": {
+              "enum": ["PROVEN", "PARTIAL", "UNKNOWN"],
+              "type": "string"
+            },
+            "expected": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": ["observed", "expected", "bypassCases", "confidence"],
+          "type": "object"
+        },
+        "rewriteFidelity": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        }
+      },
+      "required": [
+        "control",
+        "preToolCoverage",
+        "denyPreventedSideEffect",
+        "rewriteFidelity"
+      ],
+      "type": "object"
+    },
+    "derived": {
+      "additionalProperties": false,
+      "properties": {
+        "allowedClaims": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "forbiddenClaims": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "handoff": { "enum": ["ACTIVE", "INACTIVE"], "type": "string" },
+        "mode": {
+          "enum": [
+            "FULL_INTERPOSE",
+            "MICRO_ACTION_GUARD",
+            "TRANSACTION_GUARD",
+            "ADVISORY_ONLY",
+            "UNSUPPORTED"
+          ],
+          "type": "string"
+        },
+        "safety": { "enum": ["ACTIVE", "INACTIVE"], "type": "string" }
+      },
+      "required": [
+        "mode",
+        "safety",
+        "handoff",
+        "allowedClaims",
+        "forbiddenClaims"
+      ],
+      "type": "object"
+    },
+    "evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "fixtureRevision": { "minLength": 1, "type": "string" },
+        "probeSuiteVersion": { "minLength": 1, "type": "string" },
+        "testedAt": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+          "type": "string"
+        },
+        "traceManifestHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "unresolved": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "validUntilHostChange": { "type": "boolean" }
+      },
+      "required": [
+        "probeSuiteVersion",
+        "fixtureRevision",
+        "traceManifestHash",
+        "testedAt",
+        "validUntilHostChange",
+        "unresolved"
+      ],
+      "type": "object"
+    },
+    "handoff": {
+      "additionalProperties": false,
+      "properties": {
+        "activation": { "enum": ["ACTIVE", "INACTIVE"], "type": "string" },
+        "automaticToolOrEventResume": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "capability": {
+          "additionalProperties": false,
+          "properties": {
+            "conversationContextPreserved": { "type": "boolean" },
+            "lease": {
+              "enum": ["EXCLUSIVE_USER_LEASE", "BEST_EFFORT_LOCK", "NONE"],
+              "type": "string"
+            },
+            "originalPlacementRestorable": { "type": "boolean" },
+            "resume": {
+              "enum": [
+                "AUTO_VERIFIED",
+                "ONE_CLICK_VERIFIED",
+                "CHAT_MESSAGE_REQUIRED",
+                "NONE"
+              ],
+              "type": "string"
+            },
+            "sameTabBinding": { "type": "boolean" },
+            "surface": {
+              "enum": [
+                "DETACHED_REAL_TAB_WINDOW",
+                "FOCUSED_REAL_TAB",
+                "HOST_NATIVE_SAME_SESSION_VIEW",
+                "NOTICE_ONLY",
+                "NONE"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "surface",
+            "lease",
+            "resume",
+            "conversationContextPreserved",
+            "sameTabBinding",
+            "originalPlacementRestorable"
+          ],
+          "type": "object"
+        },
+        "chatMessageRequired": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "conversationContinuity": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "detachRealTabWindow": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "exclusiveBrowserLease": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "focusExistingTab": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "inactiveReasons": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "noAgentObservationDuringLease": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "nonSecretCompletionDetector": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "oneClickFallback": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "originAndStateVerification": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "restoreOriginalWindowIndex": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "restorePinnedAndGroupState": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "sameTabBinding": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation",
+        "inactiveReasons",
+        "capability",
+        "conversationContinuity",
+        "sameTabBinding",
+        "detachRealTabWindow",
+        "focusExistingTab",
+        "exclusiveBrowserLease",
+        "noAgentObservationDuringLease",
+        "nonSecretCompletionDetector",
+        "originAndStateVerification",
+        "restoreOriginalWindowIndex",
+        "restorePinnedAndGroupState",
+        "automaticToolOrEventResume",
+        "oneClickFallback",
+        "chatMessageRequired"
+      ],
+      "type": "object"
+    },
+    "hooks": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrentConflictProbe": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "definitionHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "policy": {
+          "enum": [
+            "plugin",
+            "user",
+            "project",
+            "managed-only",
+            "disabled",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "trustState": {
+          "enum": [
+            "active",
+            "review-required",
+            "skipped",
+            "disabled",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy",
+        "trustState",
+        "definitionHash",
+        "concurrentConflictProbe"
+      ],
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": false,
+      "properties": {
+        "browserPath": {
+          "enum": [
+            "chrome-extension",
+            "built-in-browser",
+            "other-browser-extension",
+            "none"
+          ],
+          "type": "string"
+        },
+        "codexVersion": { "minLength": 1, "type": "string" },
+        "computerUsePluginVersion": { "minLength": 1, "type": "string" },
+        "hostBuild": { "minLength": 1, "type": "string" },
+        "os": {
+          "enum": ["macos", "windows", "linux", "unknown"],
+          "type": "string"
+        },
+        "surface": {
+          "enum": [
+            "chatgpt-chat",
+            "chatgpt-work",
+            "codex-desktop",
+            "codex-cli"
+          ],
+          "type": "string"
+        }
+      },
+      "required": ["surface", "hostBuild", "browserPath", "os"],
+      "type": "object"
+    },
+    "nativeCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "nativeApprovalFlow": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "outputTokenLimit": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "readOnlyDeveloperTools": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "structuredObservation": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "webMcp": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        }
+      },
+      "required": [
+        "outputTokenLimit",
+        "webMcp",
+        "structuredObservation",
+        "readOnlyDeveloperTools",
+        "nativeApprovalFlow"
+      ],
+      "type": "object"
+    },
+    "nativeInteraction": {
+      "additionalProperties": false,
+      "properties": {
+        "cursorVisualization": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "fidelity": {
+          "enum": ["PROVEN_PASS_THROUGH", "PARTIAL", "FAILED", "UNKNOWN"],
+          "type": "string"
+        },
+        "incorrectNormalActionBlocks": {
+          "anyOf": [
+            { "minimum": 0, "type": "number" },
+            { "const": "unknown", "type": "string" }
+          ]
+        },
+        "overlayPolicy": {
+          "enum": ["NONE", "DEBUG_NONINTERACTIVE", "UNSAFE", "unknown"],
+          "type": "string"
+        },
+        "passThroughFingerprint": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "pointerOwnerInRunning": {
+          "anyOf": [
+            { "const": "NATIVE", "type": "string" },
+            { "const": "unknown", "type": "string" }
+          ]
+        },
+        "primitiveParity": {
+          "additionalProperties": {
+            "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+            "type": "string"
+          },
+          "propertyNames": {
+            "enum": [
+              "move_click",
+              "double_click",
+              "hover",
+              "scroll_vertical",
+              "scroll_horizontal",
+              "drag_slider",
+              "drag_drop",
+              "typing",
+              "keyboard_shortcut",
+              "focus_switch",
+              "dropdown_combobox",
+              "iframe",
+              "canvas_target",
+              "rerender_after_click",
+              "new_tab",
+              "modal",
+              "handoff_resume"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "screenshotFrameFeedback": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "unexpectedFocusInterference": {
+          "anyOf": [
+            { "minimum": 0, "type": "number" },
+            { "const": "unknown", "type": "string" }
+          ]
+        },
+        "unexpectedPointerInterference": {
+          "anyOf": [
+            { "minimum": 0, "type": "number" },
+            { "const": "unknown", "type": "string" }
+          ]
+        },
+        "unexpectedScrollInterference": {
+          "anyOf": [
+            { "minimum": 0, "type": "number" },
+            { "const": "unknown", "type": "string" }
+          ]
+        },
+        "viewportCoordinateMapping": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        }
+      },
+      "required": [
+        "fidelity",
+        "pointerOwnerInRunning",
+        "passThroughFingerprint",
+        "primitiveParity",
+        "cursorVisualization",
+        "viewportCoordinateMapping",
+        "screenshotFrameFeedback",
+        "unexpectedPointerInterference",
+        "unexpectedFocusInterference",
+        "unexpectedScrollInterference",
+        "incorrectNormalActionBlocks",
+        "overlayPolicy"
+      ],
+      "type": "object"
+    },
+    "profileId": { "minLength": 1, "type": "string" },
+    "result": {
+      "additionalProperties": false,
+      "properties": {
+        "codeModePromiseSemantics": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "control": {
+          "enum": [
+            "NATIVE_TYPED_REWRITE",
+            "HOOK_FEEDBACK_SUBSTITUTION",
+            "NATIVE_TRUNCATION_ONLY",
+            "OBSERVE_ONLY",
+            "NONE"
+          ],
+          "type": "string"
+        },
+        "controlCriticalContract": {
+          "additionalProperties": false,
+          "properties": {
+            "conditionalFields": {
+              "items": { "minLength": 1, "type": "string" },
+              "type": "array"
+            },
+            "matrixHash": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+            "requiredFields": {
+              "items": { "minLength": 1, "type": "string" },
+              "type": "array"
+            },
+            "status": {
+              "enum": ["passed", "failed", "unknown"],
+              "type": "string"
+            },
+            "testedNextStepPrimitives": {
+              "items": {
+                "enum": [
+                  "move_click",
+                  "double_click",
+                  "hover",
+                  "scroll_vertical",
+                  "scroll_horizontal",
+                  "drag_slider",
+                  "drag_drop",
+                  "typing",
+                  "keyboard_shortcut",
+                  "focus_switch",
+                  "dropdown_combobox",
+                  "iframe",
+                  "canvas_target",
+                  "rerender_after_click",
+                  "new_tab",
+                  "modal",
+                  "handoff_resume"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "unknownFields": {
+              "items": { "minLength": 1, "type": "string" },
+              "type": "array"
+            }
+          },
+          "required": [
+            "status",
+            "requiredFields",
+            "conditionalFields",
+            "unknownFields",
+            "testedNextStepPrimitives"
+          ],
+          "type": "object"
+        },
+        "media": {
+          "additionalProperties": false,
+          "properties": {
+            "attachment": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "error": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "image": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "structured": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "text": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            }
+          },
+          "required": ["text", "structured", "image", "error", "attachment"],
+          "type": "object"
+        },
+        "postToolCoverage": {
+          "additionalProperties": false,
+          "properties": {
+            "bypassCases": {
+              "items": { "minLength": 1, "type": "string" },
+              "type": "array"
+            },
+            "confidence": {
+              "enum": ["PROVEN", "PARTIAL", "UNKNOWN"],
+              "type": "string"
+            },
+            "expected": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": ["observed", "expected", "bypassCases", "confidence"],
+          "type": "object"
+        },
+        "rawPersistence": {
+          "items": {
+            "enum": [
+              "none-observed",
+              "transcript",
+              "completion-event",
+              "temporary-file",
+              "log",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "replacementTiming": {
+          "enum": [
+            "before-model-proven",
+            "model-visible-only",
+            "after-persistence",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "postToolCoverage",
+        "control",
+        "replacementTiming",
+        "media",
+        "codeModePromiseSemantics",
+        "controlCriticalContract",
+        "rawPersistence"
+      ],
+      "type": "object"
+    },
+    "route": {
+      "additionalProperties": false,
+      "properties": {
+        "canonicalToolMatchers": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array"
+        },
+        "matcherEvidenceHash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "toolRoute": {
+          "enum": [
+            "direct-mcp",
+            "code-mode-nested-mcp",
+            "outer-transaction",
+            "script-wrapper",
+            "local-function",
+            "specialized",
+            "opaque"
+          ],
+          "type": "string"
+        }
+      },
+      "required": ["toolRoute", "canonicalToolMatchers", "matcherEvidenceHash"],
+      "type": "object"
+    },
+    "schemaVersion": { "const": 3, "type": "number" },
+    "setup": {
+      "additionalProperties": false,
+      "properties": {
+        "chromeComputerUseDetectable": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "firstBrowserHookSeen": { "type": "boolean" },
+        "hooksRegistered": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "hooksTrusted": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": ["INSTALLED", "CONFIGURED", "VERIFIED"],
+          "type": "string"
+        },
+        "matcherProfileValid": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "optimization": { "enum": ["ACTIVE", "BYPASSED"], "type": "string" },
+        "pluginInstalled": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "postToolUseAvailable": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "preToolUseAvailable": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "skillAvailable": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "syntheticProbe": {
+          "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+          "type": "string"
+        },
+        "verificationSource": {
+          "enum": ["synthetic-probe", "passive-first-browser-call", "none"],
+          "type": "string"
+        }
+      },
+      "required": [
+        "lifecycle",
+        "pluginInstalled",
+        "skillAvailable",
+        "hooksRegistered",
+        "hooksTrusted",
+        "preToolUseAvailable",
+        "postToolUseAvailable",
+        "chromeComputerUseDetectable",
+        "matcherProfileValid",
+        "syntheticProbe",
+        "firstBrowserHookSeen",
+        "verificationSource",
+        "optimization"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "profileId",
+    "setup",
+    "identity",
+    "route",
+    "action",
+    "nativeInteraction",
+    "result",
+    "hooks",
+    "nativeCapabilities",
+    "handoff",
+    "evidence",
+    "derived"
+  ],
+  "type": "object"
+}
