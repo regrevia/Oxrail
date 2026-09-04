@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Split minimal Agent-facing Handoff input/result from strict runtime-only Host request, completion, and result contracts; only the exactly equivalent tool-input JSON Schema is published, all validation is non-authorizing, and Handoff remains inactive.
 - Added a process-local, fixture-only macOS opaque credential-reference lifecycle with Security.framework randomness and exact scope, TTL, generation, registry-hash, revocation, and one-shot replay checks; the public observation never returns the reference and remains inactive.
 - Added a build-fixed, read-only macOS credential-registry validator for one exact API-key fixture template/HTTPS consumer; it only reports non-authorizing structure evidence and always leaves Credential activation inactive.
 - Added a manual, permission-minimal macOS Chrome MV3 probe for the controlled loopback fixture; it tests same-tab move/focus/restore primitives only and always reports Host fence unavailable and Handoff inactive.

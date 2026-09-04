@@ -179,6 +179,339 @@ export const HandoffCapabilitySchema = z.strictObject({
 });
 export type HandoffCapability = z.infer<typeof HandoffCapabilitySchema>;
 
+const handoffText = z
+  .string()
+  .min(1)
+  .max(4_096)
+  .regex(/^[^\u0000-\u001f\u007f]+$/, "must not contain control characters");
+const handoffSafeNonNegativeInt = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+const handoffSafePositiveInt = handoffSafeNonNegativeInt.min(1);
+const handoffNonce = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/,
+    "expected a canonical 32-byte base64url nonce",
+  );
+const handoffTimeout = z.number().int().min(1_000).max(900_000);
+const handoffType = z.enum([
+  "AUTH_REQUIRED",
+  "MFA_REQUIRED",
+  "PASSKEY_REQUIRED",
+  "CAPTCHA_REQUIRED",
+  "SENSITIVE_INPUT",
+  "PERMISSION_REQUIRED",
+  "HIGH_IMPACT_CONFIRMATION",
+  "FILE_PICKER_REQUIRED",
+  "OS_DIALOG_REQUIRED",
+  "UNKNOWN_MANUAL_BOUNDARY",
+]);
+const handoffCompletionPolicy = z.enum([
+  "AUTH_FLOW_COMPLETED",
+  "DIALOG_OR_ROUTE_COMPLETED",
+  "MANUAL_DONE_THEN_VERIFY",
+]);
+const completionPolicyByType = {
+  AUTH_REQUIRED: "AUTH_FLOW_COMPLETED",
+  MFA_REQUIRED: "AUTH_FLOW_COMPLETED",
+  PASSKEY_REQUIRED: "AUTH_FLOW_COMPLETED",
+  CAPTCHA_REQUIRED: "AUTH_FLOW_COMPLETED",
+  SENSITIVE_INPUT: "AUTH_FLOW_COMPLETED",
+  PERMISSION_REQUIRED: "DIALOG_OR_ROUTE_COMPLETED",
+  HIGH_IMPACT_CONFIRMATION: "DIALOG_OR_ROUTE_COMPLETED",
+  FILE_PICKER_REQUIRED: "DIALOG_OR_ROUTE_COMPLETED",
+  OS_DIALOG_REQUIRED: "DIALOG_OR_ROUTE_COMPLETED",
+  UNKNOWN_MANUAL_BOUNDARY: "MANUAL_DONE_THEN_VERIFY",
+} as const satisfies Record<
+  z.infer<typeof handoffType>,
+  z.infer<typeof handoffCompletionPolicy>
+>;
+function phaseMatchesPolicy(policy: string, phase: string): boolean {
+  if (policy === "AUTH_FLOW_COMPLETED") {
+    return ["CHALLENGE_GONE", "AUTH_MARKER_PRESENT", "EXPECTED_ROUTE"].includes(
+      phase,
+    );
+  }
+  return (
+    policy === "DIALOG_OR_ROUTE_COMPLETED" &&
+    ["DIALOG_CLOSED", "EXPECTED_ROUTE"].includes(phase)
+  );
+}
+const handoffCompletionKind = z.enum([
+  "CHALLENGE_GONE",
+  "AUTH_MARKER_PRESENT",
+  "EXPECTED_ROUTE",
+  "DIALOG_CLOSED",
+  "MANUAL_DONE",
+  "CANCELLED",
+  "UNSAFE_ORIGIN",
+]);
+const handoffPhaseSignal = z.enum([
+  "CHALLENGE_GONE",
+  "AUTH_MARKER_PRESENT",
+  "EXPECTED_ROUTE",
+  "DIALOG_CLOSED",
+  "MANUAL_DONE",
+]);
+const handoffOutcome = z.enum([
+  "VERIFIED_COMPLETE",
+  "USER_ASSERTED_AND_VERIFIED",
+  "CANCELLED",
+  "TIMED_OUT",
+  "UNSAFE_ORIGIN",
+  "TAB_CLOSED",
+  "VERIFICATION_FAILED",
+]);
+const loopbackFixtureOrigin = "http://127.0.0.1:4173";
+const handoffOrigin = z
+  .string()
+  .max(2_048)
+  .superRefine((value, context) => {
+    try {
+      const parsed = new URL(value);
+      if (
+        parsed.origin !== value ||
+        (parsed.protocol !== "https:" && value !== loopbackFixtureOrigin)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "expected a canonical HTTPS origin or the build-fixed loopback fixture origin",
+        });
+      }
+    } catch {
+      context.addIssue({
+        code: "custom",
+        message:
+          "expected a canonical HTTPS origin or the build-fixed loopback fixture origin",
+      });
+    }
+  });
+
+/** Complete Agent-visible input. Host-owned binding fields are rejected. */
+export const HandoffToolInputSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    type: handoffType,
+  })
+  .describe(
+    "Strict Agent-visible Handoff input. Shape validation is non-authorizing and does not activate Handoff.",
+  );
+export type HandoffToolInput = z.infer<typeof HandoffToolInputSchema>;
+
+/** Host-bound request. Its values still require a trusted current Host context. */
+export const HandoffRequestSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    handoffId: handoffText,
+    sessionId: handoffText,
+    taskId: handoffText,
+    toolUseId: handoffText.optional(),
+    leaseEpoch: handoffSafePositiveInt,
+    nonce: handoffNonce,
+    type: handoffType,
+    tabBinding: z
+      .strictObject({
+        tabId: handoffSafeNonNegativeInt,
+        windowId: handoffSafeNonNegativeInt,
+        index: handoffSafeNonNegativeInt,
+        pinned: z.boolean().optional(),
+        groupId: handoffSafeNonNegativeInt.optional(),
+        topOrigin: handoffOrigin,
+        allowedRedirectOrigins: z.array(handoffOrigin).max(8).optional(),
+        initialDocumentBinding: handoffText,
+      })
+      .superRefine((binding, context) => {
+        const redirects = binding.allowedRedirectOrigins ?? [];
+        if (
+          new Set(redirects).size !== redirects.length ||
+          redirects.includes(binding.topOrigin)
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["allowedRedirectOrigins"],
+            message:
+              "redirect origins must be unique and must not repeat topOrigin",
+          });
+        }
+      }),
+    completionPolicy: handoffCompletionPolicy,
+    timeoutMs: handoffTimeout,
+    createdAt: handoffSafeNonNegativeInt,
+  })
+  .superRefine((request, context) => {
+    if (request.completionPolicy !== completionPolicyByType[request.type]) {
+      context.addIssue({
+        code: "custom",
+        path: ["completionPolicy"],
+        message: "Handoff type and Host-derived completion policy disagree",
+      });
+    }
+    if (request.createdAt > Number.MAX_SAFE_INTEGER - request.timeoutMs) {
+      context.addIssue({
+        code: "custom",
+        path: ["timeoutMs"],
+        message: "createdAt + timeoutMs must be a safe integer",
+      });
+    }
+  })
+  .describe(
+    "Strict runtime-only Host-bound Handoff request. It is not published as portable JSON Schema because its refinements require @oxrail/protocol; validation is non-authorizing and does not prove its Host binding.",
+  );
+export type HandoffRequest = z.infer<typeof HandoffRequestSchema>;
+
+export const HandoffCompletionSignalSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    handoffId: handoffText,
+    sessionId: handoffText,
+    taskId: handoffText,
+    leaseEpoch: handoffSafePositiveInt,
+    nonce: handoffNonce,
+    tabId: handoffSafeNonNegativeInt,
+    initialDocumentBinding: handoffText,
+    observedDocumentBinding: handoffText,
+    origin: handoffOrigin,
+    source: z.enum(["ISOLATED_VERIFIER", "EXTENSION_OWNED_UI"]),
+    kind: handoffCompletionKind,
+    confidence: z.enum(["DETERMINISTIC", "HEURISTIC", "USER_ASSERTED"]),
+    observedAt: handoffSafeNonNegativeInt,
+  })
+  .superRefine((signal, context) => {
+    const userSignal = ["MANUAL_DONE", "CANCELLED"].includes(signal.kind);
+    const validConfidence =
+      (userSignal &&
+        signal.source === "EXTENSION_OWNED_UI" &&
+        signal.confidence === "USER_ASSERTED") ||
+      (signal.kind === "UNSAFE_ORIGIN" &&
+        signal.source === "ISOLATED_VERIFIER" &&
+        signal.confidence === "DETERMINISTIC") ||
+      (!userSignal &&
+        signal.kind !== "UNSAFE_ORIGIN" &&
+        signal.source === "ISOLATED_VERIFIER" &&
+        signal.confidence !== "USER_ASSERTED");
+    if (!validConfidence) {
+      context.addIssue({
+        code: "custom",
+        path: ["confidence"],
+        message: "completion kind and confidence are inconsistent",
+      });
+    }
+  })
+  .describe(
+    "Strict runtime-only non-secret Handoff completion signal. It is not published as portable JSON Schema because its refinements require @oxrail/protocol; validation is non-authorizing and the current lease binding must still be verified.",
+  );
+export type HandoffCompletionSignal = z.infer<
+  typeof HandoffCompletionSignalSchema
+>;
+
+const HandoffResultBodySchema = z.strictObject({
+  outcome: handoffOutcome,
+  phaseSignal: handoffPhaseSignal.optional(),
+  sameTab: z.boolean(),
+  tabRestored: z.boolean(),
+  agentLeaseRestored: z.boolean(),
+  secretObserved: z.literal(false),
+});
+type HandoffResultBody = z.infer<typeof HandoffResultBodySchema>;
+
+function handoffResultError(
+  result: HandoffResultBody & {
+    completionPolicy?: z.infer<typeof handoffCompletionPolicy> | undefined;
+    finalOrigin?: string | undefined;
+  },
+  requireInternalBindings: boolean,
+): string | undefined {
+  const successful = [
+    "VERIFIED_COMPLETE",
+    "USER_ASSERTED_AND_VERIFIED",
+  ].includes(result.outcome);
+  if (
+    successful &&
+    (!result.phaseSignal ||
+      !result.sameTab ||
+      !result.agentLeaseRestored ||
+      (requireInternalBindings && !result.finalOrigin))
+  ) {
+    return "successful Handoff results require the applicable verified fields, same tab, and restored Agent lease";
+  }
+  if (
+    result.outcome === "USER_ASSERTED_AND_VERIFIED" &&
+    result.phaseSignal !== "MANUAL_DONE"
+  ) {
+    return "user-asserted verified results require MANUAL_DONE";
+  }
+  if (
+    result.outcome === "VERIFIED_COMPLETE" &&
+    result.phaseSignal === "MANUAL_DONE"
+  ) {
+    return "automatic verified results cannot use MANUAL_DONE";
+  }
+  if (
+    requireInternalBindings &&
+    result.outcome === "VERIFIED_COMPLETE" &&
+    result.completionPolicy &&
+    result.phaseSignal &&
+    !phaseMatchesPolicy(result.completionPolicy, result.phaseSignal)
+  ) {
+    return "phase signal does not belong to the current completion policy";
+  }
+  if (!successful && result.phaseSignal !== undefined) {
+    return "non-success Handoff results cannot include a phase signal";
+  }
+  if (
+    [
+      "TIMED_OUT",
+      "UNSAFE_ORIGIN",
+      "TAB_CLOSED",
+      "VERIFICATION_FAILED",
+    ].includes(result.outcome) &&
+    result.agentLeaseRestored
+  ) {
+    return "unsafe Handoff failures cannot restore the Agent lease";
+  }
+  if (result.outcome === "TAB_CLOSED" && result.sameTab) {
+    return "TAB_CLOSED cannot report same-tab continuity";
+  }
+  if (result.outcome === "TAB_CLOSED" && result.tabRestored) {
+    return "TAB_CLOSED cannot report restored tab placement";
+  }
+}
+
+export const HandoffResultSchema = HandoffResultBodySchema.extend({
+  schemaVersion: z.literal(1),
+  handoffId: handoffText,
+  sessionId: handoffText,
+  taskId: handoffText,
+  leaseEpoch: handoffSafePositiveInt,
+  nonce: handoffNonce,
+  completionPolicy: handoffCompletionPolicy,
+  finalOrigin: handoffOrigin.optional(),
+})
+  .superRefine((result, context) => {
+    const message = handoffResultError(result, true);
+    if (message) context.addIssue({ code: "custom", message });
+  })
+  .describe(
+    "Strict runtime-only Host-internal bound Handoff result. It is not published as portable JSON Schema because its refinements require @oxrail/protocol; validation is non-authorizing and does not resume a continuation.",
+  );
+export type HandoffResult = z.infer<typeof HandoffResultSchema>;
+
+export const HandoffToolResultSchema = HandoffResultBodySchema.extend({
+  schemaVersion: z.literal(1),
+})
+  .superRefine((result, context) => {
+    const message = handoffResultError(result, false);
+    if (message) context.addIssue({ code: "custom", message });
+  })
+  .describe(
+    "Strict runtime-only model-visible Handoff result projection. It is not published as portable JSON Schema because its cross-field refinements require @oxrail/protocol; it contains no internal binding or origin fields and is non-authorizing.",
+  );
+export type HandoffToolResult = z.infer<typeof HandoffToolResultSchema>;
+
 export const CredentialChannelCapabilitySchema = z.strictObject({
   platform: z.enum(["macos", "unsupported"]),
   surface: z.enum(["MACOS_NATIVE_SECURE_PROMPT", "NONE"]),
@@ -1477,6 +1810,7 @@ export const ProtocolSchemas = {
   "credential-provision-intent": CredentialProvisionIntentSchema,
   "credential-public-result": CredentialPublicResultSchema,
   "credential-use-registry-entry": CredentialUseRegistryEntrySchema,
+  "handoff-tool-input": HandoffToolInputSchema,
   "observation-digest": ObservationDigestSchema,
   "state-fingerprint": StateFingerprintSchema,
   "control-critical-contract": ControlCriticalContractSchema,

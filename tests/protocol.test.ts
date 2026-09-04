@@ -13,6 +13,11 @@ import {
 } from "../packages/host-openai/src/profile.js";
 import {
   BrowserTaskStateSchema,
+  HandoffCompletionSignalSchema,
+  HandoffRequestSchema,
+  HandoffResultSchema,
+  HandoffToolInputSchema,
+  HandoffToolResultSchema,
   HostProfileSchema,
   NativePrimitiveSchema,
   ReasonCodeSchema,
@@ -23,6 +28,68 @@ import {
 
 const unknown = "unknown" as const;
 const sha = "a".repeat(64);
+const handoffNonce = "A".repeat(43);
+
+const handoffToolInput = () => ({
+  schemaVersion: 1 as const,
+  type: "MFA_REQUIRED" as const,
+});
+
+const handoffRequest = () => ({
+  schemaVersion: 1 as const,
+  handoffId: "handoff-1",
+  sessionId: "session-1",
+  taskId: "task-1",
+  toolUseId: "tool-1",
+  leaseEpoch: 2,
+  nonce: handoffNonce,
+  type: "MFA_REQUIRED" as const,
+  tabBinding: {
+    tabId: 17,
+    windowId: 7,
+    index: 1,
+    topOrigin: "https://accounts.example.test",
+    allowedRedirectOrigins: ["https://id.example.test"],
+    initialDocumentBinding: "document-1",
+  },
+  completionPolicy: "AUTH_FLOW_COMPLETED" as const,
+  timeoutMs: 300_000,
+  createdAt: 1_000,
+});
+
+const handoffCompletionSignal = () => ({
+  schemaVersion: 1 as const,
+  handoffId: "handoff-1",
+  sessionId: "session-1",
+  taskId: "task-1",
+  leaseEpoch: 2,
+  nonce: handoffNonce,
+  tabId: 17,
+  initialDocumentBinding: "document-1",
+  observedDocumentBinding: "document-2",
+  origin: "https://accounts.example.test",
+  source: "ISOLATED_VERIFIER" as const,
+  kind: "AUTH_MARKER_PRESENT" as const,
+  confidence: "DETERMINISTIC" as const,
+  observedAt: 2_000,
+});
+
+const handoffResult = () => ({
+  schemaVersion: 1 as const,
+  handoffId: "handoff-1",
+  sessionId: "session-1",
+  taskId: "task-1",
+  leaseEpoch: 2,
+  nonce: handoffNonce,
+  completionPolicy: "AUTH_FLOW_COMPLETED" as const,
+  outcome: "VERIFIED_COMPLETE" as const,
+  finalOrigin: "https://accounts.example.test",
+  phaseSignal: "AUTH_MARKER_PRESENT" as const,
+  sameTab: true,
+  tabRestored: true,
+  agentLeaseRestored: true,
+  secretObserved: false as const,
+});
 
 function hostProfile() {
   const verdicts = {
@@ -579,6 +646,357 @@ describe("versioned protocol", () => {
     ).toBe(false);
   });
 
+  it("round-trips the five non-authorizing Handoff wire contracts", () => {
+    expect(HandoffToolInputSchema.parse(handoffToolInput())).toEqual(
+      handoffToolInput(),
+    );
+    expect(HandoffRequestSchema.parse(handoffRequest())).toEqual(
+      handoffRequest(),
+    );
+    expect(
+      HandoffCompletionSignalSchema.parse(handoffCompletionSignal()),
+    ).toEqual(handoffCompletionSignal());
+    expect(HandoffResultSchema.parse(handoffResult())).toEqual(handoffResult());
+    const {
+      handoffId: _handoffId,
+      sessionId: _sessionId,
+      taskId: _taskId,
+      leaseEpoch: _leaseEpoch,
+      nonce: _nonce,
+      completionPolicy: _completionPolicy,
+      finalOrigin: _finalOrigin,
+      ...toolResult
+    } = handoffResult();
+    expect(HandoffToolResultSchema.parse(toolResult)).toEqual(toolResult);
+    expect(
+      HandoffRequestSchema.safeParse({
+        ...handoffRequest(),
+        tabBinding: {
+          ...handoffRequest().tabBinding,
+          topOrigin: "http://127.0.0.1:4173",
+          allowedRedirectOrigins: ["https://id.example.test"],
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("keeps Host-owned Handoff binding fields out of Agent input", () => {
+    for (const forbidden of [
+      { reason: "page supplied text" },
+      { tabId: 17 },
+      { origin: "https://accounts.example.test" },
+      { allowedRedirectOrigins: ["https://evil.example.test"] },
+      { sessionId: "session-1" },
+      { leaseEpoch: 2 },
+      { nonce: handoffNonce },
+      { completionPolicy: "AUTH_FLOW_COMPLETED" },
+      { timeoutMs: 300_000 },
+      { password: "content-canary" },
+    ]) {
+      expect(
+        HandoffToolInputSchema.safeParse({
+          ...handoffToolInput(),
+          ...forbidden,
+        }).success,
+      ).toBe(false);
+    }
+    for (const invalid of [
+      { ...handoffToolInput(), schemaVersion: 2 },
+      { ...handoffToolInput(), type: "PAGE_DEFINED" },
+    ]) {
+      expect(HandoffToolInputSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
+  it("validates exact Handoff request and completion bindings", () => {
+    const request = handoffRequest();
+    const policyByType = {
+      AUTH_REQUIRED: "AUTH_FLOW_COMPLETED",
+      MFA_REQUIRED: "AUTH_FLOW_COMPLETED",
+      PASSKEY_REQUIRED: "AUTH_FLOW_COMPLETED",
+      CAPTCHA_REQUIRED: "AUTH_FLOW_COMPLETED",
+      SENSITIVE_INPUT: "AUTH_FLOW_COMPLETED",
+      PERMISSION_REQUIRED: "DIALOG_OR_ROUTE_COMPLETED",
+      HIGH_IMPACT_CONFIRMATION: "DIALOG_OR_ROUTE_COMPLETED",
+      FILE_PICKER_REQUIRED: "DIALOG_OR_ROUTE_COMPLETED",
+      OS_DIALOG_REQUIRED: "DIALOG_OR_ROUTE_COMPLETED",
+      UNKNOWN_MANUAL_BOUNDARY: "MANUAL_DONE_THEN_VERIFY",
+    } as const;
+    for (const [type, completionPolicy] of Object.entries(policyByType)) {
+      expect(
+        HandoffRequestSchema.safeParse({
+          ...request,
+          type,
+          completionPolicy,
+        }).success,
+      ).toBe(true);
+      expect(
+        HandoffRequestSchema.safeParse({
+          ...request,
+          type,
+          completionPolicy:
+            completionPolicy === "AUTH_FLOW_COMPLETED"
+              ? "DIALOG_OR_ROUTE_COMPLETED"
+              : "AUTH_FLOW_COMPLETED",
+        }).success,
+      ).toBe(false);
+    }
+    for (const invalid of [
+      { ...request, handoffId: "bad\0id" },
+      { ...request, taskId: "bad\nid" },
+      { ...request, sessionId: "s".repeat(4_097) },
+      { ...request, leaseEpoch: 0 },
+      { ...request, nonce: "A".repeat(42) },
+      { ...request, nonce: "A".repeat(44) },
+      { ...request, nonce: `${"A".repeat(42)}!` },
+      { ...request, nonce: `${"A".repeat(42)}n` },
+      { ...request, timeoutMs: 999 },
+      { ...request, timeoutMs: 900_001 },
+      {
+        ...request,
+        createdAt: Number.MAX_SAFE_INTEGER,
+        timeoutMs: 1_000,
+      },
+      {
+        ...request,
+        tabBinding: {
+          ...request.tabBinding,
+          topOrigin: "http://accounts.example.test",
+        },
+      },
+      {
+        ...request,
+        tabBinding: {
+          ...request.tabBinding,
+          topOrigin: "http://localhost:4173",
+        },
+      },
+      {
+        ...request,
+        tabBinding: {
+          ...request.tabBinding,
+          topOrigin: "https://accounts.example.test/path",
+        },
+      },
+      {
+        ...request,
+        tabBinding: {
+          ...request.tabBinding,
+          allowedRedirectOrigins: [
+            "https://id.example.test",
+            "https://id.example.test",
+          ],
+        },
+      },
+      {
+        ...request,
+        tabBinding: {
+          ...request.tabBinding,
+          allowedRedirectOrigins: [request.tabBinding.topOrigin],
+        },
+      },
+      {
+        ...request,
+        tabBinding: {
+          ...request.tabBinding,
+          allowedRedirectOrigins: Array.from(
+            { length: 9 },
+            (_, index) => `https://id-${index}.example.test`,
+          ),
+        },
+      },
+      { ...request, display: { instruction: "enter a secret" } },
+    ]) {
+      expect(HandoffRequestSchema.safeParse(invalid).success).toBe(false);
+    }
+
+    const signal = handoffCompletionSignal();
+    for (const valid of [
+      {
+        ...signal,
+        source: "EXTENSION_OWNED_UI",
+        kind: "MANUAL_DONE",
+        confidence: "USER_ASSERTED",
+      },
+      {
+        ...signal,
+        source: "EXTENSION_OWNED_UI",
+        kind: "CANCELLED",
+        confidence: "USER_ASSERTED",
+      },
+      { ...signal, kind: "UNSAFE_ORIGIN", confidence: "DETERMINISTIC" },
+      { ...signal, kind: "EXPECTED_ROUTE", confidence: "HEURISTIC" },
+    ]) {
+      expect(HandoffCompletionSignalSchema.safeParse(valid).success).toBe(true);
+    }
+    for (const invalid of [
+      { ...signal, kind: "MANUAL_DONE", confidence: "DETERMINISTIC" },
+      {
+        ...signal,
+        source: "ISOLATED_VERIFIER",
+        kind: "CANCELLED",
+        confidence: "USER_ASSERTED",
+      },
+      {
+        ...signal,
+        source: "EXTENSION_OWNED_UI",
+        kind: "EXPECTED_ROUTE",
+        confidence: "DETERMINISTIC",
+      },
+      { ...signal, kind: "UNSAFE_ORIGIN", confidence: "HEURISTIC" },
+      { ...signal, kind: "EXPECTED_ROUTE", confidence: "USER_ASSERTED" },
+      { ...signal, observedAt: Number.MAX_SAFE_INTEGER + 1 },
+      { ...signal, source: "PAGE_SCRIPT" },
+      { ...signal, value: "content-canary" },
+      { ...signal, text: "content-canary" },
+      { ...signal, clipboard: "content-canary" },
+      { ...signal, screenshot: "content-canary" },
+      { ...signal, cookie: "content-canary" },
+      { ...signal, token: "content-canary" },
+      { ...signal, fullUrl: "https://accounts.example.test/private?q=x" },
+      { ...signal, origin: "https://accounts.example.test/path?secret=x" },
+    ]) {
+      expect(HandoffCompletionSignalSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it("allows only consistent, secret-free Handoff results", () => {
+    const result = handoffResult();
+    const {
+      handoffId: _handoffId,
+      sessionId: _sessionId,
+      taskId: _taskId,
+      leaseEpoch: _leaseEpoch,
+      nonce: _nonce,
+      completionPolicy: _completionPolicy,
+      finalOrigin: _finalOrigin,
+      ...toolResult
+    } = result;
+    for (const valid of [
+      {
+        ...result,
+        outcome: "USER_ASSERTED_AND_VERIFIED",
+        phaseSignal: "MANUAL_DONE",
+      },
+      {
+        ...result,
+        completionPolicy: "DIALOG_OR_ROUTE_COMPLETED",
+        outcome: "USER_ASSERTED_AND_VERIFIED",
+        phaseSignal: "MANUAL_DONE",
+      },
+      {
+        ...result,
+        completionPolicy: "MANUAL_DONE_THEN_VERIFY",
+        outcome: "USER_ASSERTED_AND_VERIFIED",
+        phaseSignal: "MANUAL_DONE",
+      },
+      {
+        ...result,
+        completionPolicy: "DIALOG_OR_ROUTE_COMPLETED",
+        phaseSignal: "DIALOG_CLOSED",
+      },
+      {
+        ...result,
+        outcome: "CANCELLED",
+        phaseSignal: undefined,
+      },
+      {
+        ...result,
+        outcome: "TIMED_OUT",
+        phaseSignal: undefined,
+        agentLeaseRestored: false,
+      },
+      {
+        ...result,
+        outcome: "TAB_CLOSED",
+        phaseSignal: undefined,
+        sameTab: false,
+        tabRestored: false,
+        agentLeaseRestored: false,
+      },
+    ]) {
+      expect(HandoffResultSchema.safeParse(valid).success).toBe(true);
+    }
+    for (const invalid of [
+      { ...result, phaseSignal: undefined },
+      { ...result, finalOrigin: undefined },
+      { ...result, sameTab: false },
+      { ...result, agentLeaseRestored: false },
+      {
+        ...result,
+        outcome: "USER_ASSERTED_AND_VERIFIED",
+        phaseSignal: "AUTH_MARKER_PRESENT",
+      },
+      { ...result, phaseSignal: "MANUAL_DONE" },
+      {
+        ...result,
+        completionPolicy: "AUTH_FLOW_COMPLETED",
+        phaseSignal: "DIALOG_CLOSED",
+      },
+      {
+        ...result,
+        completionPolicy: "DIALOG_OR_ROUTE_COMPLETED",
+        phaseSignal: "AUTH_MARKER_PRESENT",
+      },
+      {
+        ...result,
+        completionPolicy: "MANUAL_DONE_THEN_VERIFY",
+        phaseSignal: "EXPECTED_ROUTE",
+      },
+      { ...result, outcome: "CANCELLED" },
+      {
+        ...result,
+        outcome: "TIMED_OUT",
+        phaseSignal: undefined,
+        agentLeaseRestored: true,
+      },
+      {
+        ...result,
+        outcome: "UNSAFE_ORIGIN",
+        phaseSignal: undefined,
+        agentLeaseRestored: true,
+      },
+      {
+        ...result,
+        outcome: "TAB_CLOSED",
+        phaseSignal: undefined,
+        agentLeaseRestored: false,
+      },
+      {
+        ...result,
+        outcome: "TAB_CLOSED",
+        phaseSignal: undefined,
+        sameTab: false,
+        tabRestored: true,
+        agentLeaseRestored: false,
+      },
+      { ...result, secretObserved: true },
+      { ...result, phaseSignal: "PAGE_TEXT" },
+      { ...result, finalOrigin: "https://accounts.example.test/private?q=x" },
+      { ...result, cookie: "content-canary" },
+    ]) {
+      expect(HandoffResultSchema.safeParse(invalid).success).toBe(false);
+    }
+    for (const internalField of [
+      "handoffId",
+      "sessionId",
+      "taskId",
+      "leaseEpoch",
+      "nonce",
+      "completionPolicy",
+      "finalOrigin",
+    ]) {
+      expect(
+        HandoffToolResultSchema.safeParse({
+          ...toolResult,
+          [internalField]: "content-canary",
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("rejects unknown BrowserTaskState fields", () => {
     expect(
       BrowserTaskStateSchema.safeParse({
@@ -674,6 +1092,15 @@ describe("versioned protocol", () => {
       "Neither authorizes credential activation",
     );
     expect(names).toContain("browser-task-state.schema.json");
+    expect(names).toContain("handoff-tool-input.schema.json");
+    for (const runtimeOnly of [
+      "handoff-completion-signal.schema.json",
+      "handoff-request.schema.json",
+      "handoff-result.schema.json",
+      "handoff-tool-result.schema.json",
+    ]) {
+      expect(names).not.toContain(runtimeOnly);
+    }
     for (const name of names) {
       expect(await readFile(join(first, name), "utf8")).toBe(
         await readFile(join(second, name), "utf8"),

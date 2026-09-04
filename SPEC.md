@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.12
+# Oxrail — 唯一实现规范（SPEC）v1.0.13
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.12
+  spec_version: 1.0.13
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -3864,24 +3864,37 @@ USER_LEASE_ACTIVE → CANCELLED
 ## 19.8 HandoffRequest
 
 ```ts
+export type HandoffType =
+  | "AUTH_REQUIRED"
+  | "MFA_REQUIRED"
+  | "PASSKEY_REQUIRED"
+  | "CAPTCHA_REQUIRED"
+  | "SENSITIVE_INPUT"
+  | "PERMISSION_REQUIRED"
+  | "HIGH_IMPACT_CONFIRMATION"
+  | "FILE_PICKER_REQUIRED"
+  | "OS_DIALOG_REQUIRED"
+  | "UNKNOWN_MANUAL_BOUNDARY";
+
+export type CompletionPolicy =
+  | "AUTH_FLOW_COMPLETED"
+  | "DIALOG_OR_ROUTE_COMPLETED"
+  | "MANUAL_DONE_THEN_VERIFY";
+
+export interface HandoffToolInput {
+  schemaVersion: 1;
+  type: HandoffType;
+}
+
 export interface HandoffRequest {
   schemaVersion: 1;
   handoffId: string;
   sessionId: string;
   taskId: string;
   toolUseId?: string;
-
-  type:
-    | "AUTH_REQUIRED"
-    | "MFA_REQUIRED"
-    | "PASSKEY_REQUIRED"
-    | "CAPTCHA_REQUIRED"
-    | "SENSITIVE_INPUT"
-    | "PERMISSION_REQUIRED"
-    | "HIGH_IMPACT_CONFIRMATION"
-    | "FILE_PICKER_REQUIRED"
-    | "OS_DIALOG_REQUIRED"
-    | "UNKNOWN_MANUAL_BOUNDARY";
+  leaseEpoch: number;
+  nonce: string;
+  type: HandoffType;
 
   tabBinding: {
     tabId: number;
@@ -3891,22 +3904,29 @@ export interface HandoffRequest {
     groupId?: number;
     topOrigin: string;
     allowedRedirectOrigins?: string[];
-    documentBinding?: string;
+    initialDocumentBinding: string;
   };
-
-  display: {
-    siteName: string;
-    reason: string;
-    instruction: string;
-  };
-
   completionPolicy: CompletionPolicy;
   timeoutMs: number;
   createdAt: number;
 }
 ```
 
-`instruction` 只能描述动作类型，例如“在此真实页面完成登录”，不得预填或回显秘密。
+`HandoffToolInput` 是完整的 Agent-facing 输入面，必须用 strict schema 拒绝额外字段；模型不得提供 `reason`、显示文案、completion policy、timeout、`tabId/windowId`、origin、redirect、document binding、session/task、lease epoch 或 nonce。`type` 只是请求提示，不是分类 authority；Host 必须与受信 blocker/site registry 独立核对，并只能保持或加强边界，不能因 Agent/page 给出的较弱 type 降级。Host adapter 根据核对后的 type 从 build-fixed registry 派生 `completionPolicy/timeoutMs` 并绑定当前上下文；extension UI 仅根据 build-fixed `type` 文案和已验证 top origin 本地渲染，不接受 Agent、页面或请求中的自由文本。
+
+固定 automatic policy 映射为：`AUTH_FLOW_COMPLETED → CHALLENGE_GONE | AUTH_MARKER_PRESENT | EXPECTED_ROUTE`，`DIALOG_OR_ROUTE_COMPLETED → DIALOG_CLOSED | EXPECTED_ROUTE`，`MANUAL_DONE_THEN_VERIFY` 不接受 automatic success signal。authenticated `MANUAL_DONE` 是所有 type/policy 均可用的一键 fallback trigger：它只能进入 settle + independent verify，永远不能单独证明完成。`CANCELLED` 和 `UNSAFE_ORIGIN` 始终是终止信号，不是成功 policy。首版 type/policy 绑定固定如下；Host 独立分类得到更强边界时使用该真实边界对应行，绝不能按 Agent 提示降级：
+
+| Handoff type | Host-derived CompletionPolicy |
+|---|---|
+| `AUTH_REQUIRED` / `MFA_REQUIRED` / `PASSKEY_REQUIRED` / `CAPTCHA_REQUIRED` / `SENSITIVE_INPUT` | `AUTH_FLOW_COMPLETED` |
+| `PERMISSION_REQUIRED` / `HIGH_IMPACT_CONFIRMATION` / `FILE_PICKER_REQUIRED` / `OS_DIALOG_REQUIRED` | `DIALOG_OR_ROUTE_COMPLETED` |
+| `UNKNOWN_MANUAL_BOUNDARY` | `MANUAL_DONE_THEN_VERIFY` |
+
+`minimum_settle_ms=500`、`maximum_auto_verify_ms=5000`、timeout 和 heuristic 双样本要求由 build-fixed registry/runtime 配置，Agent/page 不得覆盖或放宽。
+
+全部 ID/document binding 必须是 1–4096 字符且不含 `U+0000–U+001F/U+007F`；`leaseEpoch` 必须为正安全整数。nonce 必须由 Host CSPRNG 每个 handoff generation 新生成 32 bytes，并编码成恰好 43 位 canonical、无 padding base64url；接收端常量时间比较，过期或任一 terminal 后立即失效且不得跨 generation 复用。`timeoutMs` 必须为 `1000..900000` 的安全整数，且 `createdAt + timeoutMs` 不得溢出。wire 时间只用于关联；expiry、settle、quiet window 与 freshness 必须由接收端 monotonic clock 判定。redirect origin 最多 8 个、canonical、互异且不得重复 top origin。生产 origin 只允许 canonical HTTPS；唯一 HTTP 例外是 build-fixed `http://127.0.0.1:4173` fixture，schema 接受该值本身不构成授权。
+
+`HandoffRequest` 只能在 19.5 的 current Host Profile、browser instance、admission generation、same-tab scope 与 native-action fence receipt 全部由受信 Host verifier 新鲜验证后构造并 dispatch；request 的 session/task/tab/origin/initial document/lease epoch 必须与 lease 和 receipt 精确一致，内部 continuation 必须保留 receipt binding。任一缺失或 mismatch 都拒绝 request；wire schema 永远不能替代 receipt authenticity 或 Host-wide fence 证明。
 
 ## 19.8A Resume 前强制失效与重新定位
 
@@ -3950,10 +3970,17 @@ export interface HandoffRequest {
 
 ```ts
 interface CompletionSignal {
+  schemaVersion: 1;
   handoffId: string;
+  sessionId: string;
+  taskId: string;
+  leaseEpoch: number;
+  nonce: string;
   tabId: number;
-  documentBinding?: string;
+  initialDocumentBinding: string;
+  observedDocumentBinding: string;
   origin: string;
+  source: "ISOLATED_VERIFIER" | "EXTENSION_OWNED_UI";
   kind:
     | "CHALLENGE_GONE"
     | "AUTH_MARKER_PRESENT"
@@ -3966,6 +3993,10 @@ interface CompletionSignal {
   observedAt: number;
 }
 ```
+
+`CompletionSignal` 必须用 strict schema 解析，并与当前 lease 的全部 `handoffId/sessionId/taskId/leaseEpoch/nonce/tabId/initialDocumentBinding` 精确比较后才可进入状态机；schema 只验证交换结构，不授予 lease release 权限。`MANUAL_DONE/CANCELLED` 只接受 authenticated extension-owned UI channel 的 `EXTENSION_OWNED_UI + USER_ASSERTED`；自动检测 kind 只接受隔离 verifier channel 的 `ISOLATED_VERIFIER` 且不接受 `USER_ASSERTED`，`UNSAFE_ORIGIN` 还必须是 `DETERMINISTIC`。`source` 枚举自身不是 authentication，接收端必须验证实际 sender/channel identity。
+
+当前 document 与初始 binding 分列，允许合法导航，但不能把导航后的 binding 冒充初始 scope。接收端必须从当前真实 tab 独立重读 origin 与 document binding，并与 signal 交叉核对；不能信任 signal 自报字段。`observedAt` 不得替代接收端 monotonic freshness/settle 判断。任何额外字段，尤其 value/text/clipboard/screenshot/cookie/token/完整 URL，必须被拒绝。
 
 ## 19.10 Settle 与 Verify
 
@@ -4657,7 +4688,13 @@ export interface HandoffAttempt {
 }
 
 export interface HandoffResult {
+  schemaVersion: 1;
   handoffId: string;
+  sessionId: string;
+  taskId: string;
+  leaseEpoch: number;
+  nonce: string;
+  completionPolicy: CompletionPolicy;
   outcome:
     | "VERIFIED_COMPLETE"
     | "USER_ASSERTED_AND_VERIFIED"
@@ -4667,13 +4704,32 @@ export interface HandoffResult {
     | "TAB_CLOSED"
     | "VERIFICATION_FAILED";
   finalOrigin?: string;
-  phaseSignal?: string;
+  phaseSignal?:
+    | "CHALLENGE_GONE"
+    | "AUTH_MARKER_PRESENT"
+    | "EXPECTED_ROUTE"
+    | "DIALOG_CLOSED"
+    | "MANUAL_DONE";
+  sameTab: boolean;
+  tabRestored: boolean;
+  agentLeaseRestored: boolean;
+  secretObserved: false;
+}
+
+export interface HandoffToolResult {
+  schemaVersion: 1;
+  outcome: HandoffResult["outcome"];
+  phaseSignal?: HandoffResult["phaseSignal"];
   sameTab: boolean;
   tabRestored: boolean;
   agentLeaseRestored: boolean;
   secretObserved: false;
 }
 ```
+
+`HandoffResult` 是 Host 内部的 bound result；只有 strict-validated 后的 `HandoffToolResult` 投影可返回模型，nonce/session/task/origin 等内部绑定不得进入模型结果。成功 outcome 必须带来自接收端独立 observation 的 `finalOrigin`、allowlisted phase signal、`sameTab=true`、`agentLeaseRestored=true`；`VERIFIED_COMPLETE` 的 phase 必须属于当前 request `CompletionPolicy`，`USER_ASSERTED_AND_VERIFIED` 只能对应适用于任意 policy 的 `MANUAL_DONE` fallback 且仍须通过独立 verify，其它 verified success 不能对应 `MANUAL_DONE`。非成功 outcome 不得带 phase signal；`TIMED_OUT/UNSAFE_ORIGIN/TAB_CLOSED/VERIFICATION_FAILED` 必须 `agentLeaseRestored=false`，`TAB_CLOSED` 还必须 `sameTab=false` 且 `tabRestored=false`。`CANCELLED` 只有在可信 cleanup/invalidation 已完成时才可令 `agentLeaseRestored=true`。所有 origin 继续使用上述 canonical production/loopback 规则。Protocol schema 只提供 non-authorizing wire validation，不完成 continuation、completion verification 或 Handoff activation。
+
+首版只为与 runtime 完全等价、无额外交叉 refinement 的 `HandoffToolInput` 生成 portable JSON Schema。`HandoffRequest`、`CompletionSignal`、`HandoffResult` 与 `HandoffToolResult` 必须直接使用 `@oxrail/protocol` runtime Zod schema；在 portable JSON Schema 能表达 canonical origin、binding、policy/source/result 交叉不变量前不得发布对应 artifact，避免宽松 shape validator 被误当成 strict validator。即使未来生成，portable schema 也不得用于 activate、resume 或 release lease。
 
 ## 23.5 Internal event envelope
 
@@ -4778,24 +4834,24 @@ Native Computer Use 继续承担 click/type/navigate/submit。
 
 ```json
 {
-  "type": "MFA_REQUIRED",
-  "reason": "The site requires a one-time verification step.",
-  "completion_policy": "challenge_gone_or_expected_route",
-  "timeout_ms": 300000
+  "schemaVersion": 1,
+  "type": "MFA_REQUIRED"
 }
 ```
 
-Host adapter 自动绑定当前 session/task/tab/origin；模型不得自行提供 `tabId` 或扩大 redirect allowlist。
+Host adapter 独立核对 type，自动绑定当前 session/task/tab/origin/lease/nonce，并从固定 registry 派生 policy、timeout 和本地 UI 文案；模型不得提供自由文本、policy、timeout、`tabId`、origin 或扩大 redirect allowlist。
 
 结果：
 
 ```json
 {
+  "schemaVersion": 1,
   "outcome": "VERIFIED_COMPLETE",
-  "phase_signal": "authentication_complete",
-  "same_tab": true,
-  "tab_restored": true,
-  "secret_observed": false
+  "phaseSignal": "AUTH_MARKER_PRESENT",
+  "sameTab": true,
+  "tabRestored": true,
+  "agentLeaseRestored": true,
+  "secretObserved": false
 }
 ```
 
@@ -11785,6 +11841,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.13 — 2026-09-04
+
+- 将 Agent-facing `HandoffToolInput` 与 Host-bound `HandoffRequest` 分离：模型只能提交固定 type 提示，Host 独立核对并派生 policy/timeout/UI，再绑定 fresh receipt 的 tab/origin/session/lease/nonce；
+- 闭合 `CompletionPolicy`，并把 completion signal 严格绑定 handoff/session/task/lease/nonce/tab/初始与当前 document/origin/authenticated source；CSPRNG nonce、monotonic time 与唯一 loopback fixture 均固定；
+- 将内部 bound `HandoffResult` 与最小模型可见 `HandoffToolResult` 分离，限制 phase/policy 和成功、timeout、unsafe、tab-closed 交叉不变量；仅发布与 runtime 等价的 ToolInput JSON，其余 strict schema 保持 runtime-only；本 foundation 不激活 Handoff。
 
 ### v1.0.12 — 2026-09-04
 

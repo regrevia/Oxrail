@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Strict Agent-visible Handoff input. Shape validation is non-authorizing and does not activate Handoff.",
+  "properties": {
+    "schemaVersion": { "const": 1, "type": "number" },
+    "type": {
+      "enum": [
+        "AUTH_REQUIRED",
+        "MFA_REQUIRED",
+        "PASSKEY_REQUIRED",
+        "CAPTCHA_REQUIRED",
+        "SENSITIVE_INPUT",
+        "PERMISSION_REQUIRED",
+        "HIGH_IMPACT_CONFIRMATION",
+        "FILE_PICKER_REQUIRED",
+        "OS_DIALOG_REQUIRED",
+        "UNKNOWN_MANUAL_BOUNDARY"
+      ],
+      "type": "string"
+    }
+  },
+  "required": ["schemaVersion", "type"],
+  "type": "object"
+}
