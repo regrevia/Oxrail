@@ -34,6 +34,8 @@ importers:
 
   packages/evidence: {}
 
+  packages/handoff-extension: {}
+
   packages/host-openai: {}
 
   packages/native-fidelity: {}
