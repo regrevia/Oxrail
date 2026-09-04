@@ -16,8 +16,9 @@ import {
   browserOwnershipDecision,
   completePendingTool,
   completeToolCallPost,
+  createLocalDigestProtector,
   createBrowserTaskState,
-  protectToolCallRequestDigest,
+  migrateLegacyActionSignatureBaseline,
   recordToolCallPre,
   stageToolDecision,
   transitionBrowserTaskState,
@@ -211,6 +212,20 @@ function alignStateToProfile(
   };
 }
 
+function alignStateToActionSignatureKey(
+  state: BrowserTaskState,
+  keyId: string,
+): { ready: boolean; state: BrowserTaskState } {
+  try {
+    return {
+      ready: true,
+      state: migrateLegacyActionSignatureBaseline(state, keyId),
+    };
+  } catch {
+    return { ready: false, state };
+  }
+}
+
 const STATE_TRANSITION_ATTEMPTS = 10;
 const waitForStateRetry = (attempt: number) =>
   new Promise<void>((resolve) =>
@@ -378,6 +393,17 @@ export async function handleHookEvent(
     environment.pluginData,
     profile,
   );
+  const localDigestProtector = await createLocalDigestProtector(runtimeRoot);
+  const signatureProtector = localDigestProtector
+    ? {
+        keyId: localDigestProtector.keyId,
+        protect: (purpose: "input" | "target", digest: string) =>
+          localDigestProtector.protect(
+            purpose === "input" ? "action-input-v1" : "action-target-v1",
+            digest,
+          ),
+      }
+    : undefined;
 
   let blockingOutput: HookOutput | undefined;
   try {
@@ -396,6 +422,10 @@ export async function handleHookEvent(
         if (!aligned) return { value: bypassOutput() };
         state = aligned;
       }
+      const signatureState = signatureProtector
+        ? alignStateToActionSignatureKey(state, signatureProtector.keyId)
+        : { ready: false, state };
+      state = signatureState.state;
       const binding =
         bundle.status === "VALID"
           ? bundle.bindings[value.tool_name!]
@@ -415,6 +445,7 @@ export async function handleHookEvent(
           profile.nativeCapabilities.nativeApprovalFlow === "passed",
         profile,
         registry: bundle.registry,
+        ...(signatureProtector ? { signatureProtector } : {}),
         ...scope,
         state,
       });
@@ -424,17 +455,21 @@ export async function handleHookEvent(
         "SEMANTIC_HINT_ONLY",
       ].includes(guarded.decision.disposition);
       if (blocking) blockingOutput = guarded.output;
-      const requestDigest = await protectToolCallRequestDigest(
-        runtimeRoot,
+      if (
+        !localDigestProtector ||
+        !signatureProtector ||
+        !signatureState.ready
+      ) {
+        return { value: blocking ? guarded.output : bypassOutput() };
+      }
+      const requestDigest = localDigestProtector.protect(
+        "tool-call-request-v1",
         toolCallRequestDigest(
           value.tool_name!,
           guarded.action,
           guarded.decision,
         ),
       );
-      if (!requestDigest) {
-        return { value: blocking ? guarded.output : bypassOutput() };
-      }
       const claim = await recordToolCallPre(runtimeRoot, {
         ...scope,
         bindingDigest: toolCallBindingDigest(
@@ -465,7 +500,12 @@ export async function handleHookEvent(
       }
       if (!guarded.action) return { value: guarded.output };
       return {
-        state: stageToolDecision(state, guarded.action, claim.decision),
+        state: stageToolDecision(
+          state,
+          guarded.action,
+          claim.decision,
+          signatureProtector,
+        ),
         value: guarded.output,
       };
     });

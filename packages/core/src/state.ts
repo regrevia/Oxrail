@@ -9,6 +9,7 @@ import {
 } from "../../protocol/src/index.js";
 
 import {
+  type ActionSignatureProtector,
   actionDigestIdentity,
   actionIdentity,
   createActionDigest,
@@ -34,6 +35,45 @@ export interface NewBrowserTaskState {
   taskId: string;
   hostProfileId: string;
   mode: HostMode;
+}
+
+function assertActionSignatureKey(
+  state: BrowserTaskState,
+  protector: ActionSignatureProtector,
+): void {
+  if (
+    (state.actionSignatureKeyId !== undefined &&
+      state.actionSignatureKeyId !== protector.keyId) ||
+    (state.actionSignatureKeyId === undefined && state.lastAction !== undefined)
+  ) {
+    throw new Error("Action signature key does not match BrowserTaskState");
+  }
+}
+
+/** Clears only an idle legacy repetition baseline before its next atomic write. */
+export function migrateLegacyActionSignatureBaseline(
+  state: BrowserTaskState,
+  keyId: string,
+): BrowserTaskState {
+  if (state.actionSignatureKeyId !== undefined) {
+    if (state.actionSignatureKeyId !== keyId) {
+      throw new Error("Action signature key does not match BrowserTaskState");
+    }
+    return state;
+  }
+  if (
+    state.phase !== "RUNNING" ||
+    state.pointerOwner !== "NATIVE" ||
+    state.pendingNativeActionIds.length > 0
+  ) {
+    throw new Error("Legacy action baseline cannot be migrated while active");
+  }
+  const { lastAction: _legacyLastAction, ...legacy } = state;
+  return BrowserTaskStateSchema.parse({
+    ...legacy,
+    actionSignatureKeyId: keyId,
+    noProgressCount: 0,
+  });
 }
 
 export function createBrowserTaskState(
@@ -72,7 +112,9 @@ export function stageToolDecision(
   state: BrowserTaskState,
   action: ActionEnvelope,
   decision: PolicyDecision,
+  signatureProtector: ActionSignatureProtector,
 ): BrowserTaskState {
+  assertActionSignatureKey(state, signatureProtector);
   const toolUseId = persistentToolUseId(action.toolUseId);
   const executed =
     decision.disposition === "PASS_THROUGH_ORIGINAL" ||
@@ -86,9 +128,10 @@ export function stageToolDecision(
   return BrowserTaskStateSchema.parse({
     ...state,
     lastAction: {
-      ...createActionDigest(action, decision),
+      ...createActionDigest(action, decision, Date.now(), signatureProtector),
       toolUseId,
     },
+    actionSignatureKeyId: signatureProtector.keyId,
     pendingNativeActionIds,
     stateVersion: state.stateVersion + 1,
   });
@@ -126,6 +169,7 @@ export function recordActionOutcome(
   action: ActionEnvelope,
   decision: PolicyDecision,
   outcome: ActionOutcome,
+  signatureProtector: ActionSignatureProtector,
 ): BrowserTaskState {
   if (
     outcome.expectedStateVersion !== undefined &&
@@ -141,19 +185,27 @@ export function recordActionOutcome(
     decision.disposition === "SEMANTIC_HINT_ONLY";
   const sameAsLast =
     state.lastAction !== undefined &&
-    actionIdentity(action) === actionDigestIdentity(state.lastAction);
+    actionIdentity(action, signatureProtector) ===
+      actionDigestIdentity(state.lastAction);
   if (!executed) {
     return BrowserTaskStateSchema.parse({
       ...state,
       stateVersion: state.stateVersion + 1,
     });
   }
+  assertActionSignatureKey(state, signatureProtector);
   return BrowserTaskStateSchema.parse({
     ...state,
     lastAction: {
-      ...createActionDigest(action, decision, outcome.timestamp),
+      ...createActionDigest(
+        action,
+        decision,
+        outcome.timestamp,
+        signatureProtector,
+      ),
       toolUseId: persistentToolUseId(action.toolUseId),
     },
+    actionSignatureKeyId: signatureProtector.keyId,
     noProgressCount: outcome.meaningfulProgress
       ? 0
       : sameAsLast

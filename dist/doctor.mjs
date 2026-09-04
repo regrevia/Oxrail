@@ -12757,6 +12757,7 @@ var BrowserTaskStateSchema = external_exports.strictObject({
   revision: nonNegativeInt,
   lastObservation: ObservationDigestSchema.optional(),
   lastAction: ActionDigestSchema.optional(),
+  actionSignatureKeyId: hash3.optional(),
   noProgressCount: nonNegativeInt,
   recoveryLevel: nonNegativeInt,
   recoveryTransitions: nonNegativeInt,
@@ -13140,6 +13141,9 @@ import { createHash as createHash4 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 import path4 from "node:path";
 
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
@@ -13174,9 +13178,6 @@ function deriveHostMode(profile) {
   if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
   return "TRANSACTION_GUARD";
 }
-
-// packages/core/src/store.ts
-var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
 // packages/host-openai/src/guard.ts
 var hash4 = external_exports.string().regex(/^[a-f0-9]{64}$/i);

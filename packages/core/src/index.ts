@@ -1,5 +1,6 @@
 export * from "./cache.js";
 export * from "./handoff.js";
+export * from "./local-digest.js";
 export * from "./policy.js";
 export * from "./progress.js";
 export * from "./recovery.js";

@@ -814,6 +814,7 @@ export const BrowserTaskStateSchema = z.strictObject({
   revision: nonNegativeInt,
   lastObservation: ObservationDigestSchema.optional(),
   lastAction: ActionDigestSchema.optional(),
+  actionSignatureKeyId: hash.optional(),
   noProgressCount: nonNegativeInt,
   recoveryLevel: nonNegativeInt,
   recoveryTransitions: nonNegativeInt,

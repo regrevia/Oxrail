@@ -5,9 +5,9 @@ var __export = (target, all) => {
 };
 
 // packages/host-openai/src/hook.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
-import path7 from "node:path";
+import path8 from "node:path";
 
 // packages/protocol/src/digest.ts
 import { createHash } from "node:crypto";
@@ -795,10 +795,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1157,11 +1157,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -1329,7 +1329,7 @@ function treeifyError(error43, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error44, path8 = []) => {
+  const processError = (error44, path9 = []) => {
     var _a, _b;
     for (const issue2 of error44.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -1339,7 +1339,7 @@ function treeifyError(error43, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1371,8 +1371,8 @@ function treeifyError(error43, _mapper) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path8) {
+  const path9 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path9) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -12758,6 +12758,7 @@ var BrowserTaskStateSchema = external_exports.strictObject({
   revision: nonNegativeInt,
   lastObservation: ObservationDigestSchema.optional(),
   lastAction: ActionDigestSchema.optional(),
+  actionSignatureKeyId: hash3.optional(),
   noProgressCount: nonNegativeInt,
   recoveryLevel: nonNegativeInt,
   recoveryTransitions: nonNegativeInt,
@@ -12989,12 +12990,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
     ["test_results", manifest.test_results.length],
     ["reviewers", manifest.reviewers.length]
   ];
-  for (const [path8, size] of requiredCollections) {
+  for (const [path9, size] of requiredCollections) {
     if (size === 0) {
       context.addIssue({
         code: "custom",
-        path: [path8],
-        message: `ACCEPTED evidence requires ${path8}`
+        path: [path9],
+        message: `ACCEPTED evidence requires ${path9}`
       });
     }
   }
@@ -13136,188 +13137,16 @@ var EvidenceTraceSchema = external_exports.strictObject({
   }
 });
 
-// packages/core/src/policy.ts
-var pass = (reasonCode) => ({
-  disposition: "PASS_THROUGH_ORIGINAL",
-  reasonCode,
-  recoverable: true
-});
-function actionIdentity(action) {
-  return redactedDeterministicDigest("oxrail-action-identity-v1", {
-    route: action.route,
-    granularity: action.granularity,
-    actionType: action.actionType,
-    targetSignature: action.target ? redactedDeterministicDigest("oxrail-target-signature-v1", action.target) : void 0,
-    inputSignature: action.inputDigest
-  });
-}
-function actionDigestIdentity(action) {
-  return redactedDeterministicDigest("oxrail-action-identity-v1", {
-    route: action.route,
-    granularity: action.granularity,
-    actionType: action.actionType,
-    targetSignature: action.targetSignature,
-    inputSignature: action.inputSignature
-  });
-}
-function createActionDigest(action, decision, timestamp = Date.now()) {
-  const decisionKind = decision.disposition === "PASS_THROUGH_ORIGINAL" ? "ALLOW" : decision.disposition === "SEMANTIC_HINT_ONLY" ? "REWRITE" : decision.disposition === "REQUEST_HUMAN_HANDOFF" ? "HANDOFF" : "DENY";
-  return {
-    toolUseId: action.toolUseId,
-    route: action.route,
-    granularity: action.granularity,
-    actionType: action.actionType,
-    ...action.target ? {
-      targetSignature: redactedDeterministicDigest(
-        "oxrail-target-signature-v1",
-        action.target
-      ),
-      sourceRevision: action.target.sourceRevision
-    } : {},
-    ...action.inputDigest ? { inputSignature: action.inputDigest } : {},
-    decision: decisionKind,
-    reasonCode: decision.reasonCode,
-    timestamp
-  };
-}
-function targetIsStale(context) {
-  const { action, state, currentTargetFingerprint } = context;
-  if (action.revision !== void 0 && action.revision !== state.revision)
-    return true;
-  if (!action.target) return false;
-  if (action.target.sourceRevision !== state.revision) return true;
-  if (action.target.documentBinding !== void 0 && state.documentBinding !== void 0 && action.target.documentBinding !== state.documentBinding) {
-    return true;
-  }
-  return currentTargetFingerprint !== void 0 && action.target.fingerprint !== void 0 && currentTargetFingerprint !== action.target.fingerprint;
-}
-function repeatsWithoutProgress(action, state) {
-  if (!state.lastAction || state.noProgressCount < 2 || action.granularity === "NONE")
-    return false;
-  return actionIdentity(action) === actionDigestIdentity(state.lastAction);
-}
-function browserOwnershipDecision(state) {
-  if (state.phase === "USER_LEASE_ACTIVE" || state.phase === "HANDOFF_VERIFYING" || state.pointerOwner === "HUMAN") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
-      recoverable: true
-    };
-  }
-  if (state.phase === "RESUMING" || state.phase === "RESTORING_TAB" || state.pointerOwner === "NONE") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
-      recoverable: true
-    };
-  }
-  if (state.phase === "HANDOFF_PREPARING") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
-      recoverable: true
-    };
-  }
-  return void 0;
-}
-function evaluateAction(context) {
-  const { action, state } = context;
-  const ownershipDecision = browserOwnershipDecision(state);
-  if (ownershipDecision) return ownershipDecision;
-  const freshAndCovered = context.routeCovered !== false && state.hostProfileStatus === "VALID";
-  if (!freshAndCovered || state.mode === "ADVISORY_ONLY" || state.mode === "UNSUPPORTED") {
-    return pass(
-      !freshAndCovered ? state.hostProfileStatus === "VALID" ? "OXRAIL_HOST_ROUTE_UNPROVEN" : "OXRAIL_HOST_PROFILE_STALE" : "OXRAIL_HOST_ROUTE_UNPROVEN"
-    );
-  }
-  if (state.currentOrigin !== void 0 && action.origin !== void 0 && action.origin !== state.currentOrigin) {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
-      recoverable: true
-    };
-  }
-  if (context.requiresHumanBoundary) {
-    return context.handoffAvailable ? {
-      disposition: "REQUEST_HUMAN_HANDOFF",
-      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-      recoverable: true
-    } : {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-      recoverable: false
-    };
-  }
-  if (targetIsStale(context) && action.impact !== "read") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_STALE_TARGET",
-      recoverable: true
-    };
-  }
-  if (action.impact === "high-impact") {
-    if (context.hostApprovalAvailable) {
-      return {
-        disposition: "REQUEST_HOST_APPROVAL",
-        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-        recoverable: true
-      };
-    }
-    if (context.handoffAvailable) {
-      return {
-        disposition: "REQUEST_HUMAN_HANDOFF",
-        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-        recoverable: true
-      };
-    }
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-      recoverable: false
-    };
-  }
-  if (repeatsWithoutProgress(action, state)) {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_REDUNDANT_ACTION",
-      recoverable: true
-    };
-  }
-  return pass("OXRAIL_NORMAL_ACTION_PASSTHROUGH");
-}
-function deriveHostMode(profile) {
-  const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
-  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || profile.hooks.concurrentConflictProbe !== "passed" || !profile.evidence.validUntilHostChange) {
-    return "UNSUPPORTED";
-  }
-  if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
-    return "ADVISORY_ONLY";
-  }
-  const pinnedToolNames = new Set(
-    profile.route.browserTools.map((tool) => tool.canonicalToolName)
-  );
-  if (!profile.route.toolSchemaRegistryHash || !profile.route.toolSchemaRegistryEvidenceId || pinnedToolNames.size !== profile.route.canonicalToolMatchers.length || profile.route.canonicalToolMatchers.some(
-    (toolName) => !pinnedToolNames.has(toolName)
-  )) {
-    return "ADVISORY_ONLY";
-  }
-  if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
-    return "ADVISORY_ONLY";
-  }
-  const nativeSafe = profile.nativeInteraction.passThroughFingerprint === "passed" && profile.nativeInteraction.cursorVisualization === "passed" && profile.nativeInteraction.viewportCoordinateMapping === "passed" && profile.nativeInteraction.screenshotFrameFeedback === "passed" && Object.values(profile.nativeInteraction.primitiveParity).every(
-    (verdict) => verdict === "passed"
-  ) && profile.nativeInteraction.unexpectedPointerInterference === 0 && profile.nativeInteraction.unexpectedFocusInterference === 0 && profile.nativeInteraction.unexpectedScrollInterference === 0 && profile.nativeInteraction.incorrectNormalActionBlocks === 0;
-  const actionProven = nativeSafe && coverageComplete(profile.action.preToolCoverage) && profile.action.denyPreventedSideEffect === true;
-  if (!actionProven || profile.action.control === "NONE")
-    return "ADVISORY_ONLY";
-  const fullResultPath = profile.result.control === "NATIVE_TYPED_REWRITE" && coverageComplete(profile.result.postToolCoverage) && profile.result.replacementTiming === "before-model-proven" && profile.result.controlCriticalContract.status === "passed" && Object.values(profile.result.media).every(
-    (verdict) => verdict === "passed"
-  ) && profile.result.rawPersistence.length === 1 && profile.result.rawPersistence[0] === "none-observed";
-  if (profile.action.control === "MICRO_ACTION" && fullResultPath)
-    return "FULL_INTERPOSE";
-  if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
-  return "TRANSACTION_GUARD";
-}
+// packages/core/src/local-digest.ts
+import { createHash as createHash4, createHmac, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
+import { chmod as chmod2, link as link2, lstat, mkdir as mkdir2, open as open2, unlink as unlink2 } from "node:fs/promises";
+import path2 from "node:path";
+
+// packages/core/src/store.ts
+import { createHash as createHash3, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
+import path from "node:path";
 
 // packages/core/src/safe-state.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -13409,67 +13238,7 @@ function sanitizeBrowserTaskStateForPersistence(value) {
   });
 }
 
-// packages/core/src/state.ts
-function createBrowserTaskState(input) {
-  return BrowserTaskStateSchema.parse({
-    schemaVersion: 3,
-    sessionId: input.sessionId,
-    taskId: input.taskId,
-    goalSummary: "browser task",
-    hostProfileId: input.hostProfileId,
-    hostProfileStatus: "VALID",
-    mode: input.mode,
-    phase: "RUNNING",
-    revision: 0,
-    noProgressCount: 0,
-    recoveryLevel: 0,
-    recoveryTransitions: 0,
-    authState: "UNKNOWN",
-    leaseEpoch: 0,
-    pointerOwner: "NATIVE",
-    targetCacheEpoch: 0,
-    pendingNativeActionIds: [],
-    stateVersion: 0
-  });
-}
-function stageToolDecision(state, action, decision) {
-  const toolUseId = persistentToolUseId(action.toolUseId);
-  const executed = decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
-  const pendingNativeActionIds = [
-    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId))
-  ];
-  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
-    pendingNativeActionIds.push(toolUseId);
-  }
-  return BrowserTaskStateSchema.parse({
-    ...state,
-    lastAction: {
-      ...createActionDigest(action, decision),
-      toolUseId
-    },
-    pendingNativeActionIds,
-    stateVersion: state.stateVersion + 1
-  });
-}
-function completePendingTool(state, toolUseId) {
-  const persistentId = persistentToolUseId(toolUseId);
-  if (!state.pendingNativeActionIds.some(
-    (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId
-  )) {
-    return state;
-  }
-  return BrowserTaskStateSchema.parse({
-    ...state,
-    pendingNativeActionIds: state.pendingNativeActionIds.map(canonicalPersistentToolUseId).filter((pendingId) => pendingId !== persistentId),
-    stateVersion: state.stateVersion + 1
-  });
-}
-
 // packages/core/src/store.ts
-import { createHash as createHash3, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
-import path from "node:path";
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 var LOCK_STALE_MS = 3e4;
 var MAX_LOCK_BYTES = 512;
@@ -13758,28 +13527,413 @@ async function transitionBrowserTaskState(root, scope, transition) {
   }
 }
 
+// packages/core/src/local-digest.ts
+var KEY_BYTES = 32;
+var KEY_FILE = ".local-digest-key.json";
+var KEY_FILE_BYTES = 256;
+var DIGEST = /^[a-f0-9]{64}$/;
+var PURPOSES = /* @__PURE__ */ new Set([
+  "action-input-v1",
+  "action-target-v1",
+  "tool-call-request-v1"
+]);
+var errorCode2 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+var keyId = (key) => createHash4("sha256").update("oxrail-local-digest-key-id-v1\0").update(key).digest("hex");
+async function privateDirectory(directory) {
+  await mkdir2(directory, { recursive: true, mode: 448 });
+  const metadata = await lstat(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error("local digest path is not a directory");
+  }
+  await chmod2(directory, 448);
+}
+async function syncDirectory2(directory) {
+  let handle;
+  try {
+    handle = await open2(directory, "r");
+    await handle.sync();
+  } catch (error43) {
+    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode2(error43) ?? "")) {
+      throw error43;
+    }
+  } finally {
+    await handle?.close();
+  }
+}
+function parseKeyRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "algorithm,key,keyId,schemaVersion") {
+    throw new Error("invalid local digest key record");
+  }
+  const record2 = value;
+  const key = typeof record2.key === "string" ? Buffer.from(record2.key, "base64") : null;
+  if (record2.schemaVersion !== 1 || record2.algorithm !== "HMAC-SHA256" || !key || key.byteLength !== KEY_BYTES || key.toString("base64") !== record2.key || record2.keyId !== keyId(key)) {
+    throw new Error("invalid local digest key record");
+  }
+  return { key, record: record2 };
+}
+async function loadKeyRecord(filename) {
+  const { contents } = await readBoundedPrivateFile(
+    filename,
+    KEY_FILE_BYTES,
+    "UNAVAILABLE"
+  );
+  return parseKeyRecord(JSON.parse(contents.toString("utf8")));
+}
+async function localDigestKey(root) {
+  await privateDirectory(root);
+  const destination = path2.join(root, KEY_FILE);
+  try {
+    return await loadKeyRecord(destination);
+  } catch (error43) {
+    if (errorCode2(error43) !== "ENOENT") throw error43;
+  }
+  const key = randomBytes(KEY_BYTES);
+  const record2 = {
+    algorithm: "HMAC-SHA256",
+    key: key.toString("base64"),
+    keyId: keyId(key),
+    schemaVersion: 1
+  };
+  const temporary = path2.join(root, `.${randomUUID2()}.key.tmp`);
+  let handle;
+  try {
+    handle = await open2(temporary, "wx", 384);
+    await handle.writeFile(`${JSON.stringify(record2)}
+`, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    try {
+      await link2(temporary, destination);
+      await syncDirectory2(root);
+      return { key, record: record2 };
+    } catch (error43) {
+      if (errorCode2(error43) !== "EEXIST") throw error43;
+      return await loadKeyRecord(destination);
+    }
+  } finally {
+    await handle?.close();
+    await unlink2(temporary).catch(() => void 0);
+  }
+}
+async function createLocalDigestProtector(root) {
+  try {
+    const { key, record: record2 } = await localDigestKey(root);
+    return {
+      keyId: record2.keyId,
+      protect(purpose, digest2) {
+        if (!PURPOSES.has(purpose) || !DIGEST.test(digest2)) {
+          throw new TypeError("invalid local digest input");
+        }
+        return createHmac("sha256", key).update("oxrail-local-digest-v1\0").update(purpose).update("\0").update(digest2).digest("hex");
+      }
+    };
+  } catch {
+    return;
+  }
+}
+
+// packages/core/src/policy.ts
+var pass = (reasonCode) => ({
+  disposition: "PASS_THROUGH_ORIGINAL",
+  reasonCode,
+  recoverable: true
+});
+var protectSignature = (protector, purpose, digest2) => protector ? protector.protect(purpose, digest2) : digest2;
+function actionIdentity(action, signatureProtector) {
+  return redactedDeterministicDigest("oxrail-action-identity-v1", {
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    targetSignature: action.target ? protectSignature(
+      signatureProtector,
+      "target",
+      redactedDeterministicDigest(
+        "oxrail-target-signature-v1",
+        action.target
+      )
+    ) : void 0,
+    inputSignature: action.inputDigest ? protectSignature(signatureProtector, "input", action.inputDigest) : void 0
+  });
+}
+function actionDigestIdentity(action) {
+  return redactedDeterministicDigest("oxrail-action-identity-v1", {
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    targetSignature: action.targetSignature,
+    inputSignature: action.inputSignature
+  });
+}
+function createActionDigest(action, decision, timestamp = Date.now(), signatureProtector) {
+  const decisionKind = decision.disposition === "PASS_THROUGH_ORIGINAL" ? "ALLOW" : decision.disposition === "SEMANTIC_HINT_ONLY" ? "REWRITE" : decision.disposition === "REQUEST_HUMAN_HANDOFF" ? "HANDOFF" : "DENY";
+  return {
+    toolUseId: action.toolUseId,
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    ...action.target ? {
+      targetSignature: protectSignature(
+        signatureProtector,
+        "target",
+        redactedDeterministicDigest(
+          "oxrail-target-signature-v1",
+          action.target
+        )
+      ),
+      sourceRevision: action.target.sourceRevision
+    } : {},
+    ...action.inputDigest ? {
+      inputSignature: protectSignature(
+        signatureProtector,
+        "input",
+        action.inputDigest
+      )
+    } : {},
+    decision: decisionKind,
+    reasonCode: decision.reasonCode,
+    timestamp
+  };
+}
+function targetIsStale(context) {
+  const { action, state, currentTargetFingerprint } = context;
+  if (action.revision !== void 0 && action.revision !== state.revision)
+    return true;
+  if (!action.target) return false;
+  if (action.target.sourceRevision !== state.revision) return true;
+  if (action.target.documentBinding !== void 0 && state.documentBinding !== void 0 && action.target.documentBinding !== state.documentBinding) {
+    return true;
+  }
+  return currentTargetFingerprint !== void 0 && action.target.fingerprint !== void 0 && currentTargetFingerprint !== action.target.fingerprint;
+}
+function repeatsWithoutProgress(action, state, signatureProtector) {
+  if (!signatureProtector || state.actionSignatureKeyId !== signatureProtector.keyId || !state.lastAction || state.noProgressCount < 2 || action.granularity === "NONE")
+    return false;
+  return actionIdentity(action, signatureProtector) === actionDigestIdentity(state.lastAction);
+}
+function browserOwnershipDecision(state) {
+  if (state.phase === "USER_LEASE_ACTIVE" || state.phase === "HANDOFF_VERIFYING" || state.pointerOwner === "HUMAN") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
+      recoverable: true
+    };
+  }
+  if (state.phase === "RESUMING" || state.phase === "RESTORING_TAB" || state.pointerOwner === "NONE") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
+      recoverable: true
+    };
+  }
+  if (state.phase === "HANDOFF_PREPARING") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+      recoverable: true
+    };
+  }
+  return void 0;
+}
+function evaluateAction(context) {
+  const { action, state } = context;
+  const ownershipDecision = browserOwnershipDecision(state);
+  if (ownershipDecision) return ownershipDecision;
+  const freshAndCovered = context.routeCovered !== false && state.hostProfileStatus === "VALID";
+  if (!freshAndCovered || state.mode === "ADVISORY_ONLY" || state.mode === "UNSUPPORTED") {
+    return pass(
+      !freshAndCovered ? state.hostProfileStatus === "VALID" ? "OXRAIL_HOST_ROUTE_UNPROVEN" : "OXRAIL_HOST_PROFILE_STALE" : "OXRAIL_HOST_ROUTE_UNPROVEN"
+    );
+  }
+  if (state.currentOrigin !== void 0 && action.origin !== void 0 && action.origin !== state.currentOrigin) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+      recoverable: true
+    };
+  }
+  if (context.requiresHumanBoundary) {
+    return context.handoffAvailable ? {
+      disposition: "REQUEST_HUMAN_HANDOFF",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: true
+    } : {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: false
+    };
+  }
+  if (targetIsStale(context) && action.impact !== "read") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_STALE_TARGET",
+      recoverable: true
+    };
+  }
+  if (action.impact === "high-impact") {
+    if (context.hostApprovalAvailable) {
+      return {
+        disposition: "REQUEST_HOST_APPROVAL",
+        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+        recoverable: true
+      };
+    }
+    if (context.handoffAvailable) {
+      return {
+        disposition: "REQUEST_HUMAN_HANDOFF",
+        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+        recoverable: true
+      };
+    }
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: false
+    };
+  }
+  if (repeatsWithoutProgress(action, state, context.signatureProtector)) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+      recoverable: true
+    };
+  }
+  return pass("OXRAIL_NORMAL_ACTION_PASSTHROUGH");
+}
+function deriveHostMode(profile) {
+  const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
+  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || profile.hooks.concurrentConflictProbe !== "passed" || !profile.evidence.validUntilHostChange) {
+    return "UNSUPPORTED";
+  }
+  if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
+    return "ADVISORY_ONLY";
+  }
+  const pinnedToolNames = new Set(
+    profile.route.browserTools.map((tool) => tool.canonicalToolName)
+  );
+  if (!profile.route.toolSchemaRegistryHash || !profile.route.toolSchemaRegistryEvidenceId || pinnedToolNames.size !== profile.route.canonicalToolMatchers.length || profile.route.canonicalToolMatchers.some(
+    (toolName) => !pinnedToolNames.has(toolName)
+  )) {
+    return "ADVISORY_ONLY";
+  }
+  if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
+    return "ADVISORY_ONLY";
+  }
+  const nativeSafe = profile.nativeInteraction.passThroughFingerprint === "passed" && profile.nativeInteraction.cursorVisualization === "passed" && profile.nativeInteraction.viewportCoordinateMapping === "passed" && profile.nativeInteraction.screenshotFrameFeedback === "passed" && Object.values(profile.nativeInteraction.primitiveParity).every(
+    (verdict) => verdict === "passed"
+  ) && profile.nativeInteraction.unexpectedPointerInterference === 0 && profile.nativeInteraction.unexpectedFocusInterference === 0 && profile.nativeInteraction.unexpectedScrollInterference === 0 && profile.nativeInteraction.incorrectNormalActionBlocks === 0;
+  const actionProven = nativeSafe && coverageComplete(profile.action.preToolCoverage) && profile.action.denyPreventedSideEffect === true;
+  if (!actionProven || profile.action.control === "NONE")
+    return "ADVISORY_ONLY";
+  const fullResultPath = profile.result.control === "NATIVE_TYPED_REWRITE" && coverageComplete(profile.result.postToolCoverage) && profile.result.replacementTiming === "before-model-proven" && profile.result.controlCriticalContract.status === "passed" && Object.values(profile.result.media).every(
+    (verdict) => verdict === "passed"
+  ) && profile.result.rawPersistence.length === 1 && profile.result.rawPersistence[0] === "none-observed";
+  if (profile.action.control === "MICRO_ACTION" && fullResultPath)
+    return "FULL_INTERPOSE";
+  if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
+  return "TRANSACTION_GUARD";
+}
+
+// packages/core/src/state.ts
+function assertActionSignatureKey(state, protector) {
+  if (state.actionSignatureKeyId !== void 0 && state.actionSignatureKeyId !== protector.keyId || state.actionSignatureKeyId === void 0 && state.lastAction !== void 0) {
+    throw new Error("Action signature key does not match BrowserTaskState");
+  }
+}
+function migrateLegacyActionSignatureBaseline(state, keyId2) {
+  if (state.actionSignatureKeyId !== void 0) {
+    if (state.actionSignatureKeyId !== keyId2) {
+      throw new Error("Action signature key does not match BrowserTaskState");
+    }
+    return state;
+  }
+  if (state.phase !== "RUNNING" || state.pointerOwner !== "NATIVE" || state.pendingNativeActionIds.length > 0) {
+    throw new Error("Legacy action baseline cannot be migrated while active");
+  }
+  const { lastAction: _legacyLastAction, ...legacy } = state;
+  return BrowserTaskStateSchema.parse({
+    ...legacy,
+    actionSignatureKeyId: keyId2,
+    noProgressCount: 0
+  });
+}
+function createBrowserTaskState(input) {
+  return BrowserTaskStateSchema.parse({
+    schemaVersion: 3,
+    sessionId: input.sessionId,
+    taskId: input.taskId,
+    goalSummary: "browser task",
+    hostProfileId: input.hostProfileId,
+    hostProfileStatus: "VALID",
+    mode: input.mode,
+    phase: "RUNNING",
+    revision: 0,
+    noProgressCount: 0,
+    recoveryLevel: 0,
+    recoveryTransitions: 0,
+    authState: "UNKNOWN",
+    leaseEpoch: 0,
+    pointerOwner: "NATIVE",
+    targetCacheEpoch: 0,
+    pendingNativeActionIds: [],
+    stateVersion: 0
+  });
+}
+function stageToolDecision(state, action, decision, signatureProtector) {
+  assertActionSignatureKey(state, signatureProtector);
+  const toolUseId = persistentToolUseId(action.toolUseId);
+  const executed = decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
+  const pendingNativeActionIds = [
+    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId))
+  ];
+  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
+    pendingNativeActionIds.push(toolUseId);
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    lastAction: {
+      ...createActionDigest(action, decision, Date.now(), signatureProtector),
+      toolUseId
+    },
+    actionSignatureKeyId: signatureProtector.keyId,
+    pendingNativeActionIds,
+    stateVersion: state.stateVersion + 1
+  });
+}
+function completePendingTool(state, toolUseId) {
+  const persistentId = persistentToolUseId(toolUseId);
+  if (!state.pendingNativeActionIds.some(
+    (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId
+  )) {
+    return state;
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    pendingNativeActionIds: state.pendingNativeActionIds.map(canonicalPersistentToolUseId).filter((pendingId) => pendingId !== persistentId),
+    stateVersion: state.stateVersion + 1
+  });
+}
+
 // packages/core/src/tool-call.ts
-import { createHash as createHash4, createHmac, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash5, randomUUID as randomUUID3 } from "node:crypto";
 import { constants as constants2 } from "node:fs";
 import {
-  chmod as chmod2,
-  link as link2,
-  lstat,
-  mkdir as mkdir2,
-  open as open2,
+  chmod as chmod3,
+  link as link3,
+  lstat as lstat2,
+  mkdir as mkdir3,
+  open as open3,
   readdir,
   rename as rename2,
-  unlink as unlink2
+  unlink as unlink3
 } from "node:fs/promises";
-import path2 from "node:path";
+import path3 from "node:path";
 var MAX_TOOL_CALL_MARKER_BYTES = 1024;
 var MAX_ID_LENGTH = 4096;
-var REQUEST_DIGEST_KEY_BYTES = 32;
-var REQUEST_DIGEST_KEY_FILE = ".request-digest-key";
-var DIGEST = /^[a-f0-9]{64}$/;
-var errorCode2 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+var DIGEST2 = /^[a-f0-9]{64}$/;
+var errorCode3 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
 function digest(domain2, ...values) {
-  const hash6 = createHash4("sha256").update(domain2);
+  const hash6 = createHash5("sha256").update(domain2);
   for (const value of values) {
     hash6.update("\0").update(String(Buffer.byteLength(value))).update(":").update(value);
   }
@@ -13788,20 +13942,20 @@ function digest(domain2, ...values) {
 var validId = (value) => typeof value === "string" && value.length > 0 && value.length <= MAX_ID_LENGTH;
 var validScope = (scope) => Boolean(scope) && validId(scope.sessionId) && validId(scope.taskId);
 var toolDigestFor = (input) => digest("oxrail-tool-call-v2", input.sessionId, input.taskId, input.toolUseId);
-var journalDirectory = (root, scope) => path2.join(
+var journalDirectory = (root, scope) => path3.join(
   root,
   digest("oxrail-tool-call-session-v2", scope.sessionId),
   digest("oxrail-tool-call-task-v2", scope.taskId),
   "tool-calls"
 );
-var markerPath = (directory, toolDigest) => path2.join(directory, `${toolDigest}.json`);
-var receiptPath = (directory, toolDigest) => path2.join(directory, `${toolDigest}.post`);
+var markerPath = (directory, toolDigest) => path3.join(directory, `${toolDigest}.json`);
+var receiptPath = (directory, toolDigest) => path3.join(directory, `${toolDigest}.post`);
 var decisionLeavesNativeActionPending = (decision) => decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
 function parseMarker(value, expectedToolDigest) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const marker = value;
   const decision = PolicyDecisionSchema.safeParse(marker.decision);
-  if (Object.keys(value).sort().join(",") !== "bindingDigest,decision,requestDigest,schemaVersion,status,toolDigest" || marker.schemaVersion !== 1 || marker.toolDigest !== expectedToolDigest || !DIGEST.test(marker.bindingDigest ?? "") || !DIGEST.test(marker.requestDigest ?? "") || marker.status !== "PENDING" && marker.status !== "COMPLETE" || !decision.success || marker.status === "PENDING" && !decisionLeavesNativeActionPending(decision.data)) {
+  if (Object.keys(value).sort().join(",") !== "bindingDigest,decision,requestDigest,schemaVersion,status,toolDigest" || marker.schemaVersion !== 1 || marker.toolDigest !== expectedToolDigest || !DIGEST2.test(marker.bindingDigest ?? "") || !DIGEST2.test(marker.requestDigest ?? "") || marker.status !== "PENDING" && marker.status !== "COMPLETE" || !decision.success || marker.status === "PENDING" && !decisionLeavesNativeActionPending(decision.data)) {
     return;
   }
   return {
@@ -13816,7 +13970,7 @@ function parseMarker(value, expectedToolDigest) {
 async function readBounded(filename) {
   let handle;
   try {
-    handle = await open2(
+    handle = await open3(
       filename,
       constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK
     );
@@ -13852,77 +14006,32 @@ async function readMarker(filename, expectedToolDigest) {
     const marker = parseMarker(value, expectedToolDigest);
     return marker ? { kind: "VALID", marker } : { kind: "INVALID" };
   } catch (error43) {
-    return { kind: errorCode2(error43) === "ENOENT" ? "MISSING" : "INVALID" };
+    return { kind: errorCode3(error43) === "ENOENT" ? "MISSING" : "INVALID" };
   }
 }
-async function privateDirectory(directory) {
-  await mkdir2(directory, { recursive: true, mode: 448 });
-  const metadata = await lstat(directory);
+async function privateDirectory2(directory) {
+  await mkdir3(directory, { recursive: true, mode: 448 });
+  const metadata = await lstat2(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("journal path is not a directory");
   }
-  await chmod2(directory, 448);
+  await chmod3(directory, 448);
 }
 async function ensureJournalDirectory(root, scope) {
   const directory = journalDirectory(root, scope);
-  await privateDirectory(root);
-  await privateDirectory(path2.dirname(path2.dirname(directory)));
-  await privateDirectory(path2.dirname(directory));
-  await privateDirectory(directory);
+  await privateDirectory2(root);
+  await privateDirectory2(path3.dirname(path3.dirname(directory)));
+  await privateDirectory2(path3.dirname(directory));
+  await privateDirectory2(directory);
   return directory;
 }
-async function loadRequestDigestKey(filename) {
-  const key = await readBounded(filename);
-  if (key.byteLength !== REQUEST_DIGEST_KEY_BYTES) {
-    throw new Error("invalid request digest key");
-  }
-  return key;
-}
-async function requestDigestKey(root) {
-  await privateDirectory(root);
-  const destination = path2.join(root, REQUEST_DIGEST_KEY_FILE);
-  try {
-    return await loadRequestDigestKey(destination);
-  } catch (error43) {
-    if (errorCode2(error43) !== "ENOENT") throw error43;
-  }
-  const candidate = randomBytes(REQUEST_DIGEST_KEY_BYTES);
-  const temporary = path2.join(root, `.${randomUUID2()}.key.tmp`);
+async function syncDirectory3(directory) {
   let handle;
   try {
-    handle = await open2(temporary, "wx", 384);
-    await handle.writeFile(candidate);
-    await handle.sync();
-    await handle.close();
-    handle = void 0;
-    try {
-      await link2(temporary, destination);
-      await syncDirectory2(root);
-      return candidate;
-    } catch (error43) {
-      if (errorCode2(error43) !== "EEXIST") throw error43;
-      return await loadRequestDigestKey(destination);
-    }
-  } finally {
-    await handle?.close();
-    await unlink2(temporary).catch(() => void 0);
-  }
-}
-async function protectToolCallRequestDigest(root, unkeyedDigest) {
-  try {
-    if (!DIGEST.test(unkeyedDigest)) return;
-    return createHmac("sha256", await requestDigestKey(root)).update("oxrail-tool-call-request-v1\0").update(unkeyedDigest).digest("hex");
-  } catch {
-    return;
-  }
-}
-async function syncDirectory2(directory) {
-  let handle;
-  try {
-    handle = await open2(directory, "r");
+    handle = await open3(directory, "r");
     await handle.sync();
   } catch (error43) {
-    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode2(error43) ?? "")) {
+    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode3(error43) ?? "")) {
       throw error43;
     }
   } finally {
@@ -13938,63 +14047,63 @@ function serializeMarker(marker) {
   return contents;
 }
 async function createMarker(directory, destination, marker) {
-  const temporary = path2.join(
+  const temporary = path3.join(
     directory,
-    `.${marker.toolDigest}.${randomUUID2()}.tmp`
+    `.${marker.toolDigest}.${randomUUID3()}.tmp`
   );
   let handle;
   let committed = false;
   try {
-    handle = await open2(temporary, "wx", 384);
+    handle = await open3(temporary, "wx", 384);
     await handle.writeFile(serializeMarker(marker), "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     try {
-      await link2(temporary, destination);
+      await link3(temporary, destination);
       committed = true;
     } catch (error43) {
-      if (errorCode2(error43) === "EEXIST") return "EXISTS";
+      if (errorCode3(error43) === "EEXIST") return "EXISTS";
       throw error43;
     }
-    await syncDirectory2(directory);
+    await syncDirectory3(directory);
     return "CREATED";
   } catch (error43) {
     if (committed) return "CREATED";
     throw error43;
   } finally {
     await handle?.close();
-    await unlink2(temporary).catch(() => void 0);
+    await unlink3(temporary).catch(() => void 0);
   }
 }
 async function replaceMarker(directory, destination, marker) {
-  const temporary = path2.join(
+  const temporary = path3.join(
     directory,
-    `.${marker.toolDigest}.${randomUUID2()}.tmp`
+    `.${marker.toolDigest}.${randomUUID3()}.tmp`
   );
   let handle;
   let committed = false;
   try {
-    handle = await open2(temporary, "wx", 384);
+    handle = await open3(temporary, "wx", 384);
     await handle.writeFile(serializeMarker(marker), "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     await rename2(temporary, destination);
     committed = true;
-    await syncDirectory2(directory);
+    await syncDirectory3(directory);
   } catch (error43) {
     if (!committed) throw error43;
   } finally {
     await handle?.close();
-    await unlink2(temporary).catch(() => void 0);
+    await unlink3(temporary).catch(() => void 0);
   }
 }
 var sameBinding = (marker, input) => marker.bindingDigest === input.bindingDigest && marker.requestDigest === input.requestDigest;
 var sameCompletion = (receipt, marker) => receipt.status === "COMPLETE" && receipt.bindingDigest === marker.bindingDigest && receipt.requestDigest === marker.requestDigest && receipt.decision.disposition === marker.decision.disposition && receipt.decision.reasonCode === marker.decision.reasonCode && receipt.decision.recoverable === marker.decision.recoverable;
 async function recordToolCallPre(root, input) {
   try {
-    if (!validScope(input) || !validId(input.toolUseId) || !DIGEST.test(input.bindingDigest) || !DIGEST.test(input.requestDigest)) {
+    if (!validScope(input) || !validId(input.toolUseId) || !DIGEST2.test(input.bindingDigest) || !DIGEST2.test(input.requestDigest)) {
       return { kind: "UNAVAILABLE" };
     }
     const decision = PolicyDecisionSchema.safeParse(input.decision);
@@ -14391,6 +14500,7 @@ function runGuardPreToolUse(input) {
   const decision = evaluateAction({
     action: decoded.action,
     state: input.state,
+    ...input.signatureProtector ? { signatureProtector: input.signatureProtector } : {},
     routeCovered: true,
     ...input.currentTargetFingerprint !== void 0 ? {
       currentTargetFingerprint: policyTargetFingerprint(
@@ -14410,34 +14520,34 @@ function runGuardPreToolUse(input) {
 }
 
 // packages/host-openai/src/profile.ts
-import { createHash as createHash5, randomUUID as randomUUID3 } from "node:crypto";
-import path4 from "node:path";
+import { createHash as createHash6, randomUUID as randomUUID4 } from "node:crypto";
+import path5 from "node:path";
 
 // packages/host-openai/src/bounded-file.ts
 import { constants as constants3 } from "node:fs";
-import { chmod as chmod3, lstat as lstat2, mkdir as mkdir3, open as open3 } from "node:fs/promises";
-import path3 from "node:path";
+import { chmod as chmod4, lstat as lstat3, mkdir as mkdir4, open as open4 } from "node:fs/promises";
+import path4 from "node:path";
 function relativePath(root, filename) {
-  const relative = path3.relative(path3.resolve(root), path3.resolve(filename));
-  if (relative === ".." || relative.startsWith(`..${path3.sep}`) || path3.isAbsolute(relative)) {
+  const relative = path4.relative(path4.resolve(root), path4.resolve(filename));
+  if (relative === ".." || relative.startsWith(`..${path4.sep}`) || path4.isAbsolute(relative)) {
     throw new Error("path escapes its local root");
   }
   return relative;
 }
 async function rejectSymlinkPath(root, filename) {
   const relative = relativePath(root, filename);
-  let current = path3.resolve(root);
-  for (const segment of ["", ...relative.split(path3.sep).filter(Boolean)]) {
-    if (segment) current = path3.join(current, segment);
-    const stats = await lstat2(current);
+  let current = path4.resolve(root);
+  for (const segment of ["", ...relative.split(path4.sep).filter(Boolean)]) {
+    if (segment) current = path4.join(current, segment);
+    const stats = await lstat3(current);
     if (stats.isSymbolicLink())
       throw new Error("symbolic links are not allowed");
-    if (current !== path3.resolve(filename) && !stats.isDirectory()) {
+    if (current !== path4.resolve(filename) && !stats.isDirectory()) {
       throw new Error("path ancestor is not a directory");
     }
   }
 }
-async function readBoundedRegularFile(filename, maximumBytes, root = path3.dirname(filename)) {
+async function readBoundedRegularFile(filename, maximumBytes, root = path4.dirname(filename)) {
   if (process.platform === "win32") {
     throw new Error("bounded no-follow reads are unsupported on Windows");
   }
@@ -14445,7 +14555,7 @@ async function readBoundedRegularFile(filename, maximumBytes, root = path3.dirna
     throw new TypeError("maximumBytes must be a non-negative safe integer");
   }
   await rejectSymlinkPath(root, filename);
-  const handle = await open3(
+  const handle = await open4(
     filename,
     constants3.O_RDONLY | constants3.O_NOFOLLOW | constants3.O_NONBLOCK
   );
@@ -14479,8 +14589,8 @@ var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
 var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
 var CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR = "credential activation denied: independent macOS attestation verifier unavailable";
 var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
-var sha256 = (value) => createHash5("sha256").update(value).digest("hex");
-var profileDirectory = (pluginData, profileId) => path4.join(pluginData, HOSTS_DIRECTORY, profileId);
+var sha256 = (value) => createHash6("sha256").update(value).digest("hex");
+var profileDirectory = (pluginData, profileId) => path5.join(pluginData, HOSTS_DIRECTORY, profileId);
 function validateHostProfile(value, constraints = {}) {
   if (value && typeof value === "object" && value.schemaVersion === 3) {
     return {
@@ -14553,11 +14663,11 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   try {
     if (explicitProfilePath) {
       profilePath = explicitProfilePath;
-      profileId = path4.basename(path4.dirname(profilePath));
+      profileId = path5.basename(path5.dirname(profilePath));
     } else {
       const active = JSON.parse(
         (await readBoundedRegularFile(
-          path4.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
+          path5.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
           16384,
           pluginData
         )).toString("utf8")
@@ -14566,7 +14676,7 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
         throw new Error("invalid active profile selection");
       }
       profileId = active.profileId;
-      profilePath = path4.join(
+      profilePath = path5.join(
         profileDirectory(pluginData, profileId),
         HOST_PROFILE_FILENAME
       );
@@ -14582,11 +14692,11 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   try {
     if (!safeProfileId(profileId))
       throw new Error("unsafe host profile identifier");
-    const readRoot = explicitProfilePath ? path4.dirname(profilePath) : pluginData;
+    const readRoot = explicitProfilePath ? path5.dirname(profilePath) : pluginData;
     const [rawProfile, rawManifest] = await Promise.all([
       readBoundedRegularFile(profilePath, 1048576, readRoot),
       readBoundedRegularFile(
-        path4.join(path4.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        path5.join(path5.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
         16384,
         readRoot
       )
@@ -14609,8 +14719,8 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
 }
 
 // packages/host-openai/src/registry-bundle.ts
-import { createHash as createHash6 } from "node:crypto";
-import path5 from "node:path";
+import { createHash as createHash7 } from "node:crypto";
+import path6 from "node:path";
 var TOOL_SCHEMA_REGISTRY_FILENAME = "tool-schema-registry.json";
 var hash5 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
 var safeProfileId2 = external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
@@ -14689,24 +14799,24 @@ async function loadToolSchemaRegistryBundle(pluginData, profile) {
   } catch {
     return bypassed("Host Profile has no complete external tool registry pins");
   }
-  const directory = path5.join(pluginData, HOSTS_DIRECTORY, active.profileId);
+  const directory = path6.join(pluginData, HOSTS_DIRECTORY, active.profileId);
   let rawProfile;
   let rawRegistry;
   let rawManifest;
   try {
     [rawProfile, rawRegistry, rawManifest] = await Promise.all([
       readBoundedRegularFile(
-        path5.join(directory, HOST_PROFILE_FILENAME),
+        path6.join(directory, HOST_PROFILE_FILENAME),
         1048576,
         pluginData
       ),
       readBoundedRegularFile(
-        path5.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
+        path6.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
         1048576,
         pluginData
       ),
       readBoundedRegularFile(
-        path5.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+        path6.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
         16384,
         pluginData
       )
@@ -14726,11 +14836,11 @@ async function loadToolSchemaRegistryBundle(pluginData, profile) {
   if (!parsedManifest.success)
     return bypassed("tool schema registry manifest is invalid");
   const manifest = parsedManifest.data;
-  const profileFileHash = createHash6("sha256").update(rawProfile).digest("hex");
+  const profileFileHash = createHash7("sha256").update(rawProfile).digest("hex");
   if (!sameHash(profileFileHash, manifest.profileSha256)) {
     return bypassed("Host Profile file hash does not match its manifest");
   }
-  const fileHash = createHash6("sha256").update(rawRegistry).digest("hex");
+  const fileHash = createHash7("sha256").update(rawRegistry).digest("hex");
   if (!sameHash(fileHash, manifest.guard.toolSchemaRegistryFileSha256)) {
     return bypassed(
       "tool schema registry file hash does not match its manifest"
@@ -14839,10 +14949,10 @@ async function loadToolSchemaRegistryBundle(pluginData, profile) {
 }
 
 // packages/host-openai/src/state.ts
-import { createHash as createHash7, randomUUID as randomUUID4 } from "node:crypto";
-import { mkdir as mkdir4, readFile, readdir as readdir2, rename as rename3, writeFile } from "node:fs/promises";
+import { createHash as createHash8, randomUUID as randomUUID5 } from "node:crypto";
+import { mkdir as mkdir5, readFile, readdir as readdir2, rename as rename3, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import path6 from "node:path";
+import path7 from "node:path";
 var HOOK_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
@@ -14850,9 +14960,9 @@ var HOOK_EVENTS = [
   "PermissionRequest",
   "PostToolUse"
 ];
-var oxrailDataDirectory = (home = homedir()) => path6.join(home, ".oxrail");
-var digestSessionId = (sessionId) => createHash7("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
-var digestToolUseId = (toolUseId) => createHash7("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
+var oxrailDataDirectory = (home = homedir()) => path7.join(home, ".oxrail");
+var digestSessionId = (sessionId) => createHash8("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
+var digestToolUseId = (toolUseId) => createHash8("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
   SessionStart: "session-start.json",
   UserPromptSubmit: "user-prompt-submit.json",
@@ -14860,9 +14970,9 @@ var markerNames = {
   PermissionRequest: "permission-request.json",
   PostToolUse: "post-tool-use.json"
 };
-var stateDirectory = (pluginData) => path6.join(pluginData, "setup-verification");
-var browserRouteDirectory = (pluginData) => path6.join(stateDirectory(pluginData), "browser-route");
-var markerPath2 = (pluginData, event, browserHook) => path6.join(
+var stateDirectory = (pluginData) => path7.join(pluginData, "setup-verification");
+var browserRouteDirectory = (pluginData) => path7.join(stateDirectory(pluginData), "browser-route");
+var markerPath2 = (pluginData, event, browserHook) => path7.join(
   stateDirectory(pluginData),
   `${browserHook ? "browser-" : ""}${markerNames[event]}`
 );
@@ -14874,8 +14984,8 @@ function isBrowserRouteObservation(value) {
 }
 async function recordBrowserHookPhase(pluginData, phase, observation, now = Date.now()) {
   const directory = browserRouteDirectory(pluginData);
-  await mkdir4(directory, { recursive: true, mode: 448 });
-  const destination = path6.join(
+  await mkdir5(directory, { recursive: true, mode: 448 });
+  const destination = path7.join(
     directory,
     `${observation.toolUseDigest.slice(0, 2)}.json`
   );
@@ -14895,9 +15005,9 @@ async function recordBrowserHookPhase(pluginData, phase, observation, now = Date
     ...phase === "PreToolUse" ? { preObservedAt: previous?.preObservedAt ?? observedAt } : { postObservedAt: previous?.postObservedAt ?? observedAt },
     schemaVersion: 1
   };
-  const temporary = path6.join(
+  const temporary = path7.join(
     directory,
-    `.${observation.toolUseDigest}.${randomUUID4()}`
+    `.${observation.toolUseDigest}.${randomUUID5()}`
   );
   await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
@@ -14905,11 +15015,11 @@ async function recordBrowserHookPhase(pluginData, phase, observation, now = Date
 }
 async function recordHookMarker(pluginData, marker, now = Date.now()) {
   const directory = stateDirectory(pluginData);
-  await mkdir4(directory, { recursive: true, mode: 448 });
+  await mkdir5(directory, { recursive: true, mode: 448 });
   const destination = markerPath2(pluginData, marker.event, marker.browserHook);
-  const temporary = path6.join(
+  const temporary = path7.join(
     directory,
-    `.${path6.basename(destination)}.${randomUUID4()}`
+    `.${path7.basename(destination)}.${randomUUID5()}`
   );
   const value = {
     ...marker,
@@ -14928,10 +15038,10 @@ var isHookInput = (value) => {
   const input = value;
   return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string" && input.session_id.length <= 4096) && (input.tool_name === void 0 || typeof input.tool_name === "string" && input.tool_name.length <= 256) && (input.tool_use_id === void 0 || typeof input.tool_use_id === "string" && input.tool_use_id.length <= 4096) && (input.turn_id === void 0 || typeof input.turn_id === "string" && input.turn_id.length <= 4096);
 };
-var hookRuntimeStateDirectory = (pluginData) => path7.join(pluginData, "runtime-state");
+var hookRuntimeStateDirectory = (pluginData) => path8.join(pluginData, "runtime-state");
 function hookBrowserTaskScope(sessionId) {
   const sessionDigest = digestSessionId(sessionId);
-  const taskDigest = createHash8("sha256").update("oxrail-hook-browser-task-v1\0").update(sessionDigest).digest("hex");
+  const taskDigest = createHash9("sha256").update("oxrail-hook-browser-task-v1\0").update(sessionDigest).digest("hex");
   return { sessionId: sessionDigest, taskId: taskDigest };
 }
 async function hookDefinitionHash(pluginRoot) {
@@ -14942,9 +15052,9 @@ async function hookDefinitionHash(pluginRoot) {
     "dist/hooks/post-tool.mjs"
   ];
   const files = await Promise.all(
-    filenames.map((filename) => readFile2(path7.join(pluginRoot, filename)))
+    filenames.map((filename) => readFile2(path8.join(pluginRoot, filename)))
   );
-  const digest2 = createHash8("sha256").update("oxrail-hook-definition-v2\0");
+  const digest2 = createHash9("sha256").update("oxrail-hook-definition-v2\0");
   for (const [index, filename] of filenames.entries()) {
     digest2.update(filename).update("\0").update(String(files[index].length)).update("\0").update(files[index]);
   }
@@ -15006,6 +15116,16 @@ function alignStateToProfile(saved, scope, profile) {
     stateVersion: saved.stateVersion,
     targetCacheEpoch: saved.targetCacheEpoch + 1
   };
+}
+function alignStateToActionSignatureKey(state, keyId2) {
+  try {
+    return {
+      ready: true,
+      state: migrateLegacyActionSignatureBaseline(state, keyId2)
+    };
+  } catch {
+    return { ready: false, state };
+  }
 }
 var STATE_TRANSITION_ATTEMPTS = 10;
 var waitForStateRetry = (attempt) => new Promise(
@@ -15120,6 +15240,14 @@ async function handleHookEvent(value, environment) {
     environment.pluginData,
     profile
   );
+  const localDigestProtector = await createLocalDigestProtector(runtimeRoot);
+  const signatureProtector = localDigestProtector ? {
+    keyId: localDigestProtector.keyId,
+    protect: (purpose, digest2) => localDigestProtector.protect(
+      purpose === "input" ? "action-input-v1" : "action-target-v1",
+      digest2
+    )
+  } : void 0;
   let blockingOutput;
   try {
     return await transitionWithRetry(runtimeRoot, scope, async (saved) => {
@@ -15135,6 +15263,8 @@ async function handleHookEvent(value, environment) {
         if (!aligned) return { value: bypassOutput() };
         state = aligned;
       }
+      const signatureState = signatureProtector ? alignStateToActionSignatureKey(state, signatureProtector.keyId) : { ready: false, state };
+      state = signatureState.state;
       const binding = bundle.status === "VALID" ? bundle.bindings[value.tool_name] : void 0;
       if (!guardActivationVerified || bundle.status !== "VALID" || !binding) {
         return { value: bypassOutput() };
@@ -15150,6 +15280,7 @@ async function handleHookEvent(value, environment) {
         hostApprovalAvailable: profile.nativeCapabilities.nativeApprovalFlow === "passed",
         profile,
         registry: bundle.registry,
+        ...signatureProtector ? { signatureProtector } : {},
         ...scope,
         state
       });
@@ -15159,17 +15290,17 @@ async function handleHookEvent(value, environment) {
         "SEMANTIC_HINT_ONLY"
       ].includes(guarded.decision.disposition);
       if (blocking) blockingOutput = guarded.output;
-      const requestDigest = await protectToolCallRequestDigest(
-        runtimeRoot,
+      if (!localDigestProtector || !signatureProtector || !signatureState.ready) {
+        return { value: blocking ? guarded.output : bypassOutput() };
+      }
+      const requestDigest = localDigestProtector.protect(
+        "tool-call-request-v1",
         toolCallRequestDigest(
           value.tool_name,
           guarded.action,
           guarded.decision
         )
       );
-      if (!requestDigest) {
-        return { value: blocking ? guarded.output : bypassOutput() };
-      }
       const claim = await recordToolCallPre(runtimeRoot, {
         ...scope,
         bindingDigest: toolCallBindingDigest(
@@ -15198,7 +15329,12 @@ async function handleHookEvent(value, environment) {
       }
       if (!guarded.action) return { value: guarded.output };
       return {
-        state: stageToolDecision(state, guarded.action, claim.decision),
+        state: stageToolDecision(
+          state,
+          guarded.action,
+          claim.decision,
+          signatureProtector
+        ),
         value: guarded.output
       };
     });

@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Bound persisted action signatures to a purpose-separated local HMAC key generation with safe legacy-state migration.
 
 ## [0.1.0-alpha.0] - 2026-09-04
 

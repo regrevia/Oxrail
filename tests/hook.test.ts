@@ -734,6 +734,7 @@ describe("public Codex hooks", () => {
       readBrowserTaskState(runtimeRoot, scope),
     ).resolves.toMatchObject({
       hostProfileId: environment.profile.profileId,
+      actionSignatureKeyId: expect.stringMatching(/^[a-f0-9]{64}$/),
       mode: "MICRO_ACTION_GUARD",
       revision: 1,
       targetCacheEpoch: 1,
@@ -913,6 +914,120 @@ describe("public Codex hooks", () => {
     await expect(readBrowserTaskState(runtimeRoot, scope)).resolves.toEqual(
       initial,
     );
+  });
+
+  it("preserves ownership and high-impact denials when local digest protection is unavailable", async () => {
+    const environment = await setupActiveGuard();
+    const leasedSession = "digest-key-lease-session";
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    await seedUserLease(
+      environment.pluginData,
+      environment.profile,
+      leasedSession,
+    );
+    await writeFile(
+      path.join(runtimeRoot, ".local-digest-key.json"),
+      Buffer.alloc(32),
+      {
+        mode: 0o644,
+      },
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: leasedSession,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-lease",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_USER_LEASE_ACTIVE",
+        ),
+      },
+    });
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "digest-key-high-impact-session",
+          tool_name: "fixture.native.browser",
+          tool_use_id: "high-impact-call",
+          tool_input: { action: "submit", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_HUMAN_BOUNDARY",
+        ),
+      },
+    });
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "digest-key-pass-through-session",
+          tool_name: "fixture.native.browser",
+          tool_use_id: "ordinary-call",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+  });
+
+  it("does not compare or overwrite action signatures after key loss", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "digest-key-loss-session";
+    const request = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: sessionId,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "keyed-call-1",
+      tool_input: { action: "click", axis: "primary" },
+    };
+    await expect(handleHookEvent(request, environment)).resolves.toEqual({});
+    await handleHookEvent(
+      { ...request, hook_event_name: "PostToolUse" as const },
+      environment,
+    );
+
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const scope = hookBrowserTaskScope(sessionId);
+    const keyed = await readBrowserTaskState(runtimeRoot, scope);
+    if (!keyed?.actionSignatureKeyId) {
+      throw new Error("fixture action signature key was not persisted");
+    }
+    await writeBrowserTaskState(
+      runtimeRoot,
+      { ...keyed, noProgressCount: 2, stateVersion: keyed.stateVersion + 1 },
+      keyed.stateVersion,
+    );
+    await unlink(path.join(runtimeRoot, ".local-digest-key.json"));
+
+    await expect(
+      handleHookEvent({ ...request, tool_use_id: "keyed-call-2" }, environment),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({
+      actionSignatureKeyId: keyed.actionSignatureKeyId,
+      noProgressCount: 2,
+      pendingNativeActionIds: [],
+    });
   });
 
   it("does not enforce a persisted lease after activation evidence drifts", async () => {

@@ -12764,6 +12764,7 @@ var BrowserTaskStateSchema = external_exports.strictObject({
   revision: nonNegativeInt,
   lastObservation: ObservationDigestSchema.optional(),
   lastAction: ActionDigestSchema.optional(),
+  actionSignatureKeyId: hash3.optional(),
   noProgressCount: nonNegativeInt,
   recoveryLevel: nonNegativeInt,
   recoveryTransitions: nonNegativeInt,
@@ -13142,6 +13143,9 @@ var EvidenceTraceSchema = external_exports.strictObject({
   }
 });
 
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
@@ -13176,9 +13180,6 @@ function deriveHostMode(profile) {
   if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
   return "TRANSACTION_GUARD";
 }
-
-// packages/core/src/store.ts
-var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
 // packages/evidence/src/gate.ts
 var digest = (contents) => createHash2("sha256").update(contents).digest("hex");

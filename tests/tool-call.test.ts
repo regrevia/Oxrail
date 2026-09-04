@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +18,7 @@ import {
   protectToolCallRequestDigest,
   recordToolCallPre,
 } from "../packages/core/src/tool-call.js";
+import { createLocalDigestProtector } from "../packages/core/src/local-digest.js";
 import type { PolicyDecision } from "../packages/protocol/src/index.js";
 
 const allow: PolicyDecision = {
@@ -47,17 +56,50 @@ async function journalDirectory(root: string): Promise<string> {
 describe("tool call journal", () => {
   it("keys sanitized request digests with one private per-install key", async () => {
     const root = await makeRoot();
-    const first = await protectToolCallRequestDigest(root, requestDigest);
+    const concurrent = await Promise.all(
+      Array.from({ length: 24 }, () =>
+        protectToolCallRequestDigest(root, requestDigest),
+      ),
+    );
+    const first = concurrent[0];
     const repeated = await protectToolCallRequestDigest(root, requestDigest);
     const changed = await protectToolCallRequestDigest(root, "c".repeat(64));
 
     expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(new Set(concurrent)).toEqual(new Set([first]));
     expect(first).toBe(repeated);
     expect(first).not.toBe(requestDigest);
     expect(changed).not.toBe(first);
-    const key = path.join(root, ".request-digest-key");
+    const protector = await createLocalDigestProtector(root);
+    expect(protector?.protect("action-input-v1", requestDigest)).not.toBe(
+      first,
+    );
+    expect(protector?.protect("action-input-v1", requestDigest)).not.toBe(
+      protector?.protect("action-target-v1", requestDigest),
+    );
+    await expect(protectToolCallRequestDigest(root, "invalid")).resolves.toBe(
+      undefined,
+    );
+    const key = path.join(root, ".local-digest-key.json");
     expect((await stat(key)).mode & 0o777).toBe(0o600);
-    expect((await readFile(key)).byteLength).toBe(32);
+    expect((await readFile(key)).byteLength).toBeLessThanOrEqual(256);
+
+    await writeFile(key, Buffer.alloc(32, 7));
+    await expect(
+      protectToolCallRequestDigest(root, requestDigest),
+    ).resolves.toBeUndefined();
+
+    const deletedRoot = await makeRoot();
+    const beforeDelete = await createLocalDigestProtector(deletedRoot);
+    await unlink(path.join(deletedRoot, ".local-digest-key.json"));
+    const afterDelete = await createLocalDigestProtector(deletedRoot);
+    expect(afterDelete?.keyId).not.toBe(beforeDelete?.keyId);
+
+    const legacyRoot = await makeRoot();
+    await mkdir(path.join(legacyRoot, "existing-state"), { recursive: true });
+    await expect(
+      protectToolCallRequestDigest(legacyRoot, requestDigest),
+    ).resolves.toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("records, replays, and completes a call without an age limit", async () => {

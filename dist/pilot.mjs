@@ -12838,6 +12838,7 @@ var BrowserTaskStateSchema = external_exports.strictObject({
   revision: nonNegativeInt,
   lastObservation: ObservationDigestSchema.optional(),
   lastAction: ActionDigestSchema.optional(),
+  actionSignatureKeyId: hash3.optional(),
   noProgressCount: nonNegativeInt,
   recoveryLevel: nonNegativeInt,
   recoveryTransitions: nonNegativeInt,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  type ActionSignatureProtector,
   browserOwnershipDecision,
   evaluateAction,
 } from "../../core/src/index.js";
@@ -479,6 +480,7 @@ export function runGuardPreToolUse(input: {
   registry: unknown;
   requiresHumanBoundary?: boolean;
   sessionId: string;
+  signatureProtector?: ActionSignatureProtector;
   state: BrowserTaskState;
   taskId: string;
 }): GuardPreToolUseResult {
@@ -531,6 +533,9 @@ export function runGuardPreToolUse(input: {
   const decision = evaluateAction({
     action: decoded.action,
     state: input.state,
+    ...(input.signatureProtector
+      ? { signatureProtector: input.signatureProtector }
+      : {}),
     routeCovered: true,
     ...(input.currentTargetFingerprint !== undefined
       ? {

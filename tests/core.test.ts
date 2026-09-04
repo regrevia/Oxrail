@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,6 +11,7 @@ import {
   createBrowserTaskState,
   evaluateAction,
   finishResume,
+  migrateLegacyActionSignatureBaseline,
   persistentToolUseId,
   recordActionOutcome,
   sanitizeBrowserTaskStateForPersistence,
@@ -50,6 +53,17 @@ function state() {
   };
 }
 
+const signatureProtector = {
+  keyId: "f".repeat(64),
+  protect: (purpose: "input" | "target", digest: string) =>
+    createHash("sha256")
+      .update("fixture-install-key\0")
+      .update(purpose)
+      .update("\0")
+      .update(digest)
+      .digest("hex"),
+};
+
 describe("v0.1 core policy", () => {
   it("stages an executed tool decision without retaining opaque ids or changing progress", () => {
     const before = {
@@ -64,7 +78,12 @@ describe("v0.1 core policy", () => {
     });
     const decision = evaluateAction({ action: toolAction, state: before });
 
-    const staged = stageToolDecision(before, toolAction, decision);
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
 
     expect(staged).toMatchObject({
       lastAction: {
@@ -93,8 +112,18 @@ describe("v0.1 core policy", () => {
     const toolAction = action({ toolUseId: "raw-call-secret" });
     const decision = evaluateAction({ action: toolAction, state: before });
 
-    const staged = stageToolDecision(before, toolAction, decision);
-    const repeated = stageToolDecision(staged, toolAction, decision);
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+    const repeated = stageToolDecision(
+      staged,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
 
     expect(staged.pendingNativeActionIds).toEqual([
       "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
@@ -114,7 +143,12 @@ describe("v0.1 core policy", () => {
       recoverable: true,
     } as const;
 
-    const staged = stageToolDecision(before, toolAction, decision);
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
 
     expect(staged).toMatchObject({
       lastAction: { decision: "DENY" },
@@ -128,11 +162,16 @@ describe("v0.1 core policy", () => {
 
   it("stages a semantic hint as a pending native action", () => {
     const toolAction = action({ toolUseId: "hint-call" });
-    const staged = stageToolDecision(state(), toolAction, {
-      disposition: "SEMANTIC_HINT_ONLY",
-      reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
-      recoverable: true,
-    });
+    const staged = stageToolDecision(
+      state(),
+      toolAction,
+      {
+        disposition: "SEMANTIC_HINT_ONLY",
+        reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+        recoverable: true,
+      },
+      signatureProtector,
+    );
 
     expect(staged).toMatchObject({
       lastAction: { decision: "REWRITE" },
@@ -152,6 +191,7 @@ describe("v0.1 core policy", () => {
       before,
       toolAction,
       evaluateAction({ action: toolAction, state: before }),
+      signatureProtector,
     );
 
     const completed = completePendingTool(staged, "raw-call-secret");
@@ -171,6 +211,7 @@ describe("v0.1 core policy", () => {
     const firstAction = action();
     const firstDecision = evaluateAction({
       action: firstAction,
+      signatureProtector,
       state: state(),
     });
     expect(firstDecision.disposition).toBe("PASS_THROUGH_ORIGINAL");
@@ -183,10 +224,12 @@ describe("v0.1 core policy", () => {
         meaningfulProgress: false,
         timestamp: 1,
       },
+      signatureProtector,
     );
     const secondAction = action({ toolUseId: "call-2" });
     const secondDecision = evaluateAction({
       action: secondAction,
+      signatureProtector,
       state: afterFirst,
     });
     expect(secondDecision.disposition).toBe("PASS_THROUGH_ORIGINAL");
@@ -199,14 +242,121 @@ describe("v0.1 core policy", () => {
         meaningfulProgress: false,
         timestamp: 2,
       },
+      signatureProtector,
     );
     const thirdDecision = evaluateAction({
       action: action({ toolUseId: "call-3" }),
+      signatureProtector,
       state: afterSecond,
     });
     expect(thirdDecision).toMatchObject({
       disposition: "BLOCK_BEFORE_EXECUTION",
       reasonCode: "OXRAIL_REDUNDANT_ACTION",
+    });
+  });
+
+  it("keeps protected action identity stable across persisted processes", () => {
+    const firstAction = action({
+      inputDigest: "a".repeat(64),
+      toolUseId: "call-1",
+    });
+    const initial = { ...state(), documentBinding: undefined };
+    const firstDecision = evaluateAction({
+      action: firstAction,
+      signatureProtector,
+      state: initial,
+    });
+    const first = sanitizeBrowserTaskStateForPersistence(
+      recordActionOutcome(
+        initial,
+        firstAction,
+        firstDecision,
+        { meaningfulProgress: false, timestamp: 1 },
+        signatureProtector,
+      ),
+    );
+    const secondAction = action({
+      inputDigest: firstAction.inputDigest,
+      toolUseId: "call-2",
+    });
+    const secondDecision = evaluateAction({
+      action: secondAction,
+      signatureProtector,
+      state: first,
+    });
+    const second = sanitizeBrowserTaskStateForPersistence(
+      recordActionOutcome(
+        first,
+        secondAction,
+        secondDecision,
+        { meaningfulProgress: false, timestamp: 2 },
+        signatureProtector,
+      ),
+    );
+
+    expect(first.lastAction?.inputSignature).not.toBe(firstAction.inputDigest);
+    expect(first.lastAction?.targetSignature).not.toBe(
+      createActionDigest(firstAction, firstDecision, 1).targetSignature,
+    );
+    expect(
+      evaluateAction({
+        action: action({
+          inputDigest: firstAction.inputDigest,
+          toolUseId: "call-3",
+        }),
+        signatureProtector,
+        state: second,
+      }),
+    ).toMatchObject({
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+    });
+  });
+
+  it("migrates only an idle legacy action baseline and rejects key changes", () => {
+    const toolAction = action({ inputDigest: "a".repeat(64) });
+    const decision = evaluateAction({ action: toolAction, state: state() });
+    const legacy = {
+      ...state(),
+      lastAction: createActionDigest(toolAction, decision, 1),
+      noProgressCount: 2,
+    };
+
+    expect(() =>
+      stageToolDecision(legacy, toolAction, decision, signatureProtector),
+    ).toThrow("Action signature key");
+    const migrated = migrateLegacyActionSignatureBaseline(
+      legacy,
+      signatureProtector.keyId,
+    );
+    expect(migrated).toMatchObject({
+      actionSignatureKeyId: signatureProtector.keyId,
+      noProgressCount: 0,
+    });
+    expect(migrated).not.toHaveProperty("lastAction");
+
+    const staged = stageToolDecision(
+      migrated,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+    const replacement = {
+      ...signatureProtector,
+      keyId: "e".repeat(64),
+    };
+    expect(() =>
+      stageToolDecision(staged, toolAction, decision, replacement),
+    ).toThrow("Action signature key");
+    expect(
+      evaluateAction({
+        action: toolAction,
+        signatureProtector: replacement,
+        state: { ...staged, noProgressCount: 2 },
+      }),
+    ).toMatchObject({
+      disposition: "PASS_THROUGH_ORIGINAL",
+      reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
     });
   });
 
@@ -309,6 +459,7 @@ describe("v0.1 core policy", () => {
       before,
       toolAction,
       evaluateAction({ action: toolAction, state: before }),
+      signatureProtector,
     );
 
     expect(() => activateUserLease(pending, "handoff-1")).toThrow(
@@ -325,11 +476,13 @@ describe("v0.1 core policy", () => {
       state(),
       firstAction,
       evaluateAction({ action: firstAction, state: state() }),
+      signatureProtector,
     );
     const second = stageToolDecision(
       first,
       secondAction,
       evaluateAction({ action: secondAction, state: first }),
+      signatureProtector,
     );
 
     expect(second.pendingNativeActionIds).toHaveLength(2);
@@ -351,6 +504,7 @@ describe("v0.1 core policy", () => {
       toolAction,
       evaluateAction({ action: toolAction, state: state() }),
       { meaningfulProgress: true, timestamp: 1 },
+      signatureProtector,
     );
     const persisted = sanitizeBrowserTaskStateForPersistence(recorded);
 
@@ -388,6 +542,7 @@ describe("v0.1 core policy", () => {
           meaningfulProgress: false,
           expectedStateVersion: 1,
         },
+        signatureProtector,
       ),
     ).toThrow(StateVersionConflictError);
   });

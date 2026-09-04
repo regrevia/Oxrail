@@ -23,6 +23,14 @@ import {
 } from "../packages/host-openai/src/guard.js";
 
 const hash = (value: string) => value.repeat(64);
+const signatureProtector = {
+  keyId: hash("f"),
+  protect: (purpose: "input" | "target", digest: string) =>
+    redactedDeterministicDigest("oxrail-fixture-action-signature-v1", {
+      digest,
+      purpose,
+    }),
+};
 
 function profile(): HostProfile {
   return HostProfileSchema.parse({
@@ -1013,6 +1021,7 @@ describe("host Guard adapter", () => {
         ...stateScope(state),
         profile: profile(),
         registry,
+        signatureProtector,
         state,
         call: { toolName: "fixture.native.browser", toolUseId, toolInput },
       });
@@ -1020,9 +1029,13 @@ describe("host Guard adapter", () => {
       if (result.mode !== "ACTIVE" || !result.action) {
         throw new Error("fixture guard bypassed or did not decode an action");
       }
-      state = recordActionOutcome(state, result.action, result.decision, {
-        meaningfulProgress: false,
-      });
+      state = recordActionOutcome(
+        state,
+        result.action,
+        result.decision,
+        { meaningfulProgress: false },
+        signatureProtector,
+      );
     }
 
     const before = structuredClone(toolInput);
@@ -1031,6 +1044,7 @@ describe("host Guard adapter", () => {
       ...stateScope(state),
       profile: profile(),
       registry,
+      signatureProtector,
       state,
       call: {
         toolName: "fixture.native.browser",
@@ -1065,6 +1079,7 @@ describe("host Guard adapter", () => {
         ...stateScope(state),
         profile: profile(),
         registry,
+        signatureProtector,
         state,
         call: {
           toolName: "fixture.native.browser",
@@ -1076,9 +1091,13 @@ describe("host Guard adapter", () => {
       if (result.mode !== "ACTIVE" || !result.action) {
         throw new Error("fixture guard did not decode an ordinary action");
       }
-      state = recordActionOutcome(state, result.action, result.decision, {
-        meaningfulProgress: false,
-      });
+      state = recordActionOutcome(
+        state,
+        result.action,
+        result.decision,
+        { meaningfulProgress: false },
+        signatureProtector,
+      );
     }
 
     expect(
@@ -1087,6 +1106,7 @@ describe("host Guard adapter", () => {
         ...stateScope(state),
         profile: profile(),
         registry,
+        signatureProtector,
         state,
         call: {
           toolName: "fixture.native.browser",

@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.0
+# Oxrail — 唯一实现规范（SPEC）v1.0.1
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.0
+  spec_version: 1.0.1
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -4539,6 +4539,7 @@ export interface BrowserTaskState {
 
   lastObservation?: ObservationDigest;
   lastAction?: ActionDigest;
+  actionSignatureKeyId?: string;
   noProgressCount: number;
   recoveryLevel: number;
   recoveryTransitions: number;
@@ -4558,6 +4559,8 @@ export interface BrowserTaskState {
   stateVersion: number;
 }
 ```
+
+`actionSignatureKeyId` 绑定 `lastAction` 的本机 HMAC key generation。缺失表示可向后读取的 legacy state；只有 `RUNNING + NATIVE`、无 pending native action 的 sanitized state 才可清除旧 repetition baseline 后迁移。已存在但与当前 key 不一致时不得比较或静默重置，Optimization 保持 `BYPASSED`；ownership、origin、stale-target 与 high-impact gate 仍按可独立证明的信号执行。
 
 ## 23.2 ActionDigest
 
@@ -11734,6 +11737,11 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.1 — 2026-09-04
+
+- 为 `BrowserTaskState` 增加可向后读取的 `actionSignatureKeyId`，将 action identity 绑定到本机 HMAC key generation；
+- legacy repetition baseline 只允许在 idle sanitized state 上显式清除并迁移，key mismatch 时不得比较或静默覆盖，Optimization 保持 `BYPASSED`。
 
 ### v1.0.0 — 2026-09-04
 

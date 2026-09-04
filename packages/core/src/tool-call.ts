@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   chmod,
@@ -16,12 +16,11 @@ import {
   PolicyDecisionSchema,
   type PolicyDecision,
 } from "../../protocol/src/index.js";
+import { protectLocalDigest } from "./local-digest.js";
 
 export const MAX_TOOL_CALL_MARKER_BYTES = 1_024;
 
 const MAX_ID_LENGTH = 4_096;
-const REQUEST_DIGEST_KEY_BYTES = 32;
-const REQUEST_DIGEST_KEY_FILE = ".request-digest-key";
 const DIGEST = /^[a-f0-9]{64}$/;
 const TEMPORARY = /^\.[a-f0-9]{64}\.[a-f0-9-]{36}\.tmp$/;
 
@@ -222,60 +221,12 @@ async function ensureJournalDirectory(
   return directory;
 }
 
-async function loadRequestDigestKey(filename: string): Promise<Buffer> {
-  const key = await readBounded(filename);
-  if (key.byteLength !== REQUEST_DIGEST_KEY_BYTES) {
-    throw new Error("invalid request digest key");
-  }
-  return key;
-}
-
-async function requestDigestKey(root: string): Promise<Buffer> {
-  await privateDirectory(root);
-  const destination = path.join(root, REQUEST_DIGEST_KEY_FILE);
-  try {
-    return await loadRequestDigestKey(destination);
-  } catch (error) {
-    if (errorCode(error) !== "ENOENT") throw error;
-  }
-
-  const candidate = randomBytes(REQUEST_DIGEST_KEY_BYTES);
-  const temporary = path.join(root, `.${randomUUID()}.key.tmp`);
-  let handle;
-  try {
-    handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(candidate);
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    try {
-      await link(temporary, destination);
-      await syncDirectory(root);
-      return candidate;
-    } catch (error) {
-      if (errorCode(error) !== "EEXIST") throw error;
-      return await loadRequestDigestKey(destination);
-    }
-  } finally {
-    await handle?.close();
-    await unlink(temporary).catch(() => undefined);
-  }
-}
-
 /** Hides low-entropy sanitized identities in journals exported without this install key. */
 export async function protectToolCallRequestDigest(
   root: string,
   unkeyedDigest: string,
 ): Promise<string | undefined> {
-  try {
-    if (!DIGEST.test(unkeyedDigest)) return;
-    return createHmac("sha256", await requestDigestKey(root))
-      .update("oxrail-tool-call-request-v1\0")
-      .update(unkeyedDigest)
-      .digest("hex");
-  } catch {
-    return;
-  }
+  return protectLocalDigest(root, "tool-call-request-v1", unkeyedDigest);
 }
 
 async function syncDirectory(directory: string): Promise<void> {
