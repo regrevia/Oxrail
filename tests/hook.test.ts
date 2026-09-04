@@ -22,8 +22,11 @@ import {
 } from "../packages/protocol/src/index.js";
 import {
   MAX_BROWSER_TASK_STATE_BYTES,
+  activatePreparedHandoff,
   activateUserLease,
   createBrowserTaskState,
+  prepareHandoffBarrier,
+  prepareHandoffLease,
   readBrowserTaskState,
   sanitizeBrowserTaskStateForPersistence,
   writeBrowserTaskState,
@@ -228,6 +231,7 @@ const sha256 = (value: string | Buffer) =>
 
 async function setupActiveGuard(
   toolContractPatch: Record<string, unknown> = {},
+  handoffActive = false,
 ) {
   const environment = await setup();
   const registry = ToolSchemaRegistrySchema.parse({
@@ -285,7 +289,23 @@ async function setupActiveGuard(
       ...base.derived,
       mode: "MICRO_ACTION_GUARD",
       safety: "ACTIVE",
+      handoff: handoffActive ? "ACTIVE" : base.derived.handoff,
     },
+    handoff: handoffActive
+      ? {
+          ...base.handoff,
+          activation: "ACTIVE",
+          inactiveReasons: [],
+          capability: {
+            surface: "FOCUSED_REAL_TAB",
+            lease: "EXCLUSIVE_USER_LEASE",
+            resume: "AUTO_VERIFIED",
+            conversationContextPreserved: true,
+            sameTabBinding: true,
+            originalPlacementRestorable: false,
+          },
+        }
+      : base.handoff,
     hooks: {
       ...base.hooks,
       concurrentConflictProbe: "passed",
@@ -369,6 +389,41 @@ async function seedUserLease(
     activateUserLease(running, "fixture-handoff"),
     running.stateVersion,
   );
+}
+
+async function prepareFixtureHandoff(
+  environment: Awaited<ReturnType<typeof setupActiveGuard>>,
+  sessionId: string,
+  seedState = false,
+) {
+  const scope = hookBrowserTaskScope(sessionId);
+  const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+  const topOrigin = "https://accounts.example.test";
+  const documentBinding = "document-1";
+  const state = {
+    ...createBrowserTaskState({
+      ...scope,
+      hostProfileId: environment.profile.profileId,
+      mode: environment.profile.derived.mode,
+    }),
+    currentOrigin: topOrigin,
+    documentBinding,
+  };
+  if (seedState) await writeBrowserTaskState(runtimeRoot, state, null);
+  const lease = prepareHandoffLease({
+    handoffId: `${sessionId}-handoff`,
+    previousLeaseEpoch: state.leaseEpoch,
+    nonce: "0123456789abcdef0123456789abcdef",
+    scope: { ...scope, tabId: 17, topOrigin, documentBinding },
+    createdAt: 1_000,
+    expiresAt: 10_000,
+  });
+  await prepareHandoffBarrier(
+    runtimeRoot,
+    lease,
+    environment.profile.profileId,
+  );
+  return { lease, runtimeRoot };
 }
 
 describe("public Codex hooks", () => {
@@ -663,6 +718,131 @@ describe("public Codex hooks", () => {
     ).resolves.toMatchObject({
       systemMessage: expect.stringContaining("BYPASSED"),
     });
+  });
+
+  it("denies a PREPARING handoff before a live task lock can fail open", async () => {
+    const environment = await setupActiveGuard({}, true);
+    const sessionId = "preparing-handoff-session";
+    const { runtimeRoot } = await prepareFixtureHandoff(
+      environment,
+      sessionId,
+      true,
+    );
+    await writeFile(
+      await runtimeStateLockPath(runtimeRoot),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        createdAt: Date.now(),
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-preparing-handoff",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_VERIFICATION_INCONCLUSIVE",
+        ),
+      },
+    });
+  });
+
+  it("denies an ACTIVE handoff as a user-owned lease", async () => {
+    const environment = await setupActiveGuard({}, true);
+    const sessionId = "active-handoff-session";
+    const { lease, runtimeRoot } = await prepareFixtureHandoff(
+      environment,
+      sessionId,
+      true,
+    );
+    await expect(
+      activatePreparedHandoff(runtimeRoot, lease, 1_001, () => ({
+        admissionGeneration: 1,
+        browserInstanceBindingHash: "a".repeat(64),
+        expiresAt: 10_000,
+        nativeActionFenceHash: "e".repeat(64),
+        observedAt: 1_001,
+        receiptHash: "b".repeat(64),
+      })),
+    ).resolves.toMatchObject({ kind: "ACTIVE" });
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-active-handoff",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_USER_LEASE_ACTIVE",
+        ),
+      },
+    });
+  });
+
+  it("bypasses a malformed handoff gate without state proof", async () => {
+    const environment = await setupActiveGuard({}, true);
+    const sessionId = "malformed-handoff-session";
+    const { runtimeRoot } = await prepareFixtureHandoff(environment, sessionId);
+    const barrier = (await allFiles(runtimeRoot)).find((filename) =>
+      /handoff-barriers\/.*\/lease-1\.json$/.test(filename),
+    );
+    if (!barrier) throw new Error("fixture handoff barrier was not created");
+    await writeFile(barrier, "{}\n", { mode: 0o600 });
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-with-malformed-handoff-gate",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+  });
+
+  it("ignores local handoff gates while profile handoff is INACTIVE", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "inactive-profile-handoff-session";
+    await prepareFixtureHandoff(environment, sessionId);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-with-inactive-handoff-profile",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
   });
 
   it("keeps CONFIGURED first-call verification passive despite seeded state", async () => {

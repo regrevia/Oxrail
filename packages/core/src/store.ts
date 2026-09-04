@@ -41,6 +41,7 @@ export interface BrowserTaskScope {
 }
 
 export interface BrowserTaskStateTransition<Result> {
+  afterCommit?: () => Promise<void> | void;
   state?: BrowserTaskState;
   value: Result;
 }
@@ -429,6 +430,7 @@ export async function transitionBrowserTaskState<Result>(
       }
       await persistState(directory, destination, result.state);
     }
+    await result.afterCommit?.();
     return result.value;
   } finally {
     await releaseLock(
@@ -436,6 +438,35 @@ export async function transitionBrowserTaskState<Result>(
       ownership,
     );
   }
+}
+
+/** Retries only transient ownership conflicts; all storage failures stay visible. */
+export async function transitionBrowserTaskStateWithRetry<Result>(
+  root: string,
+  scope: BrowserTaskScope,
+  transition: (
+    state: BrowserTaskState | undefined,
+  ) =>
+    | BrowserTaskStateTransition<Result>
+    | Promise<BrowserTaskStateTransition<Result>>,
+): Promise<Result> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return await transitionBrowserTaskState(root, scope, transition);
+    } catch (error) {
+      if (
+        !(error instanceof BrowserTaskStateStoreError) ||
+        error.code !== "CONFLICT" ||
+        attempt === 9
+      ) {
+        throw error;
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.min(2 ** attempt, 8)),
+      );
+    }
+  }
+  throw new BrowserTaskStateStoreError("CONFLICT");
 }
 
 export async function writeBrowserTaskState(

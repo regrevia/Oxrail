@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.1
+# Oxrail — 唯一实现规范（SPEC）v1.0.2
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.1
+  spec_version: 1.0.2
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -176,6 +176,8 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HO-006**：无法可靠自动判断时只允许窗口内一键 `Done` 作为降级；稳定支持路径不得依赖聊天消息。
 - **REQ-HO-007**：完成后尽可能把同一标签页恢复到原窗口、索引、固定和分组状态。
 - **REQ-HO-008**：Browser SMH verifier、extension 与普通 Oxrail runtime 在 Handoff 期间禁止读取字段值、键盘输入、剪贴板、截图、Cookie、Token 或密码管理器内容；唯一例外是 `REQ-CRED-012` 允许 credential enclave 在用户显式粘贴提交后对系统 pasteboard 做精确 compare-and-clear，该值不得进入 Browser SMH 或普通 runtime。
+- **REQ-HO-017**：USER lease 激活必须依赖新鲜 Host-minted same-tab/browser-instance/native-action-fence receipt；receipt 必须绑定本代 admission generation，且只能在 Host 确认该 barrier 之前已准入或排队的 native Browser calls 全部终结后签发；裸 `tabId`、Agent/page 声明或仅本地 journal 清空不是权限。
+- **REQ-HO-018**：Handoff 使用 lock 前 write-ahead、单调 generation、终态 tombstone 与 Browser Pre 持锁前后复读，阻断并发/ABA 穿透。
 
 ### 安全凭据通道
 
@@ -1155,7 +1157,8 @@ no-browser
 
 ```text
 conversation/task context remains alive
-→ bind the exact same tab/session/document
+→ verify a fresh Host-minted receipt for the exact same browser instance/tab/session/document
+→ persist PREPARING admission generation before the task-state lock
 → grant EXCLUSIVE_USER_LEASE and deny Agent browser observation/action
 → detach same tab into a focused temporary Chrome window, or focus it in place
 → user acts only in the real website/browser UI
@@ -2879,9 +2882,11 @@ EvidenceState        # run_id / WP / test manifest
 必须满足：
 
 - 每个 `tool_use_id` 的 Pre/Post 事件至多影响状态一次；
+- 持久 ToolCall marker 使用 v2 格式保存去敏的 `persistentToolUseId`，使 receipt-first crash 后可把完成回执与 `BrowserTaskState.pendingNativeActionIds` 精确协调；legacy/损坏/缺失映射不得凭 aggregate pending 状态猜测完成；
 - 文件写入采用 temp + fsync + atomic rename；
 - session 状态带 `stateVersion`，更新使用 CAS；
 - Handoff lease 带单调 `leaseEpoch`；旧事件不能恢复新 lease；
+- Handoff admission gate 在 task-state lock 外先持久化 `PREPARING`；结束后保留 generation tombstone，Pre 必须在持锁前后验证同一 `OPEN` generation；
 - extension 事件包含 `handoffId + tabId + documentId/origin + nonce`；
 - duplicate、late、out-of-order 事件必须可安全忽略；
 - crash 后状态恢复只能进入 `VERIFYING` 或 `CANCELLED`，不能直接假定完成。
@@ -2896,6 +2901,7 @@ EvidenceState        # run_id / WP / test manifest
 | 重复/过期动作判断不确定 | 不虚假 deny；要求重新观察或明确失败 |
 | 高影响动作分类不确定 | deny/交接；fail closed |
 | Handoff 用户租约激活后任何 Agent browser call | deny；fail closed |
+| Handoff gate 损坏且没有可独立证明的 active lease state | 不从本地文件伪造 deny；Optimization=`BYPASSED`、Handoff=`INACTIVE`；Native 保持 fail-open |
 | Handoff verifier 断开 | 保持用户租约，显示本地恢复/取消；不得自动交回 Agent |
 | Host Profile STALE/DRIFTED | affected Oxrail path 禁用；Native Computer Use 显式 BYPASSED 并继续依赖宿主原生 approval |
 | Secret redaction/sanitizer 失败 | 不写 trace、不返回派生内容；release-blocking |
@@ -3764,6 +3770,12 @@ Conversation UI and non-browser discussion = MAY CONTINUE
 
 若宿主有不可控 browser bypass，则不能标记 `EXCLUSIVE_USER_LEASE`。敏感场景必须终止或使用宿主原生、已证明的 lock。
 
+租约激活采用 write-ahead admission gate：先原子持久化 `PREPARING/generation=n+1`，再取得 task-state lock、精确协调 v2 ToolCall journal 与 pending state，最后验证 Host-minted tab-binding/native-action-fence receipt 并切换为 `ACTIVE`。该 receipt 必须绑定本代 generation，并由 Host 在观察到 barrier 后等待所有更早已准入或排队的 native Browser calls 终结后签发；这也覆盖 Hook fail-open 未能落 journal 的调用。普通 Browser Pre 在 lock 外保存 gate 快照，进入 lock 后必须复读；状态不是 `OPEN` 或 generation 改变时均不得进入受跟踪的 native action journal。取消/释放只写同一 generation 的终态 tombstone，不删除代际证据。
+
+task state 与 barrier 的 `ACTIVE/CANCELLED` 发布必须由同一 per-task lock 串行化；状态先提交、barrier 后发布的 crash window 保持 `PREPARING` 并拒绝 Agent，不得让不同 receipt 并发覆盖。重复的同 lease activation 可从已持久化的同一 ACTIVE barrier 幂等确认，不要求 Host 重签字节完全相同的新 receipt。过期 `PREPARING` 只有在持久状态仍证明 `RUNNING + NATIVE` 时才可无需原始 lease 写入 `CANCELLED` tombstone；若状态已是 Human/user-held，则保持封锁并报告 `USER_LEASE_RECOVERY_REQUIRED`，重启后恢复 UI 与重新验证，禁止猜测交还 Agent。
+
+tab-binding receipt 必须来自当前受信 Host adapter/verifier，至少绑定 Host Profile、browser instance、同一真实 `tabId`/session、origin、初始 document binding、本代 admission generation、native-action fence、签发时间和有效期。fence 必须证明 receipt 签发时本代 barrier 之前已准入或排队的 Host native Browser calls 均已终结，且验证必须发生在本地 journal 协调之后。Agent/page 提供的数字 `tabId`、URL、自称“当前页面”或自行生成的 fence 都只是非可信输入，不能据此移动页面或激活 USER lease。本地 gate 只是在正常工作的受信 Hook 内关闭 admission；它不能替代宿主对全部 Browser action/observation 路径的独立覆盖证明，也不能单独把 Handoff 标成 `ACTIVE`。
+
 ## 19.6 Continuation 机制
 
 首选机制：
@@ -4075,6 +4087,8 @@ ChatGPT Work lifecycle parity with Codex: UNKNOWN
 - **REQ-HO-014**：user lease 期间已支持路径的 Agent browser action/observation occurrence = 0。
 - **REQ-HO-015**：Handoff activation P95 `<750 ms`，不含用户操作时间。
 - **REQ-HO-016**：Browser SMH 与普通 Oxrail 数据流中任何 secret canary occurrence = 0；Credential Channel 只适用 `SEC-21.2B` 的限定 occurrence，不得扩大到 Browser SMH。
+- **REQ-HO-017**：Browser USER lease 激活前必须验证新鲜、Host-minted 且绑定当前 Host Profile、browser instance、同一 `tabId`/session/origin/document、本代 admission generation 与 native-action fence 的 receipt；fence 只能在 barrier 可见且 Host 确认此前已准入或排队的 native Browser calls 全部终结后签发，并在本地 journal 协调后验证。Agent、模型、网页、裸 `tabId` 或仅 journal 清空不能自证该绑定与静默点。
+- **REQ-HO-018**：Handoff admission gate 必须在取得 task-state lock 前持久化 `PREPARING`，并保留单调 generation 的终态 tombstone；Browser Pre 在 lock 外与 lock 内各读取一次，只有两次均为同一 `OPEN` generation 才可进入 native action journal，防止被跟踪调用的并发和 ABA 穿透；任何未能落 journal 的 fail-open 调用仍必须由 `REQ-HO-017` 的 Host native-action fence 覆盖。state 与 barrier 的 activation/cancel 发布必须在同一 task lock 内串行化；过期准备仅可在仍证明 Native ownership 时自动取消，user-held/unknown 必须保持封锁并进入显式恢复。
 
 ---
 
@@ -4561,6 +4575,8 @@ export interface BrowserTaskState {
 ```
 
 `actionSignatureKeyId` 绑定 `lastAction` 的本机 HMAC key generation。缺失表示可向后读取的 legacy state；只有 `RUNNING + NATIVE`、无 pending native action 的 sanitized state 才可清除旧 repetition baseline 后迁移。已存在但与当前 key 不一致时不得比较或静默重置，Optimization 保持 `BYPASSED`；ownership、origin、stale-target 与 high-impact gate 仍按可独立证明的信号执行。
+
+Runtime schema 必须拒绝矛盾 ownership 组合：`RUNNING` 只能是 Native 且无 active handoff；`USER_LEASE_ACTIVE/HANDOFF_VERIFYING` 必须是 Human + active handoff；`RESTORING_TAB/RESUMING` 必须是 None + active handoff。非 Native ownership 不得保留 pending native action。
 
 ## 23.2 ActionDigest
 
@@ -9307,6 +9323,8 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 
 - lease state machine
 - lease epoch/nonce
+- durable admission generation/tombstone
+- exact ToolCall journal reconciliation
 - all-route deny hooks
 - crash/timeout cleanup
 
@@ -9315,6 +9333,8 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 - [ ] During USER_LEASE_ACTIVE all known Agent browser action/observation is denied.
 - [ ] Oxrail never becomes pointer owner.
 - [ ] Illegal/late/replayed events fail closed.
+- [ ] A stale Pre cannot cross a completed prepare/terminal generation (ABA).
+- [ ] USER lease activation requires a fresh Host-minted same-tab receipt.
 - [ ] Conversation state remains alive.
 
 **测试 / 证据**
@@ -11737,6 +11757,13 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.2 — 2026-09-04
+
+- Handoff 新增 task lock 前持久化的 admission generation、终态 tombstone、Browser Pre 双重快照、Host native-action fence、锁内串行发布与 ownership-aware crash recovery；
+- ToolCall marker v2 增加去敏 persistent tool identity，用于 receipt-first crash 后与 pending state 精确协调；
+- USER lease 激活必须使用当前 Host adapter 在旧 native calls 静默后独立签发并验证的 same-browser/same-tab/fence receipt；本地 gate 不构成全路径覆盖证明。
+- BrowserTaskState runtime schema 拒绝 phase、pointer owner、active handoff 与 pending native action 的矛盾组合。
 
 ### v1.0.1 — 2026-09-04
 

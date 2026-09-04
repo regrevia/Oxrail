@@ -10,18 +10,18 @@ import {
   type PolicyDecision,
 } from "../../protocol/src/index.js";
 import {
-  BrowserTaskStateStoreError,
-  type BrowserTaskStateTransition,
   actionIdentity,
   browserOwnershipDecision,
   completePendingTool,
   completeToolCallPost,
+  compareHandoffGates,
   createLocalDigestProtector,
   createBrowserTaskState,
   migrateLegacyActionSignatureBaseline,
+  readHandoffGate,
   recordToolCallPre,
   stageToolDecision,
-  transitionBrowserTaskState,
+  transitionBrowserTaskStateWithRetry,
 } from "../../core/src/index.js";
 import {
   buildPreToolUseOutput,
@@ -129,6 +129,21 @@ const inconclusiveOutput = (): HookOutput =>
     recoverable: true,
   });
 
+const handoffGateOutput = (
+  initial: Awaited<ReturnType<typeof readHandoffGate>>,
+  current = initial,
+): HookOutput | undefined => {
+  const verdict = compareHandoffGates(initial, current);
+  if (verdict === "OPEN" || verdict === "UNKNOWN") return;
+  return verdict === "ACTIVE"
+    ? decisionOutput({
+        disposition: "BLOCK_BEFORE_EXECUTION",
+        reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
+        recoverable: true,
+      })
+    : inconclusiveOutput();
+};
+
 const toolCallRequestDigest = (
   toolName: string,
   action: ActionEnvelope | undefined,
@@ -226,38 +241,6 @@ function alignStateToActionSignatureKey(
   }
 }
 
-const STATE_TRANSITION_ATTEMPTS = 10;
-const waitForStateRetry = (attempt: number) =>
-  new Promise<void>((resolve) =>
-    setTimeout(resolve, Math.min(2 ** attempt, 8)),
-  );
-
-async function transitionWithRetry<Result>(
-  runtimeRoot: string,
-  scope: ReturnType<typeof hookBrowserTaskScope>,
-  transition: (
-    state: BrowserTaskState | undefined,
-  ) =>
-    | BrowserTaskStateTransition<Result>
-    | Promise<BrowserTaskStateTransition<Result>>,
-): Promise<Result> {
-  for (let attempt = 0; attempt < STATE_TRANSITION_ATTEMPTS; attempt += 1) {
-    try {
-      return await transitionBrowserTaskState(runtimeRoot, scope, transition);
-    } catch (error) {
-      if (
-        !(error instanceof BrowserTaskStateStoreError) ||
-        error.code !== "CONFLICT" ||
-        attempt === STATE_TRANSITION_ATTEMPTS - 1
-      ) {
-        throw error;
-      }
-      await waitForStateRetry(attempt);
-    }
-  }
-  throw new BrowserTaskStateStoreError("CONFLICT");
-}
-
 async function completePostTool(
   runtimeRoot: string,
   scope: ReturnType<typeof hookBrowserTaskScope>,
@@ -269,7 +252,7 @@ async function completePostTool(
   });
   if (journal === "OUT_OF_ORDER") return "NOT_FOUND";
   if (journal === "UNAVAILABLE") return "UNAVAILABLE";
-  await transitionWithRetry(runtimeRoot, scope, (state) => {
+  await transitionBrowserTaskStateWithRetry(runtimeRoot, scope, (state) => {
     if (!state) return { value: {} };
     const completed = completePendingTool(state, toolUseId);
     return completed.stateVersion === state.stateVersion
@@ -389,6 +372,15 @@ export async function handleHookEvent(
     return bypassOutput();
   }
 
+  const initialHandoffGate =
+    profile.handoff.activation === "ACTIVE"
+      ? await readHandoffGate(runtimeRoot, scope)
+      : undefined;
+  if (initialHandoffGate) {
+    const gateOutput = handoffGateOutput(initialHandoffGate);
+    if (gateOutput) return gateOutput;
+  }
+
   const bundle = await loadToolSchemaRegistryBundle(
     environment.pluginData,
     profile,
@@ -407,110 +399,130 @@ export async function handleHookEvent(
 
   let blockingOutput: HookOutput | undefined;
   try {
-    return await transitionWithRetry(runtimeRoot, scope, async (saved) => {
-      let state =
-        saved ??
-        createBrowserTaskState({
-          ...scope,
-          hostProfileId: profile.profileId,
-          mode: profile.derived.mode,
-        });
-      const ownership = ownershipOutput(state, scope);
-      if (ownership) return { value: ownership };
-      if (saved) {
-        const aligned = alignStateToProfile(saved, scope, profile);
-        if (!aligned) return { value: bypassOutput() };
-        state = aligned;
-      }
-      const signatureState = signatureProtector
-        ? alignStateToActionSignatureKey(state, signatureProtector.keyId)
-        : { ready: false, state };
-      state = signatureState.state;
-      const binding =
-        bundle.status === "VALID"
-          ? bundle.bindings[value.tool_name!]
-          : undefined;
-      if (!guardActivationVerified || bundle.status !== "VALID" || !binding) {
-        return { value: bypassOutput() };
-      }
-      const guarded = runGuardPreToolUse({
-        ...binding,
-        call: {
-          toolInput: value.tool_input,
-          toolName: value.tool_name!,
-          toolUseId: value.tool_use_id!,
-        },
-        handoffAvailable: profile.handoff.activation === "ACTIVE",
-        hostApprovalAvailable:
-          profile.nativeCapabilities.nativeApprovalFlow === "passed",
-        profile,
-        registry: bundle.registry,
-        ...(signatureProtector ? { signatureProtector } : {}),
-        ...scope,
-        state,
-      });
-      if (guarded.mode !== "ACTIVE") return { value: bypassOutput() };
-      const blocking = ![
-        "PASS_THROUGH_ORIGINAL",
-        "SEMANTIC_HINT_ONLY",
-      ].includes(guarded.decision.disposition);
-      if (blocking) blockingOutput = guarded.output;
-      if (
-        !localDigestProtector ||
-        !signatureProtector ||
-        !signatureState.ready
-      ) {
-        return { value: blocking ? guarded.output : bypassOutput() };
-      }
-      const requestDigest = localDigestProtector.protect(
-        "tool-call-request-v1",
-        toolCallRequestDigest(
-          value.tool_name!,
-          guarded.action,
-          guarded.decision,
-        ),
-      );
-      const claim = await recordToolCallPre(runtimeRoot, {
-        ...scope,
-        bindingDigest: toolCallBindingDigest(
+    return await transitionBrowserTaskStateWithRetry(
+      runtimeRoot,
+      scope,
+      async (saved) => {
+        let state =
+          saved ??
+          createBrowserTaskState({
+            ...scope,
+            hostProfileId: profile.profileId,
+            mode: profile.derived.mode,
+          });
+        const ownership = ownershipOutput(state, scope);
+        if (ownership) return { value: ownership };
+        if (initialHandoffGate) {
+          const currentGate = await readHandoffGate(runtimeRoot, scope);
+          const gateOutput = handoffGateOutput(initialHandoffGate, currentGate);
+          if (gateOutput) return { value: gateOutput };
+          if (
+            compareHandoffGates(initialHandoffGate, currentGate) === "UNKNOWN"
+          ) {
+            return { value: bypassOutput() };
+          }
+        }
+        if (saved) {
+          const aligned = alignStateToProfile(saved, scope, profile);
+          if (!aligned) return { value: bypassOutput() };
+          state = aligned;
+        }
+        const signatureState = signatureProtector
+          ? alignStateToActionSignatureKey(state, signatureProtector.keyId)
+          : { ready: false, state };
+        state = signatureState.state;
+        const binding =
+          bundle.status === "VALID"
+            ? bundle.bindings[value.tool_name!]
+            : undefined;
+        if (!guardActivationVerified || bundle.status !== "VALID" || !binding) {
+          return { value: bypassOutput() };
+        }
+        const guarded = runGuardPreToolUse({
+          ...binding,
+          call: {
+            toolInput: value.tool_input,
+            toolName: value.tool_name!,
+            toolUseId: value.tool_use_id!,
+          },
+          handoffAvailable: profile.handoff.activation === "ACTIVE",
+          hostApprovalAvailable:
+            profile.nativeCapabilities.nativeApprovalFlow === "passed",
           profile,
-          value.tool_name!,
-          binding,
-        ),
-        decision: guarded.decision,
-        requestDigest,
-        toolUseId: value.tool_use_id!,
-      });
-      if (claim.kind === "MISMATCH") {
-        return { value: inconclusiveOutput() };
-      }
-      if (claim.kind === "UNAVAILABLE") {
-        return { value: blocking ? guarded.output : bypassOutput() };
-      }
-      if (claim.kind === "REPLAY") {
-        const replayBlocks = ![
+          registry: bundle.registry,
+          ...(signatureProtector ? { signatureProtector } : {}),
+          ...scope,
+          state,
+        });
+        if (guarded.mode !== "ACTIVE") return { value: bypassOutput() };
+        const blocking = ![
           "PASS_THROUGH_ORIGINAL",
           "SEMANTIC_HINT_ONLY",
-        ].includes(claim.decision.disposition);
+        ].includes(guarded.decision.disposition);
+        if (blocking) blockingOutput = guarded.output;
+        if (
+          !localDigestProtector ||
+          !signatureProtector ||
+          !signatureState.ready
+        ) {
+          return { value: blocking ? guarded.output : bypassOutput() };
+        }
+        const requestDigest = localDigestProtector.protect(
+          "tool-call-request-v1",
+          toolCallRequestDigest(
+            value.tool_name!,
+            guarded.action,
+            guarded.decision,
+          ),
+        );
+        const claim = await recordToolCallPre(runtimeRoot, {
+          ...scope,
+          bindingDigest: toolCallBindingDigest(
+            profile,
+            value.tool_name!,
+            binding,
+          ),
+          decision: guarded.decision,
+          requestDigest,
+          toolUseId: value.tool_use_id!,
+        });
+        if (claim.kind === "MISMATCH") {
+          return { value: inconclusiveOutput() };
+        }
+        if (claim.kind === "UNAVAILABLE") {
+          return { value: blocking ? guarded.output : bypassOutput() };
+        }
+        if (claim.kind === "REPLAY") {
+          const replayBlocks = ![
+            "PASS_THROUGH_ORIGINAL",
+            "SEMANTIC_HINT_ONLY",
+          ].includes(claim.decision.disposition);
+          return {
+            value: replayBlocks
+              ? decisionOutput(claim.decision)
+              : inconclusiveOutput(),
+          };
+        }
+        if (!guarded.action) return { value: guarded.output };
         return {
-          value: replayBlocks
-            ? decisionOutput(claim.decision)
-            : inconclusiveOutput(),
+          state: stageToolDecision(
+            state,
+            guarded.action,
+            claim.decision,
+            signatureProtector,
+          ),
+          value: guarded.output,
         };
-      }
-      if (!guarded.action) return { value: guarded.output };
-      return {
-        state: stageToolDecision(
-          state,
-          guarded.action,
-          claim.decision,
-          signatureProtector,
-        ),
-        value: guarded.output,
-      };
-    });
+      },
+    );
   } catch {
-    return blockingOutput ?? bypassOutput();
+    if (blockingOutput) return blockingOutput;
+    if (initialHandoffGate?.kind === "KNOWN") {
+      const currentGate = await readHandoffGate(runtimeRoot, scope);
+      const gateOutput = handoffGateOutput(initialHandoffGate, currentGate);
+      if (gateOutput) return gateOutput;
+    }
+    return bypassOutput();
   }
 }
 

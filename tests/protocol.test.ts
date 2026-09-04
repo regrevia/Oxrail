@@ -570,6 +570,54 @@ describe("versioned protocol", () => {
     ).toBe(false);
   });
 
+  it("rejects contradictory Handoff phase and ownership state", () => {
+    const running = {
+      schemaVersion: 3,
+      sessionId: "s",
+      taskId: "t",
+      goalSummary: "safe",
+      hostProfileId: "hp",
+      hostProfileStatus: "VALID",
+      mode: "ADVISORY_ONLY",
+      phase: "RUNNING",
+      revision: 0,
+      noProgressCount: 0,
+      recoveryLevel: 0,
+      recoveryTransitions: 0,
+      authState: "UNKNOWN",
+      leaseEpoch: 0,
+      pointerOwner: "NATIVE",
+      targetCacheEpoch: 0,
+      pendingNativeActionIds: [],
+      stateVersion: 0,
+    } as const;
+
+    expect(
+      BrowserTaskStateSchema.safeParse({
+        ...running,
+        phase: "USER_LEASE_ACTIVE",
+        pointerOwner: "NATIVE",
+      }).success,
+    ).toBe(false);
+    expect(
+      BrowserTaskStateSchema.safeParse({
+        ...running,
+        activeHandoffId: "handoff",
+        pendingNativeActionIds: ["pending"],
+        phase: "USER_LEASE_ACTIVE",
+        pointerOwner: "HUMAN",
+      }).success,
+    ).toBe(false);
+    expect(
+      BrowserTaskStateSchema.safeParse({
+        ...running,
+        pendingNativeActionIds: ["pending"],
+        phase: "DONE",
+        pointerOwner: "NONE",
+      }).success,
+    ).toBe(false);
+  });
+
   it("generates byte-deterministic, stable JSON schema filenames", async () => {
     const first = await mkdtemp(join(tmpdir(), "oxrail-schema-a-"));
     const second = await mkdtemp(join(tmpdir(), "oxrail-schema-b-"));

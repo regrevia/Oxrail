@@ -17,11 +17,13 @@ import {
   type PolicyDecision,
 } from "../../protocol/src/index.js";
 import { protectLocalDigest } from "./local-digest.js";
+import { persistentToolUseId } from "./safe-state.js";
 
 export const MAX_TOOL_CALL_MARKER_BYTES = 1_024;
 
 const MAX_ID_LENGTH = 4_096;
 const DIGEST = /^[a-f0-9]{64}$/;
+const PERSISTENT_ID = /^oxrail-id:[a-f0-9]{64}$/;
 const TEMPORARY = /^\.[a-f0-9]{64}\.[a-f0-9-]{36}\.tmp$/;
 
 export interface ToolCallScope {
@@ -59,14 +61,29 @@ export type ToolCallPostResult =
 
 export type PendingToolCallsResult = "NONE" | "PENDING" | "UNKNOWN";
 
-interface ToolCallMarker {
+export type ToolCallJournalSnapshot =
+  | {
+      kind: "KNOWN";
+      completedToolUseIds: string[];
+      legacyPending: boolean;
+      pendingToolUseIds: string[];
+    }
+  | { kind: "UNKNOWN" };
+
+interface ToolCallMarkerBase {
   bindingDigest: string;
   decision: PolicyDecision;
   requestDigest: string;
-  schemaVersion: 1;
   status: ToolCallJournalStatus;
   toolDigest: string;
 }
+
+type ToolCallMarker =
+  | (ToolCallMarkerBase & { schemaVersion: 1 })
+  | (ToolCallMarkerBase & {
+      schemaVersion: 2;
+      persistentToolUseId: string;
+    });
 
 type MarkerRead =
   | { kind: "INVALID" | "MISSING" }
@@ -123,12 +140,22 @@ function parseMarker(
   expectedToolDigest: string,
 ): ToolCallMarker | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const marker = value as Partial<ToolCallMarker>;
+  const marker = value as Partial<
+    ToolCallMarkerBase & {
+      persistentToolUseId: string;
+      schemaVersion: 1 | 2;
+    }
+  >;
   const decision = PolicyDecisionSchema.safeParse(marker.decision);
+  const expectedKeys =
+    marker.schemaVersion === 1
+      ? "bindingDigest,decision,requestDigest,schemaVersion,status,toolDigest"
+      : "bindingDigest,decision,persistentToolUseId,requestDigest,schemaVersion,status,toolDigest";
   if (
-    Object.keys(value).sort().join(",") !==
-      "bindingDigest,decision,requestDigest,schemaVersion,status,toolDigest" ||
-    marker.schemaVersion !== 1 ||
+    Object.keys(value).sort().join(",") !== expectedKeys ||
+    (marker.schemaVersion !== 1 && marker.schemaVersion !== 2) ||
+    (marker.schemaVersion === 2 &&
+      !PERSISTENT_ID.test(marker.persistentToolUseId ?? "")) ||
     marker.toolDigest !== expectedToolDigest ||
     !DIGEST.test(marker.bindingDigest ?? "") ||
     !DIGEST.test(marker.requestDigest ?? "") ||
@@ -139,14 +166,20 @@ function parseMarker(
   ) {
     return;
   }
-  return {
+  const common: ToolCallMarkerBase = {
     bindingDigest: marker.bindingDigest!,
     decision: decision.data,
     requestDigest: marker.requestDigest!,
-    schemaVersion: 1,
     status: marker.status,
     toolDigest: marker.toolDigest,
   };
+  return marker.schemaVersion === 1
+    ? { ...common, schemaVersion: 1 }
+    : {
+        ...common,
+        persistentToolUseId: marker.persistentToolUseId!,
+        schemaVersion: 2,
+      };
 }
 
 async function readBounded(filename: string): Promise<Buffer> {
@@ -323,13 +356,19 @@ const sameBinding = (
   input: ToolCallPreInput,
 ): boolean =>
   marker.bindingDigest === input.bindingDigest &&
-  marker.requestDigest === input.requestDigest;
+  marker.requestDigest === input.requestDigest &&
+  (marker.schemaVersion === 1 ||
+    marker.persistentToolUseId === persistentToolUseId(input.toolUseId));
 
 const sameCompletion = (
   receipt: ToolCallMarker,
   marker: ToolCallMarker,
 ): boolean =>
   receipt.status === "COMPLETE" &&
+  receipt.schemaVersion === marker.schemaVersion &&
+  (receipt.schemaVersion === 1 ||
+    (marker.schemaVersion === 2 &&
+      receipt.persistentToolUseId === marker.persistentToolUseId)) &&
   receipt.bindingDigest === marker.bindingDigest &&
   receipt.requestDigest === marker.requestDigest &&
   receipt.decision.disposition === marker.decision.disposition &&
@@ -357,8 +396,9 @@ export async function recordToolCallPre(
     const marker: ToolCallMarker = {
       bindingDigest: input.bindingDigest,
       decision: decision.data,
+      persistentToolUseId: persistentToolUseId(input.toolUseId),
       requestDigest: input.requestDigest,
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: decisionLeavesNativeActionPending(decision.data)
         ? "PENDING"
         : "COMPLETE",
@@ -382,6 +422,112 @@ export async function recordToolCallPre(
     };
   } catch {
     return { kind: "UNAVAILABLE" };
+  }
+}
+
+interface ScannedToolCall {
+  marker: ToolCallMarker;
+  status: ToolCallJournalStatus;
+}
+
+async function scanToolCallJournal(
+  root: string,
+  scope: ToolCallScope,
+): Promise<{ kind: "KNOWN"; calls: ScannedToolCall[] } | { kind: "UNKNOWN" }> {
+  if (!validScope(scope)) return { kind: "UNKNOWN" };
+  const directory = journalDirectory(root, scope);
+  let entries;
+  try {
+    const metadata = await lstat(directory);
+    if (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      (metadata.mode & 0o077) !== 0
+    ) {
+      return { kind: "UNKNOWN" };
+    }
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    return errorCode(error) === "ENOENT"
+      ? { kind: "KNOWN", calls: [] }
+      : { kind: "UNKNOWN" };
+  }
+
+  const markers = new Map<string, ToolCallMarker>();
+  const receipts = new Map<string, ToolCallMarker>();
+  for (const entry of entries) {
+    if (entry.isFile() && TEMPORARY.test(entry.name)) continue;
+    const match = /^([a-f0-9]{64})\.(json|post)$/.exec(entry.name);
+    if (!entry.isFile() || !match) return { kind: "UNKNOWN" };
+    const toolDigest = match[1]!;
+    const parsed = await readMarker(
+      path.join(directory, entry.name),
+      toolDigest,
+    );
+    if (parsed.kind !== "VALID") return { kind: "UNKNOWN" };
+    (match[2] === "json" ? markers : receipts).set(toolDigest, parsed.marker);
+  }
+
+  for (const [toolDigest, receipt] of receipts) {
+    const marker = markers.get(toolDigest);
+    if (
+      !marker ||
+      !decisionLeavesNativeActionPending(marker.decision) ||
+      !sameCompletion(receipt, marker)
+    ) {
+      return { kind: "UNKNOWN" };
+    }
+  }
+  const calls: ScannedToolCall[] = [];
+  for (const [toolDigest, marker] of markers) {
+    const receipt = receipts.get(toolDigest);
+    if (!decisionLeavesNativeActionPending(marker.decision)) {
+      if (receipt) return { kind: "UNKNOWN" };
+      continue;
+    }
+    if (!receipt && marker.status === "COMPLETE") {
+      return { kind: "UNKNOWN" };
+    }
+    calls.push({ marker, status: receipt ? "COMPLETE" : "PENDING" });
+  }
+  return { kind: "KNOWN", calls };
+}
+
+/** Exact sanitized journal identities used only while activating a user lease. */
+export async function inspectToolCallJournal(
+  root: string,
+  scope: ToolCallScope,
+): Promise<ToolCallJournalSnapshot> {
+  try {
+    const scanned = await scanToolCallJournal(root, scope);
+    if (scanned.kind === "UNKNOWN") {
+      return { kind: "UNKNOWN" };
+    }
+    const completedToolUseIds: string[] = [];
+    const pendingToolUseIds: string[] = [];
+    for (const { marker, status } of scanned.calls) {
+      if (marker.schemaVersion === 1) continue;
+      (status === "COMPLETE" ? completedToolUseIds : pendingToolUseIds).push(
+        marker.persistentToolUseId,
+      );
+    }
+    if (
+      new Set([...completedToolUseIds, ...pendingToolUseIds]).size !==
+      completedToolUseIds.length + pendingToolUseIds.length
+    ) {
+      return { kind: "UNKNOWN" };
+    }
+    return {
+      kind: "KNOWN",
+      completedToolUseIds: [...new Set(completedToolUseIds)].sort(),
+      legacyPending: scanned.calls.some(
+        ({ marker, status }) =>
+          marker.schemaVersion === 1 && status === "PENDING",
+      ),
+      pendingToolUseIds: [...new Set(pendingToolUseIds)].sort(),
+    };
+  } catch {
+    return { kind: "UNKNOWN" };
   }
 }
 
@@ -440,59 +586,11 @@ export async function hasPendingToolCalls(
   scope: ToolCallScope,
 ): Promise<PendingToolCallsResult> {
   try {
-    if (!validScope(scope)) return "UNKNOWN";
-    const directory = journalDirectory(root, scope);
-    let entries;
-    try {
-      const metadata = await lstat(directory);
-      if (
-        !metadata.isDirectory() ||
-        metadata.isSymbolicLink() ||
-        (metadata.mode & 0o077) !== 0
-      ) {
-        return "UNKNOWN";
-      }
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch (error) {
-      return errorCode(error) === "ENOENT" ? "NONE" : "UNKNOWN";
-    }
-
-    const markers = new Map<string, ToolCallMarker>();
-    const receipts = new Map<string, ToolCallMarker>();
-    for (const entry of entries) {
-      if (entry.isFile() && TEMPORARY.test(entry.name)) continue;
-      const match = /^([a-f0-9]{64})\.(json|post)$/.exec(entry.name);
-      if (!entry.isFile() || !match) return "UNKNOWN";
-      const toolDigest = match[1]!;
-      const parsed = await readMarker(
-        path.join(directory, entry.name),
-        toolDigest,
-      );
-      if (parsed.kind !== "VALID") return "UNKNOWN";
-      (match[2] === "json" ? markers : receipts).set(toolDigest, parsed.marker);
-    }
-
-    for (const [toolDigest, receipt] of receipts) {
-      const marker = markers.get(toolDigest);
-      if (
-        !marker ||
-        !decisionLeavesNativeActionPending(marker.decision) ||
-        !sameCompletion(receipt, marker)
-      ) {
-        return "UNKNOWN";
-      }
-    }
-    let pending = false;
-    for (const [toolDigest, marker] of markers) {
-      const receipt = receipts.get(toolDigest);
-      if (!decisionLeavesNativeActionPending(marker.decision)) {
-        if (receipt) return "UNKNOWN";
-      } else if (!receipt) {
-        if (marker.status === "COMPLETE") return "UNKNOWN";
-        pending = true;
-      }
-    }
-    return pending ? "PENDING" : "NONE";
+    const scanned = await scanToolCallJournal(root, scope);
+    if (scanned.kind === "UNKNOWN") return "UNKNOWN";
+    return scanned.calls.some(({ status }) => status === "PENDING")
+      ? "PENDING"
+      : "NONE";
   } catch {
     return "UNKNOWN";
   }

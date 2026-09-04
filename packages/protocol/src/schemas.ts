@@ -787,51 +787,84 @@ export const StateFingerprintSchema = z.strictObject({
 });
 export type StateFingerprint = z.infer<typeof StateFingerprintSchema>;
 
-export const BrowserTaskStateSchema = z.strictObject({
-  schemaVersion: z.literal(3),
-  sessionId: nonEmpty,
-  turnId: nonEmpty.optional(),
-  taskId: nonEmpty,
-  goalSummary: z.string().max(500),
-  hostProfileId: nonEmpty,
-  hostProfileStatus: z.enum(["VALID", "STALE", "DRIFTED", "UNSUPPORTED"]),
-  mode: HostModeSchema,
-  phase: z.enum([
-    "RUNNING",
-    "RECOVERING",
-    "HANDOFF_PREPARING",
-    "USER_LEASE_ACTIVE",
-    "HANDOFF_VERIFYING",
-    "RESTORING_TAB",
-    "RESUMING",
-    "DONE",
-    "FAILED",
-    "CANCELLED",
-  ]),
-  currentOrigin: nonEmpty.optional(),
-  currentUrlKey: nonEmpty.optional(),
-  documentBinding: nonEmpty.optional(),
-  revision: nonNegativeInt,
-  lastObservation: ObservationDigestSchema.optional(),
-  lastAction: ActionDigestSchema.optional(),
-  actionSignatureKeyId: hash.optional(),
-  noProgressCount: nonNegativeInt,
-  recoveryLevel: nonNegativeInt,
-  recoveryTransitions: nonNegativeInt,
-  authState: z.enum([
-    "UNKNOWN",
-    "AUTHENTICATED",
-    "UNAUTHENTICATED",
-    "CHALLENGE",
-    "MANUAL_BOUNDARY",
-  ]),
-  activeHandoffId: nonEmpty.optional(),
-  leaseEpoch: nonNegativeInt,
-  pointerOwner: PointerOwnerSchema,
-  targetCacheEpoch: nonNegativeInt,
-  pendingNativeActionIds: z.array(nonEmpty),
-  stateVersion: nonNegativeInt,
-});
+export const BrowserTaskStateSchema = z
+  .strictObject({
+    schemaVersion: z.literal(3),
+    sessionId: nonEmpty,
+    turnId: nonEmpty.optional(),
+    taskId: nonEmpty,
+    goalSummary: z.string().max(500),
+    hostProfileId: nonEmpty,
+    hostProfileStatus: z.enum(["VALID", "STALE", "DRIFTED", "UNSUPPORTED"]),
+    mode: HostModeSchema,
+    phase: z.enum([
+      "RUNNING",
+      "RECOVERING",
+      "HANDOFF_PREPARING",
+      "USER_LEASE_ACTIVE",
+      "HANDOFF_VERIFYING",
+      "RESTORING_TAB",
+      "RESUMING",
+      "DONE",
+      "FAILED",
+      "CANCELLED",
+    ]),
+    currentOrigin: nonEmpty.optional(),
+    currentUrlKey: nonEmpty.optional(),
+    documentBinding: nonEmpty.optional(),
+    revision: nonNegativeInt,
+    lastObservation: ObservationDigestSchema.optional(),
+    lastAction: ActionDigestSchema.optional(),
+    actionSignatureKeyId: hash.optional(),
+    noProgressCount: nonNegativeInt,
+    recoveryLevel: nonNegativeInt,
+    recoveryTransitions: nonNegativeInt,
+    authState: z.enum([
+      "UNKNOWN",
+      "AUTHENTICATED",
+      "UNAUTHENTICATED",
+      "CHALLENGE",
+      "MANUAL_BOUNDARY",
+    ]),
+    activeHandoffId: nonEmpty.optional(),
+    leaseEpoch: nonNegativeInt,
+    pointerOwner: PointerOwnerSchema,
+    targetCacheEpoch: nonNegativeInt,
+    pendingNativeActionIds: z.array(nonEmpty),
+    stateVersion: nonNegativeInt,
+  })
+  .superRefine((state, context) => {
+    const activeHumanPhase = [
+      "HANDOFF_VERIFYING",
+      "USER_LEASE_ACTIVE",
+    ].includes(state.phase);
+    const noOwnerPhase = ["RESTORING_TAB", "RESUMING"].includes(state.phase);
+    if (
+      (state.phase === "RUNNING" &&
+        (state.pointerOwner !== "NATIVE" || state.activeHandoffId)) ||
+      (activeHumanPhase &&
+        (state.pointerOwner !== "HUMAN" || !state.activeHandoffId)) ||
+      (noOwnerPhase &&
+        (state.pointerOwner !== "NONE" || !state.activeHandoffId)) ||
+      (state.phase === "HANDOFF_PREPARING" && state.pointerOwner !== "NATIVE")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["pointerOwner"],
+        message: "Browser task phase and ownership are inconsistent",
+      });
+    }
+    if (
+      state.pointerOwner !== "NATIVE" &&
+      state.pendingNativeActionIds.length > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["pendingNativeActionIds"],
+        message: "Non-Native ownership cannot retain pending native actions",
+      });
+    }
+  });
 export type BrowserTaskState = z.infer<typeof BrowserTaskStateSchema>;
 
 export const NativeActionDispositionSchema = z.enum([

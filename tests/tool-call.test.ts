@@ -15,10 +15,12 @@ import { describe, expect, it } from "vitest";
 import {
   completeToolCallPost,
   hasPendingToolCalls,
+  inspectToolCallJournal,
   protectToolCallRequestDigest,
   recordToolCallPre,
 } from "../packages/core/src/tool-call.js";
 import { createLocalDigestProtector } from "../packages/core/src/local-digest.js";
+import { persistentToolUseId } from "../packages/core/src/safe-state.js";
 import type { PolicyDecision } from "../packages/protocol/src/index.js";
 
 const allow: PolicyDecision = {
@@ -128,6 +130,37 @@ describe("tool call journal", () => {
     await expect(hasPendingToolCalls(root, input)).resolves.toBe("NONE");
   });
 
+  it("reports exact persistent ids for v2 pending and complete calls", async () => {
+    const root = await makeRoot();
+    const pending = baseInput("pending-raw-id");
+    const completed = baseInput("completed-raw-id");
+    await recordToolCallPre(root, pending);
+    await recordToolCallPre(root, completed);
+    await completeToolCallPost(root, completed);
+
+    await expect(inspectToolCallJournal(root, pending)).resolves.toEqual({
+      completedToolUseIds: [persistentToolUseId(completed.toolUseId)],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [persistentToolUseId(pending.toolUseId)],
+    });
+
+    const directory = await journalDirectory(root);
+    const markers = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    for (const filename of markers) {
+      const persisted = JSON.parse(
+        await readFile(path.join(directory, filename), "utf8"),
+      ) as Record<string, unknown>;
+      expect(persisted).toMatchObject({ schemaVersion: 2 });
+      expect(persisted).not.toHaveProperty("toolUseId");
+      expect(JSON.stringify(persisted)).not.toMatch(
+        /pending-raw-id|completed-raw-id/,
+      );
+    }
+  });
+
   it("makes one concurrent Pre the durable decision", async () => {
     const root = await makeRoot();
     const results = await Promise.all(
@@ -235,6 +268,12 @@ describe("tool call journal", () => {
     );
 
     await expect(hasPendingToolCalls(root, input)).resolves.toBe("NONE");
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      completedToolUseIds: [persistentToolUseId(input.toolUseId)],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
     await expect(completeToolCallPost(root, input)).resolves.toBe("DUPLICATE");
     expect(
       JSON.parse(await readFile(path.join(directory, markerName!), "utf8")),
@@ -254,6 +293,9 @@ describe("tool call journal", () => {
     });
 
     await expect(hasPendingToolCalls(root, input)).resolves.toBe("UNKNOWN");
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
     await expect(recordToolCallPre(root, input)).resolves.toEqual({
       kind: "UNAVAILABLE",
     });
@@ -272,6 +314,75 @@ describe("tool call journal", () => {
     await expect(hasPendingToolCalls(unavailableRoot, input)).resolves.toBe(
       "UNKNOWN",
     );
+  });
+
+  it("flags legacy pending calls but ignores completed legacy decisions", async () => {
+    const root = await makeRoot();
+    const scope = baseInput("legacy-pending");
+    await recordToolCallPre(root, scope);
+    await recordToolCallPre(root, {
+      ...baseInput("legacy-complete"),
+      decision: block,
+    });
+
+    const directory = await journalDirectory(root);
+    let pendingPath: string | undefined;
+    for (const filename of (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    )) {
+      const markerPath = path.join(directory, filename);
+      const marker = JSON.parse(await readFile(markerPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      if (marker.status === "PENDING") pendingPath = markerPath;
+      delete marker.persistentToolUseId;
+      marker.schemaVersion = 1;
+      await writeFile(markerPath, `${JSON.stringify(marker)}\n`, {
+        mode: 0o600,
+      });
+    }
+
+    await expect(inspectToolCallJournal(root, scope)).resolves.toEqual({
+      completedToolUseIds: [],
+      kind: "KNOWN",
+      legacyPending: true,
+      pendingToolUseIds: [],
+    });
+    expect(pendingPath).toBeDefined();
+    await unlink(pendingPath!);
+    await expect(inspectToolCallJournal(root, scope)).resolves.toEqual({
+      completedToolUseIds: [],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
+  });
+
+  it("returns unknown for conflicting persistent ids", async () => {
+    const root = await makeRoot();
+    const scope = baseInput("conflict-a");
+    await recordToolCallPre(root, scope);
+    await recordToolCallPre(root, baseInput("conflict-b"));
+    const directory = await journalDirectory(root);
+    const markerPaths = (await readdir(directory))
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => path.join(directory, name));
+    const first = JSON.parse(await readFile(markerPaths[0]!, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const second = JSON.parse(
+      await readFile(markerPaths[1]!, "utf8"),
+    ) as Record<string, unknown>;
+    second.persistentToolUseId = first.persistentToolUseId;
+    await writeFile(markerPaths[1]!, `${JSON.stringify(second)}\n`, {
+      mode: 0o600,
+    });
+
+    await expect(inspectToolCallJournal(root, scope)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
   });
 
   it("uses private modes and persists no raw identifiers or page data", async () => {

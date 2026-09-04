@@ -46,6 +46,7 @@ describe("persistent BrowserTaskState boundary", () => {
         reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
         timestamp: 1,
       },
+      phase: "HANDOFF_PREPARING",
       activeHandoffId: `handoff-${canary}`,
       pendingNativeActionIds: [`pending-${canary}`],
     };

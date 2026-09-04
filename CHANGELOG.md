@@ -6,6 +6,7 @@ All notable project changes are documented here. The normative specification his
 
 - Real-host compatibility and benchmark evidence remain in progress.
 - Bound persisted action signatures to a purpose-separated local HMAC key generation with safe legacy-state migration.
+- Added a monotonic Handoff admission gate, exact v2 tool-call reconciliation, serialized activation/cancel publication, and ownership-aware timeout recovery; activation requires a fresh Host-minted same-tab/native-action-fence receipt.
 
 ## [0.1.0-alpha.0] - 2026-09-04
 

@@ -12781,6 +12781,26 @@ var BrowserTaskStateSchema = external_exports.strictObject({
   targetCacheEpoch: nonNegativeInt,
   pendingNativeActionIds: external_exports.array(nonEmpty),
   stateVersion: nonNegativeInt
+}).superRefine((state, context) => {
+  const activeHumanPhase = [
+    "HANDOFF_VERIFYING",
+    "USER_LEASE_ACTIVE"
+  ].includes(state.phase);
+  const noOwnerPhase = ["RESTORING_TAB", "RESUMING"].includes(state.phase);
+  if (state.phase === "RUNNING" && (state.pointerOwner !== "NATIVE" || state.activeHandoffId) || activeHumanPhase && (state.pointerOwner !== "HUMAN" || !state.activeHandoffId) || noOwnerPhase && (state.pointerOwner !== "NONE" || !state.activeHandoffId) || state.phase === "HANDOFF_PREPARING" && state.pointerOwner !== "NATIVE") {
+    context.addIssue({
+      code: "custom",
+      path: ["pointerOwner"],
+      message: "Browser task phase and ownership are inconsistent"
+    });
+  }
+  if (state.pointerOwner !== "NATIVE" && state.pendingNativeActionIds.length > 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["pendingNativeActionIds"],
+      message: "Non-Native ownership cannot retain pending native actions"
+    });
+  }
 });
 var NativeActionDispositionSchema = external_exports.enum([
   "PASS_THROUGH_ORIGINAL",
@@ -13143,9 +13163,6 @@ var EvidenceTraceSchema = external_exports.strictObject({
   }
 });
 
-// packages/core/src/store.ts
-var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
-
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
@@ -13180,6 +13197,9 @@ function deriveHostMode(profile) {
   if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
   return "TRANSACTION_GUARD";
 }
+
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
 // packages/evidence/src/gate.ts
 var digest = (contents) => createHash2("sha256").update(contents).digest("hex");
