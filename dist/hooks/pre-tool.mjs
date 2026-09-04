@@ -14630,6 +14630,7 @@ function digest2(domain2, ...values) {
   return hash6.digest("hex");
 }
 var taskBindingDigest = (scope) => digest2("oxrail-handoff-task-binding-v1", scope.sessionId, scope.taskId);
+var safeTaskScope = (scope) => scope.sessionId.length > 0 && !scope.sessionId.includes("\0") && scope.taskId.length > 0 && !scope.taskId.includes("\0");
 var barrierDirectory = (root, scope) => path4.join(
   root,
   BARRIER_DIRECTORY,
@@ -14637,11 +14638,11 @@ var barrierDirectory = (root, scope) => path4.join(
   digest2("oxrail-handoff-task-v1", scope.taskId)
 );
 function parseBarrier(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "browserInstanceBindingHash,createdAt,expiresAt,handoffId,hostProfileDigest,leaseEpoch,nativeActionFenceHash,nonceDigest,schemaVersion,scopeDigest,state,tabBindingReceiptHash,taskBindingDigest,updatedAt") {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "browserInstanceBindingHash,createdAt,expiresAt,handoffId,hostProfileBindingHash,hostProfileIdHash,leaseEpoch,nativeActionFenceHash,nonceDigest,schemaVersion,scopeDigest,state,tabBindingReceiptHash,taskBindingDigest,updatedAt") {
     throw new Error("invalid handoff barrier");
   }
   const barrier = value;
-  if (barrier.schemaVersion !== 1 || !PERSISTENT_ID2.test(barrier.handoffId ?? "") || !Number.isSafeInteger(barrier.leaseEpoch) || barrier.leaseEpoch <= 0 || !Number.isSafeInteger(barrier.createdAt) || barrier.createdAt < 0 || !Number.isSafeInteger(barrier.updatedAt) || barrier.updatedAt < barrier.createdAt || !Number.isSafeInteger(barrier.expiresAt) || barrier.expiresAt <= barrier.createdAt || !HASH.test(barrier.nonceDigest ?? "") || !HASH.test(barrier.scopeDigest ?? "") || !HASH.test(barrier.taskBindingDigest ?? "") || !HASH.test(barrier.hostProfileDigest ?? "") || barrier.browserInstanceBindingHash !== null && !HASH.test(barrier.browserInstanceBindingHash ?? "") || barrier.nativeActionFenceHash !== null && !HASH.test(barrier.nativeActionFenceHash ?? "") || barrier.tabBindingReceiptHash !== null && !HASH.test(barrier.tabBindingReceiptHash ?? "") || barrier.state === "ACTIVE" && (barrier.browserInstanceBindingHash === null || barrier.nativeActionFenceHash === null || barrier.tabBindingReceiptHash === null) || barrier.state !== "ACTIVE" && (barrier.browserInstanceBindingHash !== null || barrier.nativeActionFenceHash !== null || barrier.tabBindingReceiptHash !== null) || !["ACTIVE", "CANCELLED", "PREPARING"].includes(barrier.state ?? "")) {
+  if (barrier.schemaVersion !== 1 || !PERSISTENT_ID2.test(barrier.handoffId ?? "") || !Number.isSafeInteger(barrier.leaseEpoch) || barrier.leaseEpoch <= 0 || !Number.isSafeInteger(barrier.createdAt) || barrier.createdAt < 0 || !Number.isSafeInteger(barrier.updatedAt) || barrier.updatedAt < barrier.createdAt || !Number.isSafeInteger(barrier.expiresAt) || barrier.expiresAt <= barrier.createdAt || !HASH.test(barrier.nonceDigest ?? "") || !HASH.test(barrier.scopeDigest ?? "") || !HASH.test(barrier.taskBindingDigest ?? "") || !HASH.test(barrier.hostProfileBindingHash ?? "") || !HASH.test(barrier.hostProfileIdHash ?? "") || barrier.browserInstanceBindingHash !== null && !HASH.test(barrier.browserInstanceBindingHash ?? "") || barrier.nativeActionFenceHash !== null && !HASH.test(barrier.nativeActionFenceHash ?? "") || barrier.tabBindingReceiptHash !== null && !HASH.test(barrier.tabBindingReceiptHash ?? "") || barrier.state === "ACTIVE" && (barrier.browserInstanceBindingHash === null || barrier.nativeActionFenceHash === null || barrier.tabBindingReceiptHash === null) || barrier.state !== "ACTIVE" && (barrier.browserInstanceBindingHash !== null || barrier.nativeActionFenceHash !== null || barrier.tabBindingReceiptHash !== null) || !["ACTIVE", "CANCELLED", "PREPARING"].includes(barrier.state ?? "")) {
     throw new Error("invalid handoff barrier");
   }
   return barrier;
@@ -14655,6 +14656,7 @@ async function readBarrier(filename) {
   return parseBarrier(JSON.parse(contents.toString("utf8")));
 }
 async function readHandoffGate(root, scope) {
+  if (!safeTaskScope(scope)) return { kind: "UNKNOWN" };
   try {
     const directory = barrierDirectory(root, scope);
     let entries;
