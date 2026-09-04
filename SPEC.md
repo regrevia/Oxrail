@@ -2206,7 +2206,7 @@ export type NativePrimitive =
   | "handoff_resume";
 ```
 
-`HostProfileSchema` 与生成 JSON Schema 只验证交换结构和跨字段不变量，都不是 Credential activation 授权器。只有独立 macOS activation verifier 实时核对 Security.framework code-signing attestation、sealed evidence manifest、launcher-owned rollback floor 与当前 Host trust binding 后，runtime 才能采用 `ACTIVE`；该 verifier 尚未实现或任一核对不可用时，即使输入 profile 自报 `ACTIVE/passed` 也必须拒绝并降为 `INACTIVE`。
+运行时 `HostProfileSchema` 验证交换结构和跨字段不变量；生成 JSON Schema 只验证可移植的交换结构，不表达 Zod `superRefine` 语义，也不得单独用于授权。两者都不是 Credential activation 授权器。只有独立 macOS activation verifier 实时核对 Security.framework code-signing attestation、sealed evidence manifest、launcher-owned rollback floor 与当前 Host trust binding 后，runtime 才能采用 `ACTIVE`；该 verifier 尚未实现或任一核对不可用时，即使输入 profile 自报 `ACTIVE/passed` 也必须拒绝并降为 `INACTIVE`。
 
 `toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
 
