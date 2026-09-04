@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.10
+# Oxrail — 唯一实现规范（SPEC）v1.0.11
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.10
+  spec_version: 1.0.11
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -2215,6 +2215,8 @@ export type NativePrimitive =
 `helperCodeDirectoryHash` 与 `launcherCodeDirectoryHash` 必须是 Security.framework `kSecCodeInfoUnique` 返回的当前已验证 binary 的 raw public CDHash：20 bytes，编码为严格的 40 位小写十六进制；它们不是签名 blob 的摘要，也不是 SHA-256。`matcherEvidenceHash`、registry/manifest/evidence Hash 与 `credentialTrustRootDigest` 等证据或信任根摘要继续使用 SHA-256 的 64 位十六进制合同，不得与 CDHash 混用。首版每个 launcher/helper 只支持一份 architecture-specific artifact 和一个对应 CDHash；Universal/fat binary 的多 architecture CodeDirectory hash set 延后，在该合同实现前不得把多个 CDHash 折叠成一个值或据此激活 Credential Channel。
 
 macOS native package 的 code-identity verifier foundation 只提供零参数、只读的 `runPinnedCodeIdentityObservation()`：production target/path、Team ID、signing identifier、CDHash 与 designated requirement 只能来自 build-fixed release pins，禁止由 argv、env、HostProfile 或调用方覆盖。实现必须通过公开 Security.framework 严格验证 launcher 与 helper 的两个不同身份，对 pinned requirement 做系统 validity check，并把其编译数据与候选自身 designated requirement data 精确比较，同时逐一匹配 Team/signing ID/20-byte CDHash；单 CDHash 合同还必须拒绝未证明为 thin Mach-O 的 artifact。输出固定为 `schemaVersion=1`、`authority=NON_AUTHORIZING`、`scope=CODE_IDENTITY_ONLY` 及 `MATCHED_NON_AUTHORIZING | INACTIVE`，不得包含路径、OSStatus 或自由文本。当前正式 release pins 尚未配置，因此 production 入口固定 `INACTIVE`；测试注入只允许存在于 package-internal seam。该局部观察不启动 helper，不访问 prompt、Keychain、pasteboard 或持久状态，不实现应用层网络 client/endpoint，不接 Hook/Doctor/Profile activation，也不证明 Host-wide suspension、G15 或 Credential `ACTIVE`。
+
+macOS native package 的 credential-registry validator foundation 只提供零参数、只读的 `runEmbeddedCredentialRegistryObservation()`：production 入口只观察 build-fixed 的 template registry、consumer registry 与 manifest，禁止由 argv、env、HostProfile、页面、Agent 或调用方替换。首个 foundation 只包含一份 `API_KEY` fixture template 与一份同 service/consumer/origin 绑定的 fixture HTTPS consumer，固定 `NSSecureTextField`、`POST` bearer placement、禁用 redirect，并校验 schema/version、ID、canonical HTTPS origin/path、TTL/generation、跨 registry 关联及严格 64 位小写 SHA-256。三类摘要分别按 domain `oxrail-credential-template-registry-v1`、`oxrail-credential-consumer-registry-v1`、`oxrail-credential-registry-manifest-v1` 对 `UTF8(domain) || 0x00 || sorted-key JSON（不转义 slash）` 计算。输出只允许固定的 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=REGISTRY_STRUCTURE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 version/Hash。embedded manifest 与同一可替换 binary 内的 self-hash 只证明 fixture 结构自洽，不是 code-signed sealed manifest、外部可信 pin 或 launcher-owned rollback floor；`MATCHED_FIXTURE_NON_AUTHORIZING` 不得映射为 HostProfile `registryManifestVerification=passed`，不得启动 helper/prompt、访问 Keychain/pasteboard/network、消费 credential、接入 Hook/Doctor/Profile activation，也不证明 G15、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
 
 `toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
 
@@ -11781,6 +11783,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.11 — 2026-09-04
+
+- 新增 build-fixed、零参数、只读的 macOS credential registry validator foundation，仅验证一组 `API_KEY` fixture template/consumer 的 schema、交叉绑定与域分离 SHA-256；
+- 输出收窄为 `FIXTURE_ONLY_NON_AUTHORIZING / REGISTRY_STRUCTURE_ONLY / MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`，固定 `activation=INACTIVE`、`consumerReadiness=FIXTURE_ONLY`，外部输入不得替换 registry；
+- 明确 embedded manifest/self-hash 不是 sealed trust root、外部 pin 或 rollback floor；该模块不启动 helper/prompt、不触碰 Keychain/pasteboard/network、不接 Hook/Doctor/Profile，不满足 G15/`WP-CRED-001`，Credential protection 保持 `INACTIVE`。
 
 ### v1.0.10 — 2026-09-04
 

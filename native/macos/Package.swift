@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "OxrailCodeIdentity", targets: ["OxrailCodeIdentity"]),
+        .library(name: "OxrailCredentialRegistry", targets: ["OxrailCredentialRegistry"]),
         .library(name: "OxrailKeychainProbe", targets: ["OxrailKeychainProbe"]),
         .executable(name: "oxrail-keychain-probe", targets: ["OxrailKeychainProbeCLI"]),
     ],
@@ -15,6 +16,7 @@ let package = Package(
             name: "OxrailCodeIdentity",
             linkerSettings: [.linkedFramework("Security")]
         ),
+        .target(name: "OxrailCredentialRegistry"),
         .target(
             name: "OxrailKeychainProbe",
             linkerSettings: [.linkedFramework("Security")]
@@ -26,6 +28,10 @@ let package = Package(
         .testTarget(
             name: "OxrailCodeIdentityTests",
             dependencies: ["OxrailCodeIdentity"]
+        ),
+        .testTarget(
+            name: "OxrailCredentialRegistryTests",
+            dependencies: ["OxrailCredentialRegistry"]
         ),
         .testTarget(
             name: "OxrailKeychainProbeTests",
