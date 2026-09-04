@@ -104,6 +104,23 @@ describe("v0.1 core policy", () => {
     ).toBe("PASS_THROUGH_ORIGINAL");
   });
 
+  it("blocks an action that is bound to a different known top origin", () => {
+    const boundState = {
+      ...state(),
+      currentOrigin: "https://example.test",
+    };
+
+    expect(
+      evaluateAction({
+        action: action({ origin: "https://other.test" }),
+        state: boundState,
+      }),
+    ).toMatchObject({
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+    });
+  });
+
   it("routes high-impact work only to native approval or handoff", () => {
     const risky = action({ impact: "high-impact" });
     expect(

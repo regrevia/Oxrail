@@ -146,8 +146,20 @@ export function evaluateAction(context: PolicyContext): PolicyDecision {
         ? state.hostProfileStatus === "VALID"
           ? "OXRAIL_HOST_ROUTE_UNPROVEN"
           : "OXRAIL_HOST_PROFILE_STALE"
-        : "OXRAIL_HOST_ROUTE_UNPROVEN",
+      : "OXRAIL_HOST_ROUTE_UNPROVEN",
     );
+  }
+
+  if (
+    state.currentOrigin !== undefined &&
+    action.origin !== undefined &&
+    action.origin !== state.currentOrigin
+  ) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+      recoverable: true,
+    };
   }
 
   if (context.requiresHumanBoundary) {
