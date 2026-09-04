@@ -6,9 +6,10 @@ import { classifyTool } from "./matcher.js";
 import { loadHostProfile } from "./profile.js";
 import {
   digestSessionId,
+  digestToolUseId,
   HOOK_EVENTS,
-  markerMatches,
   oxrailDataDirectory,
+  recordBrowserHookPhase,
   recordHookMarker,
   type HookEventName,
 } from "./state.js";
@@ -19,6 +20,7 @@ interface HookInput {
   hook_event_name: HookEventName;
   session_id?: string;
   tool_name?: string;
+  tool_use_id?: string;
 }
 
 export interface HookEnvironment {
@@ -34,7 +36,8 @@ const isHookInput = (value: unknown): value is HookInput => {
     typeof input.hook_event_name === "string" &&
     HOOK_EVENTS.includes(input.hook_event_name as HookEventName) &&
     (input.session_id === undefined || typeof input.session_id === "string") &&
-    (input.tool_name === undefined || typeof input.tool_name === "string")
+    (input.tool_name === undefined || typeof input.tool_name === "string") &&
+    (input.tool_use_id === undefined || typeof input.tool_use_id === "string")
   );
 };
 
@@ -84,7 +87,9 @@ export async function handleHookEvent(
 
   const toolEvent =
     value.hook_event_name === "PreToolUse" ||
-    value.hook_event_name === "PostToolUse";
+    value.hook_event_name === "PostToolUse"
+      ? value.hook_event_name
+      : undefined;
   const browserPath = Boolean(
     toolEvent &&
       value.tool_name &&
@@ -97,27 +102,20 @@ export async function handleHookEvent(
   if (profileResult.profile.setup.lifecycle === "INSTALLED")
     return bypassOutput();
 
-  const firstForPhase = !(await markerMatches(
-    environment.pluginData,
-    value.hook_event_name,
-    definitionHash,
-    {
-      browserHook: true,
-      now,
-      profileId: profileResult.profile.profileId,
-      ...(sessionDigest ? { sessionDigest } : {}),
-    },
-  ));
-  if (firstForPhase) {
-    await recordHookMarker(
+  if (
+    profileResult.profile.setup.lifecycle === "CONFIGURED" &&
+    value.tool_use_id &&
+    sessionDigest
+  ) {
+    await recordBrowserHookPhase(
       environment.pluginData,
+      toolEvent,
       {
-        browserHook: true,
         definitionHash,
-        event: value.hook_event_name,
         profileId: profileResult.profile.profileId,
         sessionDigest,
         synthetic: false,
+        toolUseDigest: digestToolUseId(value.tool_use_id),
       },
       now,
     );

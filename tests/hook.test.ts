@@ -12,10 +12,12 @@ import {
 } from "../packages/protocol/src/index.js";
 import {
   digestSessionId,
+  digestToolUseId,
   handleHookEvent,
   hookDefinitionHash,
   markerMatches,
   oxrailDataDirectory,
+  readBrowserRouteObservations,
   readHookMarker,
 } from "../packages/host-openai/src/index.js";
 
@@ -214,23 +216,17 @@ describe("public Codex hooks", () => {
       environment,
     );
     expect(unrelated).toEqual({});
-    expect(
-      await markerMatches(
-        environment.pluginData,
-        "PreToolUse",
-        environment.definitionHash,
-        {
-          browserHook: true,
-          profileId: "hp_fixture",
-        },
-      ),
-    ).toBe(false);
+    expect(await readBrowserRouteObservations(environment.pluginData)).toEqual(
+      [],
+    );
 
+    const toolUseId = "fixture-browser-call";
     const pre = await handleHookEvent(
       {
         hook_event_name: "PreToolUse",
         session_id: sessionCanary,
         tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
         tool_input: { value: canary },
       },
       environment,
@@ -240,6 +236,7 @@ describe("public Codex hooks", () => {
         hook_event_name: "PostToolUse",
         session_id: sessionCanary,
         tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
         tool_input: { value: canary },
         tool_response: { raw: canary },
       },
@@ -248,34 +245,16 @@ describe("public Codex hooks", () => {
 
     expect(pre).toEqual({});
     expect(post).toEqual({});
-    expect(
-      await markerMatches(
-        environment.pluginData,
-        "PreToolUse",
-        environment.definitionHash,
-        {
-          browserHook: true,
-          profileId: "hp_fixture",
-        },
-      ),
-    ).toBe(true);
-    expect(
-      await markerMatches(
-        environment.pluginData,
-        "PostToolUse",
-        environment.definitionHash,
-        {
-          browserHook: true,
-          profileId: "hp_fixture",
-        },
-      ),
-    ).toBe(true);
-    const firstMarker = await readHookMarker(
-      environment.pluginData,
-      "PreToolUse",
-      true,
-    );
-    expect(firstMarker?.first_browser_hook_seen).toBe(true);
+    const firstMarker = (
+      await readBrowserRouteObservations(environment.pluginData)
+    )[0];
+    expect(firstMarker).toMatchObject({
+      definitionHash: environment.definitionHash,
+      profileId: "hp_fixture",
+      toolUseDigest: digestToolUseId(toolUseId),
+    });
+    expect(firstMarker?.preObservedAt).toBeTypeOf("string");
+    expect(firstMarker?.postObservedAt).toBeTypeOf("string");
     expect(firstMarker?.sessionDigest).toBe(digestSessionId(sessionCanary));
     await new Promise((resolve) => setTimeout(resolve, 5));
     await handleHookEvent(
@@ -283,12 +262,13 @@ describe("public Codex hooks", () => {
         hook_event_name: "PreToolUse",
         session_id: sessionCanary,
         tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
         tool_input: { value: canary },
       },
       environment,
     );
     expect(
-      await readHookMarker(environment.pluginData, "PreToolUse", true),
+      (await readBrowserRouteObservations(environment.pluginData))[0],
     ).toEqual(firstMarker);
     const persisted = await Promise.all(
       (await allFiles(environment.pluginData)).map((filename) =>
@@ -337,6 +317,30 @@ describe("public Codex hooks", () => {
       "permissionDecision",
     );
     expect(JSON.stringify(staleProfileOutput)).not.toContain("updatedInput");
+  });
+
+  it("does not record browser-route evidence without a host session id", async () => {
+    const environment = await setup();
+    for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
+      await expect(
+        handleHookEvent(
+          {
+            hook_event_name,
+            tool_name: "fixture.native.browser",
+            tool_use_id: "sessionless-browser-call",
+            tool_input: { action: "fixture-no-op" },
+            ...(hook_event_name === "PostToolUse"
+              ? { tool_response: { ok: true } }
+              : {}),
+          },
+          environment,
+        ),
+      ).resolves.toEqual({});
+    }
+
+    await expect(
+      readBrowserRouteObservations(environment.pluginData),
+    ).resolves.toEqual([]);
   });
 
   it("surfaces a fixed inactive status when the Hook CLI fails internally", () => {

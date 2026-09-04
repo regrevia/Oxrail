@@ -13002,7 +13002,7 @@ async function writeHostProfile(pluginData2, input) {
 
 // packages/host-openai/src/state.ts
 import { createHash, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir2, readFile as readFile2, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
+import { mkdir as mkdir2, readFile as readFile2, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path2 from "node:path";
 var HOOK_EVENTS = [
@@ -13015,6 +13015,7 @@ var HOOK_EVENTS = [
 var HOOK_MARKER_FRESHNESS_MS = 3e4;
 var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
 var digestSessionId = (sessionId2) => createHash("sha256").update("oxrail-session-v1\0").update(sessionId2).digest("hex");
+var digestToolUseId = (toolUseId) => createHash("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
   SessionStart: "session-start.json",
   UserPromptSubmit: "user-prompt-submit.json",
@@ -13023,10 +13024,70 @@ var markerNames = {
   PostToolUse: "post-tool-use.json"
 };
 var stateDirectory = (pluginData2) => path2.join(pluginData2, "setup-verification");
+var browserRouteDirectory = (pluginData2) => path2.join(stateDirectory(pluginData2), "browser-route");
 var markerPath = (pluginData2, event, browserHook) => path2.join(
   stateDirectory(pluginData2),
   `${browserHook ? "browser-" : ""}${markerNames[event]}`
 );
+var isHash = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+function isBrowserRouteObservation(value) {
+  if (!value || typeof value !== "object") return false;
+  const marker = value;
+  return marker.schemaVersion === 1 && isHash(marker.definitionHash) && typeof marker.profileId === "string" && marker.profileId.length > 0 && isHash(marker.toolUseDigest) && typeof marker.synthetic === "boolean" && (marker.sessionDigest === null || isHash(marker.sessionDigest)) && (marker.preObservedAt === void 0 || Number.isFinite(Date.parse(marker.preObservedAt))) && (marker.postObservedAt === void 0 || Number.isFinite(Date.parse(marker.postObservedAt))) && (marker.preObservedAt !== void 0 || marker.postObservedAt !== void 0);
+}
+async function recordBrowserHookPhase(pluginData2, phase, observation, now = Date.now()) {
+  const directory = browserRouteDirectory(pluginData2);
+  await mkdir2(directory, { recursive: true, mode: 448 });
+  const destination = path2.join(directory, `${observation.toolUseDigest}.json`);
+  let previous;
+  try {
+    const candidate = JSON.parse(await readFile2(destination, "utf8"));
+    if (isBrowserRouteObservation(candidate) && candidate.definitionHash === observation.definitionHash && candidate.profileId === observation.profileId && candidate.sessionDigest === observation.sessionDigest && candidate.synthetic === observation.synthetic) {
+      previous = candidate;
+    }
+  } catch {
+  }
+  if (phase === "PostToolUse" && !previous?.preObservedAt) return;
+  const observedAt = new Date(now).toISOString();
+  const value = {
+    ...observation,
+    ...previous,
+    ...phase === "PreToolUse" ? { preObservedAt: previous?.preObservedAt ?? observedAt } : { postObservedAt: previous?.postObservedAt ?? observedAt },
+    schemaVersion: 1
+  };
+  const temporary = path2.join(
+    directory,
+    `.${observation.toolUseDigest}.${randomUUID2()}`
+  );
+  await writeFile2(temporary, `${JSON.stringify(value)}
+`, { mode: 384 });
+  await rename2(temporary, destination);
+}
+async function readBrowserRouteObservations(pluginData2) {
+  try {
+    const directory = browserRouteDirectory(pluginData2);
+    const names = (await readdir(directory)).filter(
+      (name) => /^[a-f0-9]{64}\.json$/.test(name)
+    );
+    const markers = await Promise.all(
+      names.map(async (name) => {
+        try {
+          const value = JSON.parse(
+            await readFile2(path2.join(directory, name), "utf8")
+          );
+          return isBrowserRouteObservation(value) ? value : void 0;
+        } catch {
+          return void 0;
+        }
+      })
+    );
+    return markers.filter(
+      (marker) => marker !== void 0
+    );
+  } catch {
+    return [];
+  }
+}
 function isMarker(value) {
   if (!value || typeof value !== "object") return false;
   const marker = value;
@@ -13196,26 +13257,10 @@ async function observe(pluginData2, definitionHash, now, profileId, sessionDiges
       ])
     )
   );
-  const [
-    genericPreMarker,
-    genericPostMarker,
-    browserPreMarker,
-    browserPostMarker
-  ] = await Promise.all([
+  const [genericPreMarker, genericPostMarker, browserMarkers] = await Promise.all([
     readHookMarker(pluginData2, "PreToolUse"),
     readHookMarker(pluginData2, "PostToolUse"),
-    readHookMarker(pluginData2, "PreToolUse", true),
-    readHookMarker(pluginData2, "PostToolUse", true)
-  ]);
-  const [browserPre, browserPost] = await Promise.all([
-    markerMatches(pluginData2, "PreToolUse", definitionHash, {
-      ...current,
-      browserHook: true
-    }),
-    markerMatches(pluginData2, "PostToolUse", definitionHash, {
-      ...current,
-      browserHook: true
-    })
+    readBrowserRouteObservations(pluginData2)
   ]);
   const sameSession = (markers) => {
     const digests = markers.flatMap(
@@ -13223,18 +13268,31 @@ async function observe(pluginData2, definitionHash, now, profileId, sessionDiges
     );
     return digests.length === 0 || digests.length === markers.length && new Set(digests).size === 1;
   };
-  const persistedBrowserRoute = Boolean(
-    profileId && browserPreMarker && browserPostMarker && browserPreMarker.definitionHash === definitionHash && browserPostMarker.definitionHash === definitionHash && browserPreMarker.profileId === profileId && browserPostMarker.profileId === profileId && browserPreMarker.synthetic === browserPostMarker.synthetic && sameSession([browserPreMarker, browserPostMarker])
+  const matchingBrowserMarkers = browserMarkers.filter(
+    (marker) => marker.definitionHash === definitionHash && (!profileId || marker.profileId === profileId) && (!sessionDigest || marker.sessionDigest === sessionDigest)
   );
+  const ageIsCurrent = (observedAt) => {
+    const age = now - Date.parse(observedAt ?? "");
+    return Number.isFinite(age) && age >= 0 && age <= HOOK_MARKER_FRESHNESS_MS;
+  };
+  const completedBrowserMarker = matchingBrowserMarkers.find(
+    (marker) => marker.preObservedAt && marker.postObservedAt
+  );
+  const browserPre = matchingBrowserMarkers.some(
+    (marker) => ageIsCurrent(marker.preObservedAt)
+  );
+  const browserPost = matchingBrowserMarkers.some(
+    (marker) => ageIsCurrent(marker.postObservedAt)
+  );
+  const persistedBrowserRoute = Boolean(completedBrowserMarker);
   return {
     browserPost,
     browserPre,
-    browserSessionBound: sameSession([browserPreMarker, browserPostMarker]),
     generic,
     genericSessionBound: sameSession([genericPreMarker, genericPostMarker]),
     persistedBrowserRoute,
-    persistedSyntheticBrowser: persistedBrowserRoute && browserPreMarker?.synthetic === true,
-    syntheticBrowser: browserPre && browserPost && sameSession([browserPreMarker, browserPostMarker]) && browserPreMarker?.synthetic === true && browserPostMarker?.synthetic === true
+    persistedSyntheticBrowser: persistedBrowserRoute && completedBrowserMarker?.synthetic === true,
+    syntheticBrowser: Boolean(completedBrowserMarker) && completedBrowserMarker?.synthetic === true && ageIsCurrent(completedBrowserMarker.preObservedAt) && ageIsCurrent(completedBrowserMarker.postObservedAt)
   };
 }
 var matchesCurrentIdentity = (profile, current) => Boolean(
@@ -13313,24 +13371,22 @@ async function runDoctor(options) {
           now
         );
       }
-      if (result.chromeComputerUse && result.matcherMatched && result.preToolUse) {
-        await recordHookMarker(
+      if (result.chromeComputerUse && result.matcherMatched && result.preToolUse && result.postToolUse) {
+        await recordBrowserHookPhase(
           options.pluginData,
+          "PreToolUse",
           {
             ...common,
-            browserHook: true,
-            event: "PreToolUse"
+            toolUseDigest: digestToolUseId("oxrail-harmless-synthetic-probe")
           },
           now
         );
-      }
-      if (result.chromeComputerUse && result.matcherMatched && result.postToolUse) {
-        await recordHookMarker(
+        await recordBrowserHookPhase(
           options.pluginData,
+          "PostToolUse",
           {
             ...common,
-            browserHook: true,
-            event: "PostToolUse"
+            toolUseDigest: digestToolUseId("oxrail-harmless-synthetic-probe")
           },
           now
         );

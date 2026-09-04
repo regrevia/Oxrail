@@ -12,9 +12,13 @@ import { hookDefinitionHash } from "./hook.js";
 import { loadHostProfile, writeHostProfile } from "./profile.js";
 import {
   digestSessionId,
+  digestToolUseId,
   HOOK_EVENTS,
+  HOOK_MARKER_FRESHNESS_MS,
   markerMatches,
+  readBrowserRouteObservations,
   readHookMarker,
+  recordBrowserHookPhase,
   recordHookMarker,
   type HookEventName,
 } from "./state.js";
@@ -132,27 +136,12 @@ async function observe(
       ]),
     ),
   ) as Record<HookEventName, boolean>;
-  const [
-    genericPreMarker,
-    genericPostMarker,
-    browserPreMarker,
-    browserPostMarker,
-  ] = await Promise.all([
-    readHookMarker(pluginData, "PreToolUse"),
-    readHookMarker(pluginData, "PostToolUse"),
-    readHookMarker(pluginData, "PreToolUse", true),
-    readHookMarker(pluginData, "PostToolUse", true),
-  ]);
-  const [browserPre, browserPost] = await Promise.all([
-    markerMatches(pluginData, "PreToolUse", definitionHash, {
-      ...current,
-      browserHook: true,
-    }),
-    markerMatches(pluginData, "PostToolUse", definitionHash, {
-      ...current,
-      browserHook: true,
-    }),
-  ]);
+  const [genericPreMarker, genericPostMarker, browserMarkers] =
+    await Promise.all([
+      readHookMarker(pluginData, "PreToolUse"),
+      readHookMarker(pluginData, "PostToolUse"),
+      readBrowserRouteObservations(pluginData),
+    ]);
   const sameSession = (markers: Array<typeof genericPreMarker>) => {
     const digests = markers.flatMap((marker) =>
       marker?.sessionDigest ? [marker.sessionDigest] : [],
@@ -162,32 +151,39 @@ async function observe(
       (digests.length === markers.length && new Set(digests).size === 1)
     );
   };
-  const persistedBrowserRoute = Boolean(
-    profileId &&
-      browserPreMarker &&
-      browserPostMarker &&
-      browserPreMarker.definitionHash === definitionHash &&
-      browserPostMarker.definitionHash === definitionHash &&
-      browserPreMarker.profileId === profileId &&
-      browserPostMarker.profileId === profileId &&
-      browserPreMarker.synthetic === browserPostMarker.synthetic &&
-      sameSession([browserPreMarker, browserPostMarker]),
+  const matchingBrowserMarkers = browserMarkers.filter(
+    (marker) =>
+      marker.definitionHash === definitionHash &&
+      (!profileId || marker.profileId === profileId) &&
+      (!sessionDigest || marker.sessionDigest === sessionDigest),
   );
+  const ageIsCurrent = (observedAt?: string) => {
+    const age = now - Date.parse(observedAt ?? "");
+    return Number.isFinite(age) && age >= 0 && age <= HOOK_MARKER_FRESHNESS_MS;
+  };
+  const completedBrowserMarker = matchingBrowserMarkers.find(
+    (marker) => marker.preObservedAt && marker.postObservedAt,
+  );
+  const browserPre = matchingBrowserMarkers.some((marker) =>
+    ageIsCurrent(marker.preObservedAt),
+  );
+  const browserPost = matchingBrowserMarkers.some((marker) =>
+    ageIsCurrent(marker.postObservedAt),
+  );
+  const persistedBrowserRoute = Boolean(completedBrowserMarker);
   return {
     browserPost,
     browserPre,
-    browserSessionBound: sameSession([browserPreMarker, browserPostMarker]),
     generic,
     genericSessionBound: sameSession([genericPreMarker, genericPostMarker]),
     persistedBrowserRoute,
     persistedSyntheticBrowser:
-      persistedBrowserRoute && browserPreMarker?.synthetic === true,
+      persistedBrowserRoute && completedBrowserMarker?.synthetic === true,
     syntheticBrowser:
-      browserPre &&
-      browserPost &&
-      sameSession([browserPreMarker, browserPostMarker]) &&
-      browserPreMarker?.synthetic === true &&
-      browserPostMarker?.synthetic === true,
+      Boolean(completedBrowserMarker) &&
+      completedBrowserMarker?.synthetic === true &&
+      ageIsCurrent(completedBrowserMarker.preObservedAt) &&
+      ageIsCurrent(completedBrowserMarker.postObservedAt),
   };
 }
 
@@ -301,29 +297,24 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       if (
         result.chromeComputerUse &&
         result.matcherMatched &&
-        result.preToolUse
+        result.preToolUse &&
+        result.postToolUse
       ) {
-        await recordHookMarker(
+        await recordBrowserHookPhase(
           options.pluginData,
+          "PreToolUse",
           {
             ...common,
-            browserHook: true,
-            event: "PreToolUse",
+            toolUseDigest: digestToolUseId("oxrail-harmless-synthetic-probe"),
           },
           now,
         );
-      }
-      if (
-        result.chromeComputerUse &&
-        result.matcherMatched &&
-        result.postToolUse
-      ) {
-        await recordHookMarker(
+        await recordBrowserHookPhase(
           options.pluginData,
+          "PostToolUse",
           {
             ...common,
-            browserHook: true,
-            event: "PostToolUse",
+            toolUseDigest: digestToolUseId("oxrail-harmless-synthetic-probe"),
           },
           now,
         );

@@ -12981,7 +12981,7 @@ async function loadHostProfile(pluginData, constraints = {}, profilePath = path.
 
 // packages/host-openai/src/state.ts
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir as mkdir2, readFile as readFile2, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
+import { mkdir as mkdir2, readFile as readFile2, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path2 from "node:path";
 var HOOK_EVENTS = [
@@ -12991,9 +12991,9 @@ var HOOK_EVENTS = [
   "PermissionRequest",
   "PostToolUse"
 ];
-var HOOK_MARKER_FRESHNESS_MS = 3e4;
 var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
 var digestSessionId = (sessionId) => createHash("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
+var digestToolUseId = (toolUseId) => createHash("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
   SessionStart: "session-start.json",
   UserPromptSubmit: "user-prompt-submit.json",
@@ -13002,14 +13002,44 @@ var markerNames = {
   PostToolUse: "post-tool-use.json"
 };
 var stateDirectory = (pluginData) => path2.join(pluginData, "setup-verification");
+var browserRouteDirectory = (pluginData) => path2.join(stateDirectory(pluginData), "browser-route");
 var markerPath = (pluginData, event, browserHook) => path2.join(
   stateDirectory(pluginData),
   `${browserHook ? "browser-" : ""}${markerNames[event]}`
 );
-function isMarker(value) {
+var isHash = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+function isBrowserRouteObservation(value) {
   if (!value || typeof value !== "object") return false;
   const marker = value;
-  return marker.schemaVersion === 2 && typeof marker.definitionHash === "string" && typeof marker.browserHook === "boolean" && marker.first_browser_hook_seen === marker.browserHook && typeof marker.synthetic === "boolean" && typeof marker.observedAt === "string" && (marker.profileId === null || typeof marker.profileId === "string") && (marker.sessionDigest === null || typeof marker.sessionDigest === "string" && /^[a-f0-9]{64}$/.test(marker.sessionDigest)) && HOOK_EVENTS.includes(marker.event);
+  return marker.schemaVersion === 1 && isHash(marker.definitionHash) && typeof marker.profileId === "string" && marker.profileId.length > 0 && isHash(marker.toolUseDigest) && typeof marker.synthetic === "boolean" && (marker.sessionDigest === null || isHash(marker.sessionDigest)) && (marker.preObservedAt === void 0 || Number.isFinite(Date.parse(marker.preObservedAt))) && (marker.postObservedAt === void 0 || Number.isFinite(Date.parse(marker.postObservedAt))) && (marker.preObservedAt !== void 0 || marker.postObservedAt !== void 0);
+}
+async function recordBrowserHookPhase(pluginData, phase, observation, now = Date.now()) {
+  const directory = browserRouteDirectory(pluginData);
+  await mkdir2(directory, { recursive: true, mode: 448 });
+  const destination = path2.join(directory, `${observation.toolUseDigest}.json`);
+  let previous;
+  try {
+    const candidate = JSON.parse(await readFile2(destination, "utf8"));
+    if (isBrowserRouteObservation(candidate) && candidate.definitionHash === observation.definitionHash && candidate.profileId === observation.profileId && candidate.sessionDigest === observation.sessionDigest && candidate.synthetic === observation.synthetic) {
+      previous = candidate;
+    }
+  } catch {
+  }
+  if (phase === "PostToolUse" && !previous?.preObservedAt) return;
+  const observedAt = new Date(now).toISOString();
+  const value = {
+    ...observation,
+    ...previous,
+    ...phase === "PreToolUse" ? { preObservedAt: previous?.preObservedAt ?? observedAt } : { postObservedAt: previous?.postObservedAt ?? observedAt },
+    schemaVersion: 1
+  };
+  const temporary = path2.join(
+    directory,
+    `.${observation.toolUseDigest}.${randomUUID()}`
+  );
+  await writeFile2(temporary, `${JSON.stringify(value)}
+`, { mode: 384 });
+  await rename2(temporary, destination);
 }
 async function recordHookMarker(pluginData, marker, now = Date.now()) {
   const directory = stateDirectory(pluginData);
@@ -13029,33 +13059,12 @@ async function recordHookMarker(pluginData, marker, now = Date.now()) {
 `, { mode: 384 });
   await rename2(temporary, destination);
 }
-async function readHookMarker(pluginData, event, browserHook = false) {
-  try {
-    const value = JSON.parse(
-      await readFile2(markerPath(pluginData, event, browserHook), "utf8")
-    );
-    return isMarker(value) && value.event === event && value.browserHook === browserHook ? value : void 0;
-  } catch {
-    return void 0;
-  }
-}
-async function markerMatches(pluginData, event, definitionHash, options = {}) {
-  const marker = await readHookMarker(
-    pluginData,
-    event,
-    options.browserHook ?? false
-  );
-  const age = (options.now ?? Date.now()) - Date.parse(marker?.observedAt ?? "");
-  return Boolean(
-    marker && marker.definitionHash === definitionHash && (!options.profileId || marker.profileId === options.profileId) && (options.sessionDigest === void 0 || marker.sessionDigest === options.sessionDigest) && Number.isFinite(age) && age >= 0 && age <= (options.maxAgeMs ?? HOOK_MARKER_FRESHNESS_MS)
-  );
-}
 
 // packages/host-openai/src/hook.ts
 var isHookInput = (value) => {
   if (!value || typeof value !== "object") return false;
   const input = value;
-  return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string") && (input.tool_name === void 0 || typeof input.tool_name === "string");
+  return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string") && (input.tool_name === void 0 || typeof input.tool_name === "string") && (input.tool_use_id === void 0 || typeof input.tool_use_id === "string");
 };
 async function hookDefinitionHash(pluginRoot) {
   const definition = await readFile3(
@@ -13088,7 +13097,7 @@ async function handleHookEvent(value, environment) {
   );
   if (value.hook_event_name === "SessionStart")
     return profileResult.valid ? {} : bypassOutput();
-  const toolEvent = value.hook_event_name === "PreToolUse" || value.hook_event_name === "PostToolUse";
+  const toolEvent = value.hook_event_name === "PreToolUse" || value.hook_event_name === "PostToolUse" ? value.hook_event_name : void 0;
   const browserPath = Boolean(
     toolEvent && value.tool_name && profileResult.profile && classifyTool(profileResult.profile, value.tool_name) === "BROWSER"
   );
@@ -13097,27 +13106,16 @@ async function handleHookEvent(value, environment) {
   if (!toolEvent || !value.tool_name || !browserPath) return {};
   if (profileResult.profile.setup.lifecycle === "INSTALLED")
     return bypassOutput();
-  const firstForPhase = !await markerMatches(
-    environment.pluginData,
-    value.hook_event_name,
-    definitionHash,
-    {
-      browserHook: true,
-      now,
-      profileId: profileResult.profile.profileId,
-      ...sessionDigest ? { sessionDigest } : {}
-    }
-  );
-  if (firstForPhase) {
-    await recordHookMarker(
+  if (profileResult.profile.setup.lifecycle === "CONFIGURED" && value.tool_use_id && sessionDigest) {
+    await recordBrowserHookPhase(
       environment.pluginData,
+      toolEvent,
       {
-        browserHook: true,
         definitionHash,
-        event: value.hook_event_name,
         profileId: profileResult.profile.profileId,
         sessionDigest,
-        synthetic: false
+        synthetic: false,
+        toolUseDigest: digestToolUseId(value.tool_use_id)
       },
       now
     );

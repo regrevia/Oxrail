@@ -248,10 +248,13 @@ describe("oxrail doctor", () => {
 
   it("reports CONFIGURED while passively awaiting the first native browser call", async () => {
     const environment = await setup();
+    const sessionId = "configured-browser-session";
     await handleHookEvent(
       {
         hook_event_name: "PreToolUse",
+        session_id: sessionId,
         tool_name: "fixture.safe.probe",
+        tool_use_id: "verified-generic-pre",
         tool_input: {},
       },
       environment,
@@ -259,14 +262,16 @@ describe("oxrail doctor", () => {
     await handleHookEvent(
       {
         hook_event_name: "PostToolUse",
+        session_id: sessionId,
         tool_name: "fixture.safe.probe",
+        tool_use_id: "verified-generic-post",
         tool_input: {},
         tool_response: {},
       },
       environment,
     );
 
-    const report = await runDoctor(environment);
+    const report = await runDoctor({ ...environment, sessionId });
     expect(report.stage).toBe("CONFIGURED");
     expect(report.preToolUseAvailable).toBe("passed");
     expect(report.postToolUseAvailable).toBe("passed");
@@ -284,14 +289,18 @@ describe("oxrail doctor", () => {
   it("becomes VERIFIED after both passive browser hook phases are seen", async () => {
     const environment = await setup();
     const browserEvent = {
+      session_id: "verified-browser-session",
       tool_name: "fixture.native.browser",
+      tool_use_id: "verified-browser-call",
       tool_input: { action: "fixture-no-op" },
     };
 
     await handleHookEvent(
       {
         hook_event_name: "PreToolUse",
+        session_id: browserEvent.session_id,
         tool_name: "fixture.safe.probe",
+        tool_use_id: "verified-generic-pre",
         tool_input: {},
       },
       environment,
@@ -299,7 +308,9 @@ describe("oxrail doctor", () => {
     await handleHookEvent(
       {
         hook_event_name: "PostToolUse",
+        session_id: browserEvent.session_id,
         tool_name: "fixture.safe.probe",
+        tool_use_id: "verified-generic-post",
         tool_input: {},
         tool_response: {},
       },
@@ -309,7 +320,10 @@ describe("oxrail doctor", () => {
       { hook_event_name: "PreToolUse", ...browserEvent },
       environment,
     );
-    const duringCall = await runDoctor(environment);
+    const duringCall = await runDoctor({
+      ...environment,
+      sessionId: browserEvent.session_id,
+    });
     expect(duringCall.stage).toBe("CONFIGURED");
     expect(duringCall.firstBrowserHookSeen).toBe(true);
     expect(duringCall.optimization).toBe("BYPASSED");
@@ -322,7 +336,10 @@ describe("oxrail doctor", () => {
       },
       environment,
     );
-    const afterCall = await runDoctor(environment);
+    const afterCall = await runDoctor({
+      ...environment,
+      sessionId: browserEvent.session_id,
+    });
     expect(afterCall.stage).toBe("VERIFIED");
     expect(afterCall.resultingMode).toBe("ADVISORY_ONLY");
     expect(afterCall.optimization).toBe("BYPASSED");
@@ -331,6 +348,117 @@ describe("oxrail doctor", () => {
     expect(formatDoctorReport(afterCall)).toContain(
       "Handoff protection: INACTIVE",
     );
+  });
+
+  it("pairs passive browser verification by one exact tool call", async () => {
+    const environment = await setup();
+    const session_id = "paired-browser-session";
+    for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
+      await handleHookEvent(
+        {
+          hook_event_name,
+          session_id,
+          tool_name: "fixture.safe.probe",
+          tool_use_id: `generic-${hook_event_name}`,
+          tool_input: {},
+        },
+        environment,
+      );
+    }
+
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "browser-call-1",
+        tool_input: { action: "fixture-no-op" },
+      },
+      environment,
+    );
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        session_id,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "browser-call-2",
+        tool_input: { action: "fixture-no-op" },
+        tool_response: { ok: true },
+      },
+      environment,
+    );
+
+    const mismatched = await runDoctor({
+      ...environment,
+      sessionId: session_id,
+    });
+    expect(mismatched).toMatchObject({
+      stage: "CONFIGURED",
+      firstBrowserHookSeen: true,
+      verificationSource: "none",
+    });
+
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        session_id,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "browser-call-1",
+        tool_input: { action: "fixture-no-op" },
+        tool_response: { ok: true },
+      },
+      environment,
+    );
+
+    await expect(
+      runDoctor({ ...environment, sessionId: session_id }),
+    ).resolves.toMatchObject({
+      stage: "VERIFIED",
+      firstBrowserHookSeen: true,
+      verificationSource: "passive-first-browser-call",
+    });
+  });
+
+  it("does not complete passive verification from an out-of-order Post event", async () => {
+    const environment = await setup();
+    const session_id = "ordered-browser-session";
+    for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
+      await handleHookEvent(
+        {
+          hook_event_name,
+          session_id,
+          tool_name: "fixture.safe.probe",
+          tool_use_id: `generic-${hook_event_name}`,
+          tool_input: {},
+        },
+        environment,
+      );
+    }
+    const browserEvent = {
+      session_id,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "out-of-order-browser-call",
+      tool_input: { action: "fixture-no-op" },
+    };
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        ...browserEvent,
+        tool_response: { ok: true },
+      },
+      environment,
+    );
+    await handleHookEvent(
+      { hook_event_name: "PreToolUse", ...browserEvent },
+      environment,
+    );
+
+    await expect(
+      runDoctor({ ...environment, sessionId: session_id }),
+    ).resolves.toMatchObject({
+      stage: "CONFIGURED",
+      verificationSource: "none",
+    });
   });
 
   it("fails open after hook observations expire", async () => {
@@ -344,6 +472,7 @@ describe("oxrail doctor", () => {
     const browserEvent = {
       session_id: sessionId,
       tool_name: "fixture.native.browser",
+      tool_use_id: "expiring-browser-call",
       tool_input: { action: "fixture-no-op" },
     };
 
@@ -451,6 +580,32 @@ describe("oxrail doctor", () => {
     expect(report.syntheticProbeUsed).toBe(true);
     expect(report.stage).toBe("VERIFIED");
     expect(report.firstBrowserHookSeen).toBe(true);
+  });
+
+  it("does not combine partial synthetic probes from separate runs", async () => {
+    const environment = await setup();
+    await runDoctor({
+      ...environment,
+      syntheticProbe: async () => ({
+        chromeComputerUse: true,
+        matcherMatched: true,
+        postToolUse: false,
+        preToolUse: true,
+      }),
+    });
+
+    const report = await runDoctor({
+      ...environment,
+      syntheticProbe: async () => ({
+        chromeComputerUse: true,
+        matcherMatched: true,
+        postToolUse: true,
+        preToolUse: false,
+      }),
+    });
+
+    expect(report.stage).not.toBe("VERIFIED");
+    expect(report.verificationSource).toBe("none");
   });
 
   it("invalidates setup when the profile carries an old hook hash", async () => {
