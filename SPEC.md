@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.9
+# Oxrail — 唯一实现规范（SPEC）v1.0.10
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.9
+  spec_version: 1.0.10
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -2213,6 +2213,8 @@ export type NativePrimitive =
 运行时 `HostProfileSchema` 验证交换结构和跨字段不变量；生成 JSON Schema 只验证可移植的交换结构，不表达 Zod `superRefine` 语义，也不得单独用于授权。两者都不是 Credential activation 授权器。只有独立 macOS activation verifier 实时核对 Security.framework code-signing attestation、sealed evidence manifest、launcher-owned rollback floor 与当前 Host trust binding 后，runtime 才能采用 `ACTIVE`；该 verifier 尚未实现或任一核对不可用时，即使输入 profile 自报 `ACTIVE/passed` 也必须拒绝并降为 `INACTIVE`。
 
 `helperCodeDirectoryHash` 与 `launcherCodeDirectoryHash` 必须是 Security.framework `kSecCodeInfoUnique` 返回的当前已验证 binary 的 raw public CDHash：20 bytes，编码为严格的 40 位小写十六进制；它们不是签名 blob 的摘要，也不是 SHA-256。`matcherEvidenceHash`、registry/manifest/evidence Hash 与 `credentialTrustRootDigest` 等证据或信任根摘要继续使用 SHA-256 的 64 位十六进制合同，不得与 CDHash 混用。首版每个 launcher/helper 只支持一份 architecture-specific artifact 和一个对应 CDHash；Universal/fat binary 的多 architecture CodeDirectory hash set 延后，在该合同实现前不得把多个 CDHash 折叠成一个值或据此激活 Credential Channel。
+
+macOS native package 的 code-identity verifier foundation 只提供零参数、只读的 `runPinnedCodeIdentityObservation()`：production target/path、Team ID、signing identifier、CDHash 与 designated requirement 只能来自 build-fixed release pins，禁止由 argv、env、HostProfile 或调用方覆盖。实现必须通过公开 Security.framework 严格验证 launcher 与 helper 的两个不同身份，对 pinned requirement 做系统 validity check，并把其编译数据与候选自身 designated requirement data 精确比较，同时逐一匹配 Team/signing ID/20-byte CDHash；单 CDHash 合同还必须拒绝未证明为 thin Mach-O 的 artifact。输出固定为 `schemaVersion=1`、`authority=NON_AUTHORIZING`、`scope=CODE_IDENTITY_ONLY` 及 `MATCHED_NON_AUTHORIZING | INACTIVE`，不得包含路径、OSStatus 或自由文本。当前正式 release pins 尚未配置，因此 production 入口固定 `INACTIVE`；测试注入只允许存在于 package-internal seam。该局部观察不启动 helper，不访问 prompt、Keychain、pasteboard 或持久状态，不实现应用层网络 client/endpoint，不接 Hook/Doctor/Profile activation，也不证明 Host-wide suspension、G15 或 Credential `ACTIVE`。
 
 `toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
 
@@ -11779,6 +11781,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.10 — 2026-09-04
+
+- 新增 macOS Security.framework code-identity verifier foundation：同时精确核对不同 launcher/helper 的 Team ID、signing identifier、20-byte CDHash 与 designated requirement data，并拒绝非 thin Mach-O；
+- 对外 interface 收窄为零参数、固定 `NON_AUTHORIZING/CODE_IDENTITY_ONLY` 报告，runtime 不能注入路径或 release pins；
+- 正式 release pins 尚未配置，因此 production 始终返回 `INACTIVE`，不接 Hook/Doctor/Profile、不启动 helper，且不能满足 G15 或激活 Credential Channel。
 
 ### v1.0.9 — 2026-09-04
 
