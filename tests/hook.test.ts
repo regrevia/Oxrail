@@ -61,7 +61,7 @@ afterEach(async () => {
 
 async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
   return HostProfileSchema.parse({
-    schemaVersion: 4,
+    schemaVersion: 5,
     profileId: "hp_fixture",
     setup: {
       lifecycle: "CONFIGURED",

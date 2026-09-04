@@ -96,7 +96,7 @@ describe("evidence release gate", () => {
     const commit = runGit("rev-parse", "HEAD");
 
     const profile = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       profileId: "hp_gate",
       setup: {
         lifecycle: "VERIFIED",

@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.8
+# Oxrail — 唯一实现规范（SPEC）v1.0.9
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.8
+  spec_version: 1.0.9
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -1959,7 +1959,7 @@ pauseAgentGuaranteed()
 
 ```ts
 export interface HostProfile {
-  schemaVersion: 4;
+  schemaVersion: 5;
   profileId: string;
 
   setup: {
@@ -2165,13 +2165,13 @@ export type CredentialChannelProfile =
       helperIdentity: ProbeVerdict;
       helperBundleId?: string;
       helperBuild?: string;
-      helperSignatureHash?: string;
+      helperCodeDirectoryHash?: string;
       helperTeamId?: string;
       helperDesignatedRequirement?: string;
       launcherIdentity: ProbeVerdict;
       launcherBundleId?: string;
       launcherBuild?: string;
-      launcherSignatureHash?: string;
+      launcherCodeDirectoryHash?: string;
       launcherTeamId?: string;
       launcherDesignatedRequirement?: string;
       secureInput: ProbeVerdict;
@@ -2211,6 +2211,8 @@ export type NativePrimitive =
 ```
 
 运行时 `HostProfileSchema` 验证交换结构和跨字段不变量；生成 JSON Schema 只验证可移植的交换结构，不表达 Zod `superRefine` 语义，也不得单独用于授权。两者都不是 Credential activation 授权器。只有独立 macOS activation verifier 实时核对 Security.framework code-signing attestation、sealed evidence manifest、launcher-owned rollback floor 与当前 Host trust binding 后，runtime 才能采用 `ACTIVE`；该 verifier 尚未实现或任一核对不可用时，即使输入 profile 自报 `ACTIVE/passed` 也必须拒绝并降为 `INACTIVE`。
+
+`helperCodeDirectoryHash` 与 `launcherCodeDirectoryHash` 必须是 Security.framework `kSecCodeInfoUnique` 返回的当前已验证 binary 的 raw public CDHash：20 bytes，编码为严格的 40 位小写十六进制；它们不是签名 blob 的摘要，也不是 SHA-256。`matcherEvidenceHash`、registry/manifest/evidence Hash 与 `credentialTrustRootDigest` 等证据或信任根摘要继续使用 SHA-256 的 64 位十六进制合同，不得与 CDHash 混用。首版每个 launcher/helper 只支持一份 architecture-specific artifact 和一个对应 CDHash；Universal/fat binary 的多 architecture CodeDirectory hash set 延后，在该合同实现前不得把多个 CDHash 折叠成一个值或据此激活 Credential Channel。
 
 `toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
 
@@ -8016,7 +8018,7 @@ Generate an evidence-backed profile, present capabilities/limitations and requir
 - profile freshness/invalidator
 - acceptance record
 - setup lifecycle state and passive first-call evidence
-- HostProfile v4 external tool-registry/input-schema pins and Credential Channel fields
+- HostProfile v5 external tool-registry/input-schema pins and Credential Channel fields
 
 **验收**
 
@@ -10366,7 +10368,7 @@ Prove one narrow macOS API-key path from the exact authenticated Chrome tab thro
 - at least one independently audited registered real-service consumer
 - release-pinned independent launcher/helper signing requirements, sealed registry manifest and launcher-owned rollback floor
 - credential-input lease and pasteboard hygiene path
-- HostProfile v4 and doctor capability evidence
+- HostProfile v5 and doctor capability evidence
 
 **验收**
 
@@ -10389,7 +10391,7 @@ Prove one narrow macOS API-key path from the exact authenticated Chrome tab thro
 
 - HandoffBench Credential Channel subset
 - SecretLeakBench Credential Channel subset
-- HostProfile v4 contract and doctor probes
+- HostProfile v5 contract and doctor probes
 - Full BENCH-NIF handoff subset
 
 **阻断 / Kill**
@@ -11777,6 +11779,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.9 — 2026-09-04
+
+- HostProfile 升级至 v5，并把 launcher/helper 身份字段更名为 `launcherCodeDirectoryHash` / `helperCodeDirectoryHash`；
+- 两字段严格记录 Security.framework `kSecCodeInfoUnique` 的 raw 20-byte CDHash（40 位小写十六进制），与仍为 64 位 SHA-256 的 evidence/trust-root 摘要明确分离；
+- 首版只接受单 architecture artifact 的单一 CDHash；Universal/fat binary hash set 延后，且 native verifier/Hook 尚未接入时 Credential `ACTIVE` 继续被 runtime 拒绝。
 
 ### v1.0.8 — 2026-09-04
 

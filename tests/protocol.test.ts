@@ -32,7 +32,7 @@ function hostProfile() {
     attachment: unknown,
   };
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     profileId: "hp_test",
     setup: {
       lifecycle: "INSTALLED",
@@ -212,20 +212,25 @@ describe("versioned protocol", () => {
     ).not.toThrow();
   });
 
-  it("round-trips the v4 HostProfile and rejects the previous version", () => {
+  it("round-trips the v5 HostProfile and rejects the previous version", () => {
     const parsed = HostProfileSchema.parse(hostProfile());
     expect(HostProfileSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(
       parsed,
     );
     expect(ReasonCodeSchema.safeParse("OXRAIL_MADE_UP").success).toBe(false);
     expect(
-      HostProfileSchema.safeParse({ ...hostProfile(), schemaVersion: 3 })
+      HostProfileSchema.safeParse({ ...hostProfile(), schemaVersion: 4 })
         .success,
     ).toBe(false);
     expect(
+      validateHostProfile({ ...hostProfile(), schemaVersion: 4 }).errors,
+    ).toEqual([
+      "host profile schema v4 is stale; run Oxrail setup to create a v5 profile",
+    ]);
+    expect(
       validateHostProfile({ ...hostProfile(), schemaVersion: 3 }).errors,
     ).toEqual([
-      "host profile schema v3 is stale; run Oxrail setup to create a v4 profile",
+      "host profile schema v3 is stale; run Oxrail setup to create a v5 profile",
     ]);
   });
 
@@ -363,14 +368,14 @@ describe("versioned protocol", () => {
         helperIdentity: "passed",
         helperBundleId: "dev.oxrail.credentials",
         helperBuild: "fixture-build",
-        helperSignatureHash: "b".repeat(64),
+        helperCodeDirectoryHash: "b".repeat(40),
         helperTeamId: "ABCDE12345",
         helperDesignatedRequirement:
           'identifier "dev.oxrail.credentials" and anchor apple generic',
         launcherIdentity: "passed",
         launcherBundleId: "dev.oxrail.launcher",
         launcherBuild: "fixture-launcher-build",
-        launcherSignatureHash: "0".repeat(64),
+        launcherCodeDirectoryHash: "0".repeat(40),
         launcherTeamId: "ABCDE12345",
         launcherDesignatedRequirement:
           'identifier "dev.oxrail.launcher" and anchor apple generic',
@@ -401,6 +406,22 @@ describe("versioned protocol", () => {
     } as const;
 
     expect(HostProfileSchema.safeParse(active).success).toBe(true);
+    for (const invalidCodeDirectoryHash of [
+      "a".repeat(39),
+      "a".repeat(41),
+      "A".repeat(40),
+      "g".repeat(40),
+    ]) {
+      expect(
+        HostProfileSchema.safeParse({
+          ...active,
+          credentialChannel: {
+            ...active.credentialChannel,
+            helperCodeDirectoryHash: invalidCodeDirectoryHash,
+          },
+        }).success,
+      ).toBe(false);
+    }
     expect(validateHostProfile(active)).toMatchObject({
       valid: false,
       errors: expect.arrayContaining([CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR]),

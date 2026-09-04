@@ -83,14 +83,14 @@ export function validateHostProfile(
   value: unknown,
   constraints: ProfileConstraints = {},
 ): ProfileValidation {
-  if (
-    value &&
-    typeof value === "object" &&
-    (value as { schemaVersion?: unknown }).schemaVersion === 3
-  ) {
+  const schemaVersion =
+    value && typeof value === "object"
+      ? (value as { schemaVersion?: unknown }).schemaVersion
+      : undefined;
+  if (schemaVersion === 3 || schemaVersion === 4) {
     return {
       errors: [
-        "host profile schema v3 is stale; run Oxrail setup to create a v4 profile",
+        `host profile schema v${schemaVersion} is stale; run Oxrail setup to create a v5 profile`,
       ],
       valid: false,
     };

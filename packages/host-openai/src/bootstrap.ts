@@ -131,7 +131,7 @@ export async function bootstrapHostProfile(
   }).slice(0, 24)}`;
 
   const profile = HostProfileSchema.parse({
-    schemaVersion: 4,
+    schemaVersion: 5,
     profileId,
     setup: {
       lifecycle: "INSTALLED",

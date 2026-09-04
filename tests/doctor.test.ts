@@ -53,7 +53,7 @@ const fixtureInventory = {
 
 const fixtureProfile = (definitionHash: string) =>
   HostProfileSchema.parse({
-    schemaVersion: 4,
+    schemaVersion: 5,
     profileId: "hp_doctor_fixture",
     setup: {
       lifecycle: "CONFIGURED",

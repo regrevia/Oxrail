@@ -7,6 +7,12 @@ const nonEmpty = z.string().min(1);
 const hash = z
   .string()
   .regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+const codeDirectoryHash = z
+  .string()
+  .regex(
+    /^[a-f0-9]{40}$/,
+    "expected a lowercase 20-byte CodeDirectory hash (CDHash)",
+  );
 const exactToolName = z
   .string()
   .min(1)
@@ -342,13 +348,13 @@ const InactiveMacosCredentialChannelSchema = z.strictObject({
   helperIdentity: ProbeVerdictSchema,
   helperBundleId: nonEmpty.optional(),
   helperBuild: nonEmpty.optional(),
-  helperSignatureHash: hash.optional(),
+  helperCodeDirectoryHash: codeDirectoryHash.optional(),
   helperTeamId: appleTeamId.optional(),
   helperDesignatedRequirement: z.string().min(1).max(4096).optional(),
   launcherIdentity: ProbeVerdictSchema,
   launcherBundleId: nonEmpty.optional(),
   launcherBuild: nonEmpty.optional(),
-  launcherSignatureHash: hash.optional(),
+  launcherCodeDirectoryHash: codeDirectoryHash.optional(),
   launcherTeamId: appleTeamId.optional(),
   launcherDesignatedRequirement: z.string().min(1).max(4096).optional(),
   secureInput: ProbeVerdictSchema,
@@ -385,13 +391,13 @@ const ActiveMacosCredentialChannelSchema = z.strictObject({
   helperIdentity: z.literal("passed"),
   helperBundleId: nonEmpty,
   helperBuild: nonEmpty,
-  helperSignatureHash: hash,
+  helperCodeDirectoryHash: codeDirectoryHash,
   helperTeamId: appleTeamId,
   helperDesignatedRequirement: z.string().min(1).max(4096),
   launcherIdentity: z.literal("passed"),
   launcherBundleId: nonEmpty,
   launcherBuild: nonEmpty,
-  launcherSignatureHash: hash,
+  launcherCodeDirectoryHash: codeDirectoryHash,
   launcherTeamId: appleTeamId,
   launcherDesignatedRequirement: z.string().min(1).max(4096),
   secureInput: z.literal("passed"),
@@ -452,7 +458,7 @@ export const HostSetupSchema = z.strictObject({
 export type HostSetup = z.infer<typeof HostSetupSchema>;
 
 const HostProfileBaseSchema = z.strictObject({
-  schemaVersion: z.literal(4),
+  schemaVersion: z.literal(5),
   profileId: nonEmpty,
   setup: HostSetupSchema,
   identity: z.strictObject({

@@ -34,7 +34,7 @@ const signatureProtector = {
 
 function profile(): HostProfile {
   return HostProfileSchema.parse({
-    schemaVersion: 4,
+    schemaVersion: 5,
     profileId: "hp_guard_fixture",
     setup: {
       lifecycle: "VERIFIED",

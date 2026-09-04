@@ -12102,6 +12102,10 @@ var ReasonCodeSchema = external_exports.enum(REASON_CODES);
 // packages/protocol/src/schemas.ts
 var nonEmpty = external_exports.string().min(1);
 var hash3 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+var codeDirectoryHash = external_exports.string().regex(
+  /^[a-f0-9]{40}$/,
+  "expected a lowercase 20-byte CodeDirectory hash (CDHash)"
+);
 var exactToolName = external_exports.string().min(1).max(256).regex(
   /^[A-Za-z0-9_.:/-]+$/,
   "expected an exact tool name, not a matcher expression"
@@ -12356,13 +12360,13 @@ var InactiveMacosCredentialChannelSchema = external_exports.strictObject({
   helperIdentity: ProbeVerdictSchema,
   helperBundleId: nonEmpty.optional(),
   helperBuild: nonEmpty.optional(),
-  helperSignatureHash: hash3.optional(),
+  helperCodeDirectoryHash: codeDirectoryHash.optional(),
   helperTeamId: appleTeamId.optional(),
   helperDesignatedRequirement: external_exports.string().min(1).max(4096).optional(),
   launcherIdentity: ProbeVerdictSchema,
   launcherBundleId: nonEmpty.optional(),
   launcherBuild: nonEmpty.optional(),
-  launcherSignatureHash: hash3.optional(),
+  launcherCodeDirectoryHash: codeDirectoryHash.optional(),
   launcherTeamId: appleTeamId.optional(),
   launcherDesignatedRequirement: external_exports.string().min(1).max(4096).optional(),
   secureInput: ProbeVerdictSchema,
@@ -12398,13 +12402,13 @@ var ActiveMacosCredentialChannelSchema = external_exports.strictObject({
   helperIdentity: external_exports.literal("passed"),
   helperBundleId: nonEmpty,
   helperBuild: nonEmpty,
-  helperSignatureHash: hash3,
+  helperCodeDirectoryHash: codeDirectoryHash,
   helperTeamId: appleTeamId,
   helperDesignatedRequirement: external_exports.string().min(1).max(4096),
   launcherIdentity: external_exports.literal("passed"),
   launcherBundleId: nonEmpty,
   launcherBuild: nonEmpty,
-  launcherSignatureHash: hash3,
+  launcherCodeDirectoryHash: codeDirectoryHash,
   launcherTeamId: appleTeamId,
   launcherDesignatedRequirement: external_exports.string().min(1).max(4096),
   secureInput: external_exports.literal("passed"),
@@ -12457,7 +12461,7 @@ var HostSetupSchema = external_exports.strictObject({
   optimization: external_exports.enum(["ACTIVE", "BYPASSED"])
 });
 var HostProfileBaseSchema = external_exports.strictObject({
-  schemaVersion: external_exports.literal(4),
+  schemaVersion: external_exports.literal(5),
   profileId: nonEmpty,
   setup: HostSetupSchema,
   identity: external_exports.strictObject({
