@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.6
+# Oxrail — 唯一实现规范（SPEC）v1.0.7
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.6
+  spec_version: 1.0.7
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -4247,6 +4247,8 @@ missing/expired/revoked item
 → sanitized outcome resumes the original task
 ```
 
+这里的“同一标签页”必须是同一 Chrome profile/browser instance 中原有的 tab 对象、navigation history、cookie 与登录态本身；可以把该 tab 暂时移动到或聚焦于真实 Chrome window，但截图、复制页、远程重建、DOM 映射或仅映射输入位置均不构成 Handoff。凭据复用的易用性由 opaque `credentialRef` 提供，而不是把明文作为环境变量或文件交给 Agent。
+
 首版固定边界：
 
 - 仅 `API_KEY`，不接受 Password、OTP、Cookie、Session token、Private key 或支付字段；
@@ -4348,6 +4350,8 @@ Safe verifier enum        = ALLOW
 ### 21.3A Credential-input execution lease
 
 在任何网页 generate/reveal API-key 动作前，Oxrail 必须先取得比 Browser Handoff 更强的 credential-input lease：所有已探测 Agent tool、browser action、browser observation、shell/terminal、screen capture、clipboard access 与语义查询路径一律拒绝，唯一例外是签名 credential enclave 的固定内部协议。该 lease 必须持续到 secure field 清空、Keychain commit 或 cancel、pasteboard hygiene、prompt teardown、一次性 key reveal surface 经非秘密 verifier 证明已关闭/遮蔽，以及 sanitized result 完成；任一未知/bypass path、helper crash、reveal surface 仍可见或 cleanup 失败都保持 fail-closed，不得恢复 Agent 或宣称 Credential protection `ACTIVE`。Native Chrome 页面仍由用户正常操作；这里的 fail-closed 只针对 credential task 与 Agent resume，不得破坏普通 Native Chrome 可用性。
+
+Core 的 fixture-only credential execution gate 只是一份全局保守阻断账本：显式 setup 创建私有 `OPEN` tombstone，之后仅允许代际单调的 `OPEN → PREPARING → ACTIVE → CLEANUP_PENDING → OPEN`，或 `PREPARING → CLEANUP_PENDING → OPEN` abort 路径。缺失已初始化状态、部分初始化、锁存在、损坏、权限异常、快照改变或任何非 `OPEN` 状态均产生 `BLOCK_AGENT_EXECUTION`；TTL 不得自动 reopen。只有已知 `OPEN` 产生 `NO_LEDGER_BLOCK`，它仅表示这份账本未要求阻断，不是执行许可。其 `FIXTURE_ONLY_NON_AUTHORIZING` 状态、binding digest、调用方提供的 quiescence receipt hash 与 cleanup evidence hash 都不是 attestation、授权或 capability evidence，也不得令 doctor/profile 显示 Credential `ACTIVE`。真实 Hook 集成必须在所有 Agent 路径的 admission lock 前后双读并比较完整快照；恢复 `OPEN` 还必须由独立可信 verifier 验证 cleanup evidence，不能只信任该 hash 字段或复用激活 receipt。
 
 ## 21.4 Origin Binding
 
@@ -11771,6 +11775,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.7 — 2026-09-04
+
+- 明确 same-tab Handoff 必须移交原生 Chrome 同一 profile/browser instance 中原有 tab 与登录态；可移动/聚焦该真实 tab，但截图、复制、重建与表单位置映射均不合格；
+- 新增 fixture-only 全局 credential execution gate 合同：显式初始化、单调状态机、独立 cleanup evidence、完整快照双读、保守 crash/lock 语义与 no-auto-expiry；
+- 明确 ledger 状态与 hash-shaped receipt 不是授权或 attestation，真实恢复 Agent 必须依赖独立可信 cleanup evidence，且 G15 前 Credential 保持 `INACTIVE`。
 
 ### v1.0.6 — 2026-09-04
 

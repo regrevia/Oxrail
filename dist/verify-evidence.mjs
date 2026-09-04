@@ -13274,6 +13274,19 @@ var EvidenceTraceSchema = external_exports.strictObject({
   }
 });
 
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+
+// packages/core/src/credential-execution-gate.ts
+var MAX_CURRENT_BYTES = 2 * 1024;
+var AUTHORITY = "FIXTURE_ONLY_NON_AUTHORIZING";
+var sentinelContents = `${JSON.stringify({
+  authority: AUTHORITY,
+  schemaVersion: 1,
+  state: "INITIALIZED"
+})}
+`;
+
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
@@ -13308,9 +13321,6 @@ function deriveHostMode(profile) {
   if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
   return "TRANSACTION_GUARD";
 }
-
-// packages/core/src/store.ts
-var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 
 // packages/core/src/tool-call.ts
 var MAX_ACTIVE_TOOL_CALLS = 256;

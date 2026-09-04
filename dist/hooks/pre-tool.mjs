@@ -13268,19 +13268,11 @@ var EvidenceTraceSchema = external_exports.strictObject({
   }
 });
 
-// packages/core/src/handoff-coordinator.ts
-import { createHash as createHash6, randomUUID as randomUUID4 } from "node:crypto";
-import {
-  chmod as chmod4,
-  link as link4,
-  lstat as lstat3,
-  mkdir as mkdir4,
-  open as open4,
-  readdir as readdir2,
-  rename as rename3,
-  unlink as unlink4
-} from "node:fs/promises";
-import path4 from "node:path";
+// packages/core/src/store.ts
+import { createHash as createHash3, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
+import path from "node:path";
 
 // packages/core/src/safe-state.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -13372,292 +13364,7 @@ function sanitizeBrowserTaskStateForPersistence(value) {
   });
 }
 
-// packages/core/src/policy.ts
-var pass = (reasonCode) => ({
-  disposition: "PASS_THROUGH_ORIGINAL",
-  reasonCode,
-  recoverable: true
-});
-var protectSignature = (protector, purpose, digest3) => protector ? protector.protect(purpose, digest3) : digest3;
-function actionIdentity(action, signatureProtector) {
-  return redactedDeterministicDigest("oxrail-action-identity-v1", {
-    route: action.route,
-    granularity: action.granularity,
-    actionType: action.actionType,
-    targetSignature: action.target ? protectSignature(
-      signatureProtector,
-      "target",
-      redactedDeterministicDigest(
-        "oxrail-target-signature-v1",
-        action.target
-      )
-    ) : void 0,
-    inputSignature: action.inputDigest ? protectSignature(signatureProtector, "input", action.inputDigest) : void 0
-  });
-}
-function actionDigestIdentity(action) {
-  return redactedDeterministicDigest("oxrail-action-identity-v1", {
-    route: action.route,
-    granularity: action.granularity,
-    actionType: action.actionType,
-    targetSignature: action.targetSignature,
-    inputSignature: action.inputSignature
-  });
-}
-function createActionDigest(action, decision, timestamp = Date.now(), signatureProtector) {
-  const decisionKind = decision.disposition === "PASS_THROUGH_ORIGINAL" ? "ALLOW" : decision.disposition === "SEMANTIC_HINT_ONLY" ? "REWRITE" : decision.disposition === "REQUEST_HUMAN_HANDOFF" ? "HANDOFF" : "DENY";
-  return {
-    toolUseId: action.toolUseId,
-    route: action.route,
-    granularity: action.granularity,
-    actionType: action.actionType,
-    ...action.target ? {
-      targetSignature: protectSignature(
-        signatureProtector,
-        "target",
-        redactedDeterministicDigest(
-          "oxrail-target-signature-v1",
-          action.target
-        )
-      ),
-      sourceRevision: action.target.sourceRevision
-    } : {},
-    ...action.inputDigest ? {
-      inputSignature: protectSignature(
-        signatureProtector,
-        "input",
-        action.inputDigest
-      )
-    } : {},
-    decision: decisionKind,
-    reasonCode: decision.reasonCode,
-    timestamp
-  };
-}
-function targetIsStale(context) {
-  const { action, state, currentTargetFingerprint } = context;
-  if (action.revision !== void 0 && action.revision !== state.revision)
-    return true;
-  if (!action.target) return false;
-  if (action.target.sourceRevision !== state.revision) return true;
-  if (action.target.documentBinding !== void 0 && state.documentBinding !== void 0 && action.target.documentBinding !== state.documentBinding) {
-    return true;
-  }
-  return currentTargetFingerprint !== void 0 && action.target.fingerprint !== void 0 && currentTargetFingerprint !== action.target.fingerprint;
-}
-function repeatsWithoutProgress(action, state, signatureProtector) {
-  if (!signatureProtector || state.actionSignatureKeyId !== signatureProtector.keyId || !state.lastAction || state.noProgressCount < 2 || action.granularity === "NONE")
-    return false;
-  return actionIdentity(action, signatureProtector) === actionDigestIdentity(state.lastAction);
-}
-function browserOwnershipDecision(state) {
-  if (state.phase === "USER_LEASE_ACTIVE" || state.phase === "HANDOFF_VERIFYING" || state.pointerOwner === "HUMAN") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
-      recoverable: true
-    };
-  }
-  if (state.phase === "RESUMING" || state.phase === "RESTORING_TAB" || state.pointerOwner === "NONE") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
-      recoverable: true
-    };
-  }
-  if (state.phase === "HANDOFF_PREPARING") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
-      recoverable: true
-    };
-  }
-  return void 0;
-}
-function evaluateAction(context) {
-  const { action, state } = context;
-  const ownershipDecision = browserOwnershipDecision(state);
-  if (ownershipDecision) return ownershipDecision;
-  const freshAndCovered = context.routeCovered !== false && state.hostProfileStatus === "VALID";
-  if (!freshAndCovered || state.mode === "ADVISORY_ONLY" || state.mode === "UNSUPPORTED") {
-    return pass(
-      !freshAndCovered ? state.hostProfileStatus === "VALID" ? "OXRAIL_HOST_ROUTE_UNPROVEN" : "OXRAIL_HOST_PROFILE_STALE" : "OXRAIL_HOST_ROUTE_UNPROVEN"
-    );
-  }
-  if (state.currentOrigin !== void 0 && action.origin !== void 0 && action.origin !== state.currentOrigin) {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
-      recoverable: true
-    };
-  }
-  if (context.requiresHumanBoundary) {
-    return context.handoffAvailable ? {
-      disposition: "REQUEST_HUMAN_HANDOFF",
-      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-      recoverable: true
-    } : {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-      recoverable: false
-    };
-  }
-  if (targetIsStale(context) && action.impact !== "read") {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_STALE_TARGET",
-      recoverable: true
-    };
-  }
-  if (action.impact === "high-impact") {
-    if (context.hostApprovalAvailable) {
-      return {
-        disposition: "REQUEST_HOST_APPROVAL",
-        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-        recoverable: true
-      };
-    }
-    if (context.handoffAvailable) {
-      return {
-        disposition: "REQUEST_HUMAN_HANDOFF",
-        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-        recoverable: true
-      };
-    }
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
-      recoverable: false
-    };
-  }
-  if (repeatsWithoutProgress(action, state, context.signatureProtector)) {
-    return {
-      disposition: "BLOCK_BEFORE_EXECUTION",
-      reasonCode: "OXRAIL_REDUNDANT_ACTION",
-      recoverable: true
-    };
-  }
-  return pass("OXRAIL_NORMAL_ACTION_PASSTHROUGH");
-}
-function deriveHostMode(profile) {
-  const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
-  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || profile.hooks.concurrentConflictProbe !== "passed" || !profile.evidence.validUntilHostChange) {
-    return "UNSUPPORTED";
-  }
-  if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
-    return "ADVISORY_ONLY";
-  }
-  const pinnedToolNames = new Set(
-    profile.route.browserTools.map((tool) => tool.canonicalToolName)
-  );
-  if (!profile.route.toolSchemaRegistryHash || !profile.route.toolSchemaRegistryEvidenceId || pinnedToolNames.size !== profile.route.canonicalToolMatchers.length || profile.route.canonicalToolMatchers.some(
-    (toolName) => !pinnedToolNames.has(toolName)
-  )) {
-    return "ADVISORY_ONLY";
-  }
-  if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
-    return "ADVISORY_ONLY";
-  }
-  const nativeSafe = profile.nativeInteraction.passThroughFingerprint === "passed" && profile.nativeInteraction.cursorVisualization === "passed" && profile.nativeInteraction.viewportCoordinateMapping === "passed" && profile.nativeInteraction.screenshotFrameFeedback === "passed" && Object.values(profile.nativeInteraction.primitiveParity).every(
-    (verdict) => verdict === "passed"
-  ) && profile.nativeInteraction.unexpectedPointerInterference === 0 && profile.nativeInteraction.unexpectedFocusInterference === 0 && profile.nativeInteraction.unexpectedScrollInterference === 0 && profile.nativeInteraction.incorrectNormalActionBlocks === 0;
-  const actionProven = nativeSafe && coverageComplete(profile.action.preToolCoverage) && profile.action.denyPreventedSideEffect === true;
-  if (!actionProven || profile.action.control === "NONE")
-    return "ADVISORY_ONLY";
-  const fullResultPath = profile.result.control === "NATIVE_TYPED_REWRITE" && coverageComplete(profile.result.postToolCoverage) && profile.result.replacementTiming === "before-model-proven" && profile.result.controlCriticalContract.status === "passed" && Object.values(profile.result.media).every(
-    (verdict) => verdict === "passed"
-  ) && profile.result.rawPersistence.length === 1 && profile.result.rawPersistence[0] === "none-observed";
-  if (profile.action.control === "MICRO_ACTION" && fullResultPath)
-    return "FULL_INTERPOSE";
-  if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
-  return "TRANSACTION_GUARD";
-}
-
-// packages/core/src/state.ts
-function assertActionSignatureKey(state, protector) {
-  if (state.actionSignatureKeyId !== void 0 && state.actionSignatureKeyId !== protector.keyId || state.actionSignatureKeyId === void 0 && state.lastAction !== void 0) {
-    throw new Error("Action signature key does not match BrowserTaskState");
-  }
-}
-function migrateLegacyActionSignatureBaseline(state, keyId2) {
-  if (state.actionSignatureKeyId !== void 0) {
-    if (state.actionSignatureKeyId !== keyId2) {
-      throw new Error("Action signature key does not match BrowserTaskState");
-    }
-    return state;
-  }
-  if (state.phase !== "RUNNING" || state.pointerOwner !== "NATIVE" || state.pendingNativeActionIds.length > 0) {
-    throw new Error("Legacy action baseline cannot be migrated while active");
-  }
-  const { lastAction: _legacyLastAction, ...legacy } = state;
-  return BrowserTaskStateSchema.parse({
-    ...legacy,
-    actionSignatureKeyId: keyId2,
-    noProgressCount: 0
-  });
-}
-function createBrowserTaskState(input) {
-  return BrowserTaskStateSchema.parse({
-    schemaVersion: 3,
-    sessionId: input.sessionId,
-    taskId: input.taskId,
-    goalSummary: "browser task",
-    hostProfileId: input.hostProfileId,
-    hostProfileStatus: "VALID",
-    mode: input.mode,
-    phase: "RUNNING",
-    revision: 0,
-    noProgressCount: 0,
-    recoveryLevel: 0,
-    recoveryTransitions: 0,
-    authState: "UNKNOWN",
-    leaseEpoch: 0,
-    pointerOwner: "NATIVE",
-    targetCacheEpoch: 0,
-    pendingNativeActionIds: [],
-    stateVersion: 0
-  });
-}
-function stageToolDecision(state, action, decision, signatureProtector) {
-  assertActionSignatureKey(state, signatureProtector);
-  const toolUseId = persistentToolUseId(action.toolUseId);
-  const executed = decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
-  const pendingNativeActionIds = [
-    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId))
-  ];
-  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
-    pendingNativeActionIds.push(toolUseId);
-  }
-  return BrowserTaskStateSchema.parse({
-    ...state,
-    lastAction: {
-      ...createActionDigest(action, decision, Date.now(), signatureProtector),
-      toolUseId
-    },
-    actionSignatureKeyId: signatureProtector.keyId,
-    pendingNativeActionIds,
-    stateVersion: state.stateVersion + 1
-  });
-}
-function completePendingTool(state, toolUseId) {
-  const persistentId = persistentToolUseId(toolUseId);
-  if (!state.pendingNativeActionIds.some(
-    (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId
-  )) {
-    return state;
-  }
-  return BrowserTaskStateSchema.parse({
-    ...state,
-    pendingNativeActionIds: state.pendingNativeActionIds.map(canonicalPersistentToolUseId).filter((pendingId) => pendingId !== persistentId),
-    stateVersion: state.stateVersion + 1
-  });
-}
-
 // packages/core/src/store.ts
-import { createHash as createHash3, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
-import path from "node:path";
 var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 var LOCK_STALE_MS = 3e4;
 var MAX_LOCK_BYTES = 512;
@@ -13957,6 +13664,311 @@ async function transitionBrowserTaskStateWithRetry(root, scope, transition) {
     }
   }
   throw new BrowserTaskStateStoreError("CONFLICT");
+}
+
+// packages/core/src/credential-execution-gate.ts
+var MAX_CURRENT_BYTES = 2 * 1024;
+var AUTHORITY = "FIXTURE_ONLY_NON_AUTHORIZING";
+var sentinelContents = `${JSON.stringify({
+  authority: AUTHORITY,
+  schemaVersion: 1,
+  state: "INITIALIZED"
+})}
+`;
+
+// packages/core/src/handoff-coordinator.ts
+import { createHash as createHash6, randomUUID as randomUUID4 } from "node:crypto";
+import {
+  chmod as chmod4,
+  link as link4,
+  lstat as lstat3,
+  mkdir as mkdir4,
+  open as open4,
+  readdir as readdir2,
+  rename as rename3,
+  unlink as unlink4
+} from "node:fs/promises";
+import path4 from "node:path";
+
+// packages/core/src/policy.ts
+var pass = (reasonCode) => ({
+  disposition: "PASS_THROUGH_ORIGINAL",
+  reasonCode,
+  recoverable: true
+});
+var protectSignature = (protector, purpose, digest3) => protector ? protector.protect(purpose, digest3) : digest3;
+function actionIdentity(action, signatureProtector) {
+  return redactedDeterministicDigest("oxrail-action-identity-v1", {
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    targetSignature: action.target ? protectSignature(
+      signatureProtector,
+      "target",
+      redactedDeterministicDigest(
+        "oxrail-target-signature-v1",
+        action.target
+      )
+    ) : void 0,
+    inputSignature: action.inputDigest ? protectSignature(signatureProtector, "input", action.inputDigest) : void 0
+  });
+}
+function actionDigestIdentity(action) {
+  return redactedDeterministicDigest("oxrail-action-identity-v1", {
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    targetSignature: action.targetSignature,
+    inputSignature: action.inputSignature
+  });
+}
+function createActionDigest(action, decision, timestamp = Date.now(), signatureProtector) {
+  const decisionKind = decision.disposition === "PASS_THROUGH_ORIGINAL" ? "ALLOW" : decision.disposition === "SEMANTIC_HINT_ONLY" ? "REWRITE" : decision.disposition === "REQUEST_HUMAN_HANDOFF" ? "HANDOFF" : "DENY";
+  return {
+    toolUseId: action.toolUseId,
+    route: action.route,
+    granularity: action.granularity,
+    actionType: action.actionType,
+    ...action.target ? {
+      targetSignature: protectSignature(
+        signatureProtector,
+        "target",
+        redactedDeterministicDigest(
+          "oxrail-target-signature-v1",
+          action.target
+        )
+      ),
+      sourceRevision: action.target.sourceRevision
+    } : {},
+    ...action.inputDigest ? {
+      inputSignature: protectSignature(
+        signatureProtector,
+        "input",
+        action.inputDigest
+      )
+    } : {},
+    decision: decisionKind,
+    reasonCode: decision.reasonCode,
+    timestamp
+  };
+}
+function targetIsStale(context) {
+  const { action, state, currentTargetFingerprint } = context;
+  if (action.revision !== void 0 && action.revision !== state.revision)
+    return true;
+  if (!action.target) return false;
+  if (action.target.sourceRevision !== state.revision) return true;
+  if (action.target.documentBinding !== void 0 && state.documentBinding !== void 0 && action.target.documentBinding !== state.documentBinding) {
+    return true;
+  }
+  return currentTargetFingerprint !== void 0 && action.target.fingerprint !== void 0 && currentTargetFingerprint !== action.target.fingerprint;
+}
+function repeatsWithoutProgress(action, state, signatureProtector) {
+  if (!signatureProtector || state.actionSignatureKeyId !== signatureProtector.keyId || !state.lastAction || state.noProgressCount < 2 || action.granularity === "NONE")
+    return false;
+  return actionIdentity(action, signatureProtector) === actionDigestIdentity(state.lastAction);
+}
+function browserOwnershipDecision(state) {
+  if (state.phase === "USER_LEASE_ACTIVE" || state.phase === "HANDOFF_VERIFYING" || state.pointerOwner === "HUMAN") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
+      recoverable: true
+    };
+  }
+  if (state.phase === "RESUMING" || state.phase === "RESTORING_TAB" || state.pointerOwner === "NONE") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
+      recoverable: true
+    };
+  }
+  if (state.phase === "HANDOFF_PREPARING") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+      recoverable: true
+    };
+  }
+  return void 0;
+}
+function evaluateAction(context) {
+  const { action, state } = context;
+  const ownershipDecision = browserOwnershipDecision(state);
+  if (ownershipDecision) return ownershipDecision;
+  const freshAndCovered = context.routeCovered !== false && state.hostProfileStatus === "VALID";
+  if (!freshAndCovered || state.mode === "ADVISORY_ONLY" || state.mode === "UNSUPPORTED") {
+    return pass(
+      !freshAndCovered ? state.hostProfileStatus === "VALID" ? "OXRAIL_HOST_ROUTE_UNPROVEN" : "OXRAIL_HOST_PROFILE_STALE" : "OXRAIL_HOST_ROUTE_UNPROVEN"
+    );
+  }
+  if (state.currentOrigin !== void 0 && action.origin !== void 0 && action.origin !== state.currentOrigin) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+      recoverable: true
+    };
+  }
+  if (context.requiresHumanBoundary) {
+    return context.handoffAvailable ? {
+      disposition: "REQUEST_HUMAN_HANDOFF",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: true
+    } : {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: false
+    };
+  }
+  if (targetIsStale(context) && action.impact !== "read") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_STALE_TARGET",
+      recoverable: true
+    };
+  }
+  if (action.impact === "high-impact") {
+    if (context.hostApprovalAvailable) {
+      return {
+        disposition: "REQUEST_HOST_APPROVAL",
+        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+        recoverable: true
+      };
+    }
+    if (context.handoffAvailable) {
+      return {
+        disposition: "REQUEST_HUMAN_HANDOFF",
+        reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+        recoverable: true
+      };
+    }
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_HUMAN_BOUNDARY",
+      recoverable: false
+    };
+  }
+  if (repeatsWithoutProgress(action, state, context.signatureProtector)) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+      recoverable: true
+    };
+  }
+  return pass("OXRAIL_NORMAL_ACTION_PASSTHROUGH");
+}
+function deriveHostMode(profile) {
+  const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
+  if (profile.setup.lifecycle === "INSTALLED" || profile.hooks.trustState !== "active" || profile.hooks.policy === "disabled" || profile.hooks.policy === "managed-only" || profile.hooks.concurrentConflictProbe !== "passed" || !profile.evidence.validUntilHostChange) {
+    return "UNSUPPORTED";
+  }
+  if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
+    return "ADVISORY_ONLY";
+  }
+  const pinnedToolNames = new Set(
+    profile.route.browserTools.map((tool) => tool.canonicalToolName)
+  );
+  if (!profile.route.toolSchemaRegistryHash || !profile.route.toolSchemaRegistryEvidenceId || pinnedToolNames.size !== profile.route.canonicalToolMatchers.length || profile.route.canonicalToolMatchers.some(
+    (toolName) => !pinnedToolNames.has(toolName)
+  )) {
+    return "ADVISORY_ONLY";
+  }
+  if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
+    return "ADVISORY_ONLY";
+  }
+  const nativeSafe = profile.nativeInteraction.passThroughFingerprint === "passed" && profile.nativeInteraction.cursorVisualization === "passed" && profile.nativeInteraction.viewportCoordinateMapping === "passed" && profile.nativeInteraction.screenshotFrameFeedback === "passed" && Object.values(profile.nativeInteraction.primitiveParity).every(
+    (verdict) => verdict === "passed"
+  ) && profile.nativeInteraction.unexpectedPointerInterference === 0 && profile.nativeInteraction.unexpectedFocusInterference === 0 && profile.nativeInteraction.unexpectedScrollInterference === 0 && profile.nativeInteraction.incorrectNormalActionBlocks === 0;
+  const actionProven = nativeSafe && coverageComplete(profile.action.preToolCoverage) && profile.action.denyPreventedSideEffect === true;
+  if (!actionProven || profile.action.control === "NONE")
+    return "ADVISORY_ONLY";
+  const fullResultPath = profile.result.control === "NATIVE_TYPED_REWRITE" && coverageComplete(profile.result.postToolCoverage) && profile.result.replacementTiming === "before-model-proven" && profile.result.controlCriticalContract.status === "passed" && Object.values(profile.result.media).every(
+    (verdict) => verdict === "passed"
+  ) && profile.result.rawPersistence.length === 1 && profile.result.rawPersistence[0] === "none-observed";
+  if (profile.action.control === "MICRO_ACTION" && fullResultPath)
+    return "FULL_INTERPOSE";
+  if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
+  return "TRANSACTION_GUARD";
+}
+
+// packages/core/src/state.ts
+function assertActionSignatureKey(state, protector) {
+  if (state.actionSignatureKeyId !== void 0 && state.actionSignatureKeyId !== protector.keyId || state.actionSignatureKeyId === void 0 && state.lastAction !== void 0) {
+    throw new Error("Action signature key does not match BrowserTaskState");
+  }
+}
+function migrateLegacyActionSignatureBaseline(state, keyId2) {
+  if (state.actionSignatureKeyId !== void 0) {
+    if (state.actionSignatureKeyId !== keyId2) {
+      throw new Error("Action signature key does not match BrowserTaskState");
+    }
+    return state;
+  }
+  if (state.phase !== "RUNNING" || state.pointerOwner !== "NATIVE" || state.pendingNativeActionIds.length > 0) {
+    throw new Error("Legacy action baseline cannot be migrated while active");
+  }
+  const { lastAction: _legacyLastAction, ...legacy } = state;
+  return BrowserTaskStateSchema.parse({
+    ...legacy,
+    actionSignatureKeyId: keyId2,
+    noProgressCount: 0
+  });
+}
+function createBrowserTaskState(input) {
+  return BrowserTaskStateSchema.parse({
+    schemaVersion: 3,
+    sessionId: input.sessionId,
+    taskId: input.taskId,
+    goalSummary: "browser task",
+    hostProfileId: input.hostProfileId,
+    hostProfileStatus: "VALID",
+    mode: input.mode,
+    phase: "RUNNING",
+    revision: 0,
+    noProgressCount: 0,
+    recoveryLevel: 0,
+    recoveryTransitions: 0,
+    authState: "UNKNOWN",
+    leaseEpoch: 0,
+    pointerOwner: "NATIVE",
+    targetCacheEpoch: 0,
+    pendingNativeActionIds: [],
+    stateVersion: 0
+  });
+}
+function stageToolDecision(state, action, decision, signatureProtector) {
+  assertActionSignatureKey(state, signatureProtector);
+  const toolUseId = persistentToolUseId(action.toolUseId);
+  const executed = decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
+  const pendingNativeActionIds = [
+    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId))
+  ];
+  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
+    pendingNativeActionIds.push(toolUseId);
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    lastAction: {
+      ...createActionDigest(action, decision, Date.now(), signatureProtector),
+      toolUseId
+    },
+    actionSignatureKeyId: signatureProtector.keyId,
+    pendingNativeActionIds,
+    stateVersion: state.stateVersion + 1
+  });
+}
+function completePendingTool(state, toolUseId) {
+  const persistentId = persistentToolUseId(toolUseId);
+  if (!state.pendingNativeActionIds.some(
+    (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId
+  )) {
+    return state;
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    pendingNativeActionIds: state.pendingNativeActionIds.map(canonicalPersistentToolUseId).filter((pendingId) => pendingId !== persistentId),
+    stateVersion: state.stateVersion + 1
+  });
 }
 
 // packages/core/src/tool-call.ts
