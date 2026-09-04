@@ -23,7 +23,9 @@ import {
   handleHookEvent,
   hookDefinitionHash,
   markerMatches,
+  MAX_BROWSER_ROUTE_OBSERVATIONS,
   oxrailDataDirectory,
+  recordBrowserHookPhase,
   readBrowserRouteObservations,
   readHookMarker,
   writeHostProfile,
@@ -375,6 +377,37 @@ describe("public Codex hooks", () => {
     await expect(
       readBrowserRouteObservations(environment.pluginData),
     ).resolves.toEqual([]);
+  });
+
+  it("bounds passive browser-route evidence without storing tool ids", async () => {
+    const environment = await setup();
+    for (let index = 0; index < MAX_BROWSER_ROUTE_OBSERVATIONS + 32; index++) {
+      await recordBrowserHookPhase(
+        environment.pluginData,
+        "PreToolUse",
+        {
+          definitionHash: environment.definitionHash,
+          profileId: "hp_fixture",
+          sessionDigest: digestSessionId("bounded-session"),
+          synthetic: false,
+          toolUseDigest: digestToolUseId(`raw-tool-use-${index}`),
+        },
+        index,
+      );
+    }
+
+    const observations = await readBrowserRouteObservations(
+      environment.pluginData,
+    );
+    expect(observations.length).toBeLessThanOrEqual(
+      MAX_BROWSER_ROUTE_OBSERVATIONS,
+    );
+    const persisted = await Promise.all(
+      (await allFiles(environment.pluginData)).map((filename) =>
+        readFile(filename, "utf8"),
+      ),
+    );
+    expect(persisted.join("\n")).not.toContain("raw-tool-use-");
   });
 
   it("surfaces a fixed inactive status when the Hook CLI fails internally", () => {

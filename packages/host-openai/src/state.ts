@@ -12,6 +12,7 @@ export const HOOK_EVENTS = [
 ] as const;
 export type HookEventName = (typeof HOOK_EVENTS)[number];
 export const HOOK_MARKER_FRESHNESS_MS = 30_000;
+export const MAX_BROWSER_ROUTE_OBSERVATIONS = 256;
 export const oxrailDataDirectory = (home = homedir()): string =>
   path.join(home, ".oxrail");
 
@@ -107,7 +108,10 @@ export async function recordBrowserHookPhase(
 ): Promise<void> {
   const directory = browserRouteDirectory(pluginData);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const destination = path.join(directory, `${observation.toolUseDigest}.json`);
+  const destination = path.join(
+    directory,
+    `${observation.toolUseDigest.slice(0, 2)}.json`,
+  );
   let previous: BrowserRouteObservation | undefined;
   try {
     const candidate: unknown = JSON.parse(await readFile(destination, "utf8"));
@@ -116,7 +120,8 @@ export async function recordBrowserHookPhase(
       candidate.definitionHash === observation.definitionHash &&
       candidate.profileId === observation.profileId &&
       candidate.sessionDigest === observation.sessionDigest &&
-      candidate.synthetic === observation.synthetic
+      candidate.synthetic === observation.synthetic &&
+      candidate.toolUseDigest === observation.toolUseDigest
     ) {
       previous = candidate;
     }
@@ -147,7 +152,7 @@ export async function readBrowserRouteObservations(
   try {
     const directory = browserRouteDirectory(pluginData);
     const names = (await readdir(directory)).filter((name) =>
-      /^[a-f0-9]{64}\.json$/.test(name),
+      /^[a-f0-9]{2}\.json$/.test(name),
     );
     const markers = await Promise.all(
       names.map(async (name) => {
