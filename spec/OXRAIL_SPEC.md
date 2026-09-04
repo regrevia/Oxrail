@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.7
+# Oxrail — 唯一实现规范（SPEC）v1.0.8
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.7
+  spec_version: 1.0.8
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -4352,6 +4352,8 @@ Safe verifier enum        = ALLOW
 在任何网页 generate/reveal API-key 动作前，Oxrail 必须先取得比 Browser Handoff 更强的 credential-input lease：所有已探测 Agent tool、browser action、browser observation、shell/terminal、screen capture、clipboard access 与语义查询路径一律拒绝，唯一例外是签名 credential enclave 的固定内部协议。该 lease 必须持续到 secure field 清空、Keychain commit 或 cancel、pasteboard hygiene、prompt teardown、一次性 key reveal surface 经非秘密 verifier 证明已关闭/遮蔽，以及 sanitized result 完成；任一未知/bypass path、helper crash、reveal surface 仍可见或 cleanup 失败都保持 fail-closed，不得恢复 Agent 或宣称 Credential protection `ACTIVE`。Native Chrome 页面仍由用户正常操作；这里的 fail-closed 只针对 credential task 与 Agent resume，不得破坏普通 Native Chrome 可用性。
 
 Core 的 fixture-only credential execution gate 只是一份全局保守阻断账本：显式 setup 创建私有 `OPEN` tombstone，之后仅允许代际单调的 `OPEN → PREPARING → ACTIVE → CLEANUP_PENDING → OPEN`，或 `PREPARING → CLEANUP_PENDING → OPEN` abort 路径。缺失已初始化状态、部分初始化、锁存在、损坏、权限异常、快照改变或任何非 `OPEN` 状态均产生 `BLOCK_AGENT_EXECUTION`；TTL 不得自动 reopen。只有已知 `OPEN` 产生 `NO_LEDGER_BLOCK`，它仅表示这份账本未要求阻断，不是执行许可。其 `FIXTURE_ONLY_NON_AUTHORIZING` 状态、binding digest、调用方提供的 quiescence receipt hash 与 cleanup evidence hash 都不是 attestation、授权或 capability evidence，也不得令 doctor/profile 显示 Credential `ACTIVE`。真实 Hook 集成必须在所有 Agent 路径的 admission lock 前后双读并比较完整快照；恢复 `OPEN` 还必须由独立可信 verifier 验证 cleanup evidence，不能只信任该 hash 字段或复用激活 receipt。
+
+Core 的 fixture-only Credential Tool Fence primitive 使用一个 reserved 全局 scope，把严格的 `sessionId + toolUseId` 在内存中先摘要、再经本机 HMAC 后写入现有 bounded active journal；它拒绝任何额外字段且不接收或持久化 `tool_input`。只有 runtime root 本身不存在时才返回 `BYPASS`；root 已存在但 gate 缺失、未知或损坏时返回 `UNKNOWN`。已知 `OPEN` 的 Pre 在全局 mutex 内复读 gate、清理已完成项、确认包含 legacy COMPLETE marker 在内的物理 active count `< 256`、登记调用并再次比较完整快照；duplicate、超限、变化与异常均不产生正向结果。Post 不依赖 gate 仍为 `OPEN`，必须幂等完成旧调用；PREPARING quiescence 只在 mutex 内前后快照一致且 bounded journal 可证明时返回 `PENDING/QUIESCENT`。`NO_LEDGER_BLOCK_TRACKED` 与 `QUIESCENT` 都只是非授权的本地事实。当前 gate PREPARE 不共享该 mutex，模块也未接入 Hook；最终 admission window、Hook 缺失/超时/崩溃及所有 Host 路径只能由未来 verified-current、Host-wide execution suspension/native fence 解决，在此前不得启动 secret prompt、通过 G15 或显示 Credential `ACTIVE`。
 
 ## 21.4 Origin Binding
 
@@ -11775,6 +11777,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.8 — 2026-09-04
+
+- 新增 fixture-only 全局 Credential Tool Fence primitive：原始调用身份仅以本机 HMAC 派生值持久化，输入边界拒绝 `tool_input` 与额外字段；
+- 复用现有 task lock 与 bounded active journal，锁内清理当前格式完成项并按所有 schema 的物理 marker 把并发 active 调用硬限制为 256；Post 可在非 OPEN 或 gate 缺失时补全旧调用；
+- 明确 `NO_LEDGER_BLOCK_TRACKED/QUIESCENT` 不是授权或 Host fence，且该模块尚未接 Hook；G15 仍依赖独立 Host-wide suspension/native fence。
 
 ### v1.0.7 — 2026-09-04
 

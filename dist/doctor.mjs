@@ -13285,6 +13285,20 @@ var sentinelContents = `${JSON.stringify({
 })}
 `;
 
+// packages/core/src/tool-call.ts
+var MAX_ACTIVE_TOOL_CALLS = 256;
+var MAX_ACTIVE_INDEX_ENTRIES = MAX_ACTIVE_TOOL_CALLS * 2 + 1;
+
+// packages/core/src/credential-tool-fence.ts
+var BINDING_DIGEST = deterministicDigest(
+  "oxrail-credential-tool-fence-binding-v1",
+  {
+    authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+    scope: "GLOBAL",
+    schemaVersion: 1
+  }
+);
+
 // packages/core/src/policy.ts
 function deriveHostMode(profile) {
   const coverageComplete = (coverage) => coverage.confidence === "PROVEN" && coverage.expected > 0 && coverage.observed === coverage.expected && coverage.bypassCases.length === 0;
@@ -13319,10 +13333,6 @@ function deriveHostMode(profile) {
   if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
   return "TRANSACTION_GUARD";
 }
-
-// packages/core/src/tool-call.ts
-var MAX_ACTIVE_TOOL_CALLS = 256;
-var MAX_ACTIVE_INDEX_ENTRIES = MAX_ACTIVE_TOOL_CALLS * 2 + 1;
 
 // packages/host-openai/src/guard.ts
 var hash4 = external_exports.string().regex(/^[a-f0-9]{64}$/i);

@@ -709,6 +709,19 @@ async function scanToolCallJournal(
   return { kind: "KNOWN", calls };
 }
 
+/** Counts every physical active marker, including legacy completed calls. */
+export async function countActiveToolCalls(
+  root: string,
+  scope: ToolCallScope,
+): Promise<number | "UNKNOWN"> {
+  try {
+    const scanned = await scanToolCallJournal(root, scope);
+    return scanned.kind === "KNOWN" ? scanned.calls.length : "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
+  }
+}
+
 /** Exact sanitized journal identities used only while activating a user lease. */
 export async function inspectToolCallJournal(
   root: string,

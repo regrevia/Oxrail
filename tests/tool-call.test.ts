@@ -20,6 +20,7 @@ import {
   MAX_ACTIVE_INDEX_ENTRIES,
   MAX_ACTIVE_TOOL_CALLS,
   completeToolCallPost,
+  countActiveToolCalls,
   hasPendingToolCalls,
   inspectToolCallJournal,
   protectToolCallRequestDigest,
@@ -666,6 +667,42 @@ describe("tool call journal", () => {
     await unlink(path.join(directory, "active", path.basename(pendingPath!)));
     await unlink(pendingPath!);
     await expect(inspectToolCallJournal(root, scope)).resolves.toEqual({
+      completedToolUseIds: [],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
+  });
+
+  it("counts a legacy completed call retained in the active index", async () => {
+    const root = await makeRoot();
+    const input = baseInput("legacy-complete-active");
+    await recordToolCallPre(root, input);
+    await completeToolCallPost(root, input);
+
+    const directory = await journalDirectory(root);
+    const [filename] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    if (!filename) throw new Error("expected journal marker");
+    for (const markerPath of [
+      path.join(directory, filename),
+      path.join(directory, filename.replace(/\.json$/, ".post")),
+      path.join(directory, "active", filename),
+    ]) {
+      const marker = JSON.parse(await readFile(markerPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      delete marker.persistentToolUseId;
+      marker.schemaVersion = 1;
+      await writeFile(markerPath, `${JSON.stringify(marker)}\n`, {
+        mode: 0o600,
+      });
+    }
+
+    await expect(countActiveToolCalls(root, input)).resolves.toBe(1);
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
       completedToolUseIds: [],
       kind: "KNOWN",
       legacyPending: false,

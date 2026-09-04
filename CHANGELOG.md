@@ -11,6 +11,7 @@ All notable project changes are documented here. The normative specification his
 - Bound credential provisioning to one allowlisted ID, the active real-tab Handoff scope, a fixed registry, a non-authorizing fixture ticket, and a fixed secret-free public result.
 - Added an explicit, input-free macOS Keychain synthetic round-trip probe with fixed secret-free output and cleanup on every post-locator path; it remains fixture-only and cannot activate Credential protection.
 - Added a durable, fail-closed credential execution gate ledger with monotonic prepare/active/cleanup transitions, distinct cleanup evidence, bounded private state, conservative crash recovery, and exact replay detection; it remains fixture-only and is not authorization or attestation.
+- Added a fixture-only global Credential Tool Fence primitive with locally keyed call identities, a serialized 256-marker active ceiling across legacy and current schemas, exact gate snapshot checks, durable Post cleanup, and bounded quiescence reporting; it is not connected to Hooks and cannot satisfy G15.
 
 ## [0.1.0-alpha.0] - 2026-09-04
 
