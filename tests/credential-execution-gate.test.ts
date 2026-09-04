@@ -13,7 +13,14 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  credentialToolFencePre,
+  readCredentialToolFenceQuiescence,
+} from "../packages/core/src/credential-tool-fence.js";
+import { withCredentialToolFenceLock } from "../packages/core/src/credential-tool-fence-lock.js";
+import * as toolCallJournal from "../packages/core/src/tool-call.js";
 
 import {
   CredentialExecutionGateError,
@@ -143,6 +150,7 @@ async function initializedRoot(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -246,6 +254,106 @@ describe("credential execution gate", () => {
     await expect(
       transitionCredentialExecutionGate(root, event("PREPARE", 2, 60)),
     ).resolves.toBe("APPLIED");
+  });
+
+  it("serializes PREPARE behind an in-flight global Pre registration", async () => {
+    const root = await initializedRoot();
+    let releaseRegistration!: () => void;
+    let registrationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      registrationStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseRegistration = resolve;
+    });
+    const recordToolCallPre = toolCallJournal.recordToolCallPre;
+    vi.spyOn(toolCallJournal, "recordToolCallPre").mockImplementation(
+      async (...input) => {
+        registrationStarted();
+        await release;
+        return recordToolCallPre(...input);
+      },
+    );
+
+    const pre = credentialToolFencePre(root, {
+      sessionId: "concurrent-session",
+      toolUseId: "concurrent-call",
+    });
+    await started;
+    let prepareSettled = false;
+    const prepare = transitionCredentialExecutionGate(
+      root,
+      event("PREPARE", 1, 20),
+    ).finally(() => {
+      prepareSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(prepareSettled).toBe(false);
+
+    releaseRegistration();
+    await expect(pre).resolves.toBe("NO_LEDGER_BLOCK_TRACKED");
+    await expect(prepare).resolves.toBe("APPLIED");
+    await expect(readCredentialToolFenceQuiescence(root)).resolves.toBe(
+      "PENDING",
+    );
+  });
+
+  it("serializes an incoming Pre behind the transition mutex", async () => {
+    const root = await initializedRoot();
+    let releaseTransition!: () => void;
+    let transitionLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      transitionLocked = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseTransition = resolve;
+    });
+    const transition = withCredentialToolFenceLock(root, async () => {
+      transitionLocked();
+      await release;
+    });
+    await locked;
+
+    let preSettled = false;
+    const pre = credentialToolFencePre(root, {
+      sessionId: "transition-first-session",
+      toolUseId: "transition-first-call",
+    }).finally(() => {
+      preSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(preSettled).toBe(false);
+
+    releaseTransition();
+    await expect(transition).resolves.toBeUndefined();
+    await expect(pre).resolves.toBe("NO_LEDGER_BLOCK_TRACKED");
+  });
+
+  it("never bypasses when a transition mutex outlives Pre retries", async () => {
+    const root = await initializedRoot();
+    let releaseTransition!: () => void;
+    let transitionLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      transitionLocked = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseTransition = resolve;
+    });
+    const transition = withCredentialToolFenceLock(root, async () => {
+      transitionLocked();
+      await release;
+    });
+    await locked;
+
+    await expect(
+      credentialToolFencePre(root, {
+        sessionId: "long-transition-session",
+        toolUseId: "long-transition-call",
+      }),
+    ).resolves.toBe("UNKNOWN");
+
+    releaseTransition();
+    await expect(transition).resolves.toBeUndefined();
   });
 
   it("rejects illegal, stale, conflicting, and overflowing transitions", async () => {

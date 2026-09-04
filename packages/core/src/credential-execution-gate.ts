@@ -8,6 +8,7 @@ import {
   type CredentialEnclaveTicket,
 } from "../../protocol/src/index.js";
 import { BrowserTaskStateStoreError, readBoundedPrivateFile } from "./store.js";
+import { withCredentialToolFenceLock } from "./credential-tool-fence-lock.js";
 
 const DIRECTORY = "credential-execution-gate";
 const CURRENT = "current.json";
@@ -770,14 +771,10 @@ function cleanupEvidenceDigest(
   });
 }
 
-/**
- * Advance the global fixture ledger. ACTIVE is a conservative blocking fact;
- * it never proves protection, launches a helper, or authorizes secret use.
- */
-export async function transitionCredentialExecutionGate(
+function validateTransition(
   root: string,
   event: CredentialExecutionGateEvent,
-): Promise<"APPLIED" | "REPLAY"> {
+): ReturnType<typeof parseOperationBinding> {
   if (
     !root ||
     !event ||
@@ -796,18 +793,30 @@ export async function transitionCredentialExecutionGate(
   ) {
     throw new CredentialExecutionGateError("INVALID_INPUT");
   }
-  const { digest, ticket: parsedTicket } = parseOperationBinding(event.binding);
+  const parsed = parseOperationBinding(event.binding);
   if (
-    parsedTicket.issuedAt < parsedTicket.handoff.acquiredAt ||
-    parsedTicket.issuedAt > parsedTicket.handoff.expiresAt ||
-    parsedTicket.handoff.expiresAt <= parsedTicket.handoff.acquiredAt ||
+    parsed.ticket.issuedAt < parsed.ticket.handoff.acquiredAt ||
+    parsed.ticket.issuedAt > parsed.ticket.handoff.expiresAt ||
+    parsed.ticket.handoff.expiresAt <= parsed.ticket.handoff.acquiredAt ||
     (["ACTIVATE", "PREPARE"].includes(event.kind) &&
-      (event.observedAt < parsedTicket.handoff.acquiredAt ||
-        event.observedAt < parsedTicket.issuedAt ||
-        event.observedAt > parsedTicket.handoff.expiresAt))
+      (event.observedAt < parsed.ticket.handoff.acquiredAt ||
+        event.observedAt < parsed.ticket.issuedAt ||
+        event.observedAt > parsed.ticket.handoff.expiresAt))
   ) {
     throw new CredentialExecutionGateError("INVALID_INPUT");
   }
+  return parsed;
+}
+
+/**
+ * Advance the global fixture ledger. ACTIVE is a conservative blocking fact;
+ * it never proves protection, launches a helper, or authorizes secret use.
+ */
+async function transitionCredentialExecutionGateLocked(
+  root: string,
+  event: CredentialExecutionGateEvent,
+): Promise<"APPLIED" | "REPLAY"> {
+  const { digest, ticket: parsedTicket } = validateTransition(root, event);
   if (
     (await inspectPrivateDirectory(root)) !== "PRIVATE" ||
     (await inspectPrivateDirectory(gateDirectory(root))) !== "PRIVATE"
@@ -922,5 +931,26 @@ export async function transitionCredentialExecutionGate(
     throw new CredentialExecutionGateError("UNAVAILABLE");
   } finally {
     await releaseLock(root, ownership);
+  }
+}
+
+export async function transitionCredentialExecutionGate(
+  root: string,
+  event: CredentialExecutionGateEvent,
+): Promise<"APPLIED" | "REPLAY"> {
+  validateTransition(root, event);
+  if (
+    (await inspectPrivateDirectory(root)) !== "PRIVATE" ||
+    (await inspectPrivateDirectory(gateDirectory(root))) !== "PRIVATE"
+  ) {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+  try {
+    return await withCredentialToolFenceLock(root, () =>
+      transitionCredentialExecutionGateLocked(root, event),
+    );
+  } catch (error) {
+    if (error instanceof CredentialExecutionGateError) throw error;
+    throw new CredentialExecutionGateError("UNAVAILABLE");
   }
 }

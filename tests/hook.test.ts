@@ -26,8 +26,11 @@ import {
   activateUserLease,
   createBrowserTaskState,
   handoffScopeBindingHash,
+  initializeCredentialExecutionGate,
   prepareHandoffBarrier,
   prepareHandoffLease,
+  readCredentialExecutionGate,
+  readCredentialToolFenceQuiescence,
   readBrowserTaskState,
   sanitizeBrowserTaskStateForPersistence,
   writeBrowserTaskState,
@@ -37,6 +40,7 @@ import {
   digestToolUseId,
   handleHookEvent,
   hookBrowserTaskScope,
+  hookCredentialFenceStateDirectory,
   hookDefinitionHash,
   hookRuntimeStateDirectory,
   hostProfileBindingHash,
@@ -49,6 +53,7 @@ import {
   TOOL_SCHEMA_REGISTRY_FILENAME,
   ToolSchemaRegistrySchema,
   toolSchemaRegistryHash,
+  type HookOutput,
   writeHostProfile,
 } from "../packages/host-openai/src/index.js";
 
@@ -224,6 +229,10 @@ async function setup() {
   temporaryDirectories.push(pluginData);
   const definitionHash = await hookDefinitionHash(pluginRoot);
   const profile = await fixtureProfile(definitionHash);
+  await initializeCredentialExecutionGate(
+    hookCredentialFenceStateDirectory(pluginData),
+    1,
+  );
   await writeHostProfile(pluginData, profile);
   return { definitionHash, pluginData, pluginRoot, profile };
 }
@@ -373,6 +382,36 @@ async function runtimeStateLockPath(runtimeRoot: string): Promise<string> {
   return path.join(path.dirname(state), ".browser-task-state.lock");
 }
 
+async function setCredentialGateState(
+  pluginData: string,
+  state: "ACTIVE" | "CLEANUP_PENDING" | "PREPARING" | "UNKNOWN",
+): Promise<void> {
+  const root = hookCredentialFenceStateDirectory(pluginData);
+  const filename = path.join(root, "credential-execution-gate", "current.json");
+  if (state === "UNKNOWN") {
+    await writeFile(filename, "{}\n");
+    return;
+  }
+  const current = await readCredentialExecutionGate(root);
+  if (current.kind !== "KNOWN") throw new Error("missing credential gate");
+  const persisted: Record<string, unknown> = { ...current };
+  delete persisted.kind;
+  await writeFile(
+    filename,
+    `${JSON.stringify({
+      ...persisted,
+      createdAt: 2,
+      expiresAt: 10_000,
+      generation: 1,
+      operationDigest: "a".repeat(64),
+      outcome: state === "PREPARING" ? "NONE" : "ACTIVATED",
+      receiptDigest: state === "PREPARING" ? null : "b".repeat(64),
+      state,
+      updatedAt: 2,
+    })}\n`,
+  );
+}
+
 async function seedUserLease(
   pluginData: string,
   profile: HostProfile,
@@ -479,12 +518,25 @@ describe("public Codex hooks", () => {
     const unrelated = await handleHookEvent(
       {
         hook_event_name: "PreToolUse",
+        session_id: sessionCanary,
         tool_name: "fixture.native.browser.extra",
+        tool_use_id: "unrelated-call",
         tool_input: { value: canary },
       },
       environment,
     );
     expect(unrelated).toEqual({});
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PostToolUse",
+          session_id: sessionCanary,
+          tool_name: "fixture.native.browser.extra",
+          tool_use_id: "unrelated-call",
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
     expect(await readBrowserRouteObservations(environment.pluginData)).toEqual(
       [],
     );
@@ -548,6 +600,176 @@ describe("public Codex hooks", () => {
     expect(persisted.join("\n")).not.toContain(sessionCanary);
   });
 
+  it("tracks every wildcard tool class and never reads or persists payloads", async () => {
+    const environment = await setup();
+    const canary = "OXRAIL_CREDENTIAL_FENCE_SECRET_CANARY";
+    const calls = [
+      "fixture.native.browser",
+      "fixture.shell.exec",
+      "fixture.screen.capture",
+      "fixture.clipboard.read",
+      "fixture.other.tool",
+    ].map((toolName, index) => ({
+      sessionId: `${canary}-session-${index}`,
+      toolName,
+      toolUseId: `${canary}-call-${index}`,
+    }));
+    const outputs: HookOutput[] = [];
+
+    for (const call of calls) {
+      const pre: Record<string, unknown> = {
+        hook_event_name: "PreToolUse",
+        session_id: call.sessionId,
+        tool_name: call.toolName,
+        tool_use_id: call.toolUseId,
+      };
+      Object.defineProperty(pre, "tool_input", {
+        enumerable: true,
+        get() {
+          throw new Error("credential fence must not read tool_input");
+        },
+      });
+      outputs.push(await handleHookEvent(pre, environment));
+    }
+    expect(outputs).toEqual(calls.map(() => ({})));
+
+    await setCredentialGateState(environment.pluginData, "PREPARING");
+    for (const [index, call] of calls.entries()) {
+      const blocked = await handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: `${canary}-blocked-session-${index}`,
+          tool_name: call.toolName,
+          tool_use_id: `${canary}-blocked-call-${index}`,
+          get tool_input() {
+            throw new Error("blocked fence must not read tool_input");
+          },
+        },
+        environment,
+      );
+      expect(blocked).toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+          ),
+        },
+      });
+      expect(JSON.stringify(blocked)).toContain(
+        "Credential protection remains INACTIVE",
+      );
+      outputs.push(blocked);
+    }
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("PENDING");
+
+    for (const call of calls) {
+      const post: Record<string, unknown> = {
+        hook_event_name: "PostToolUse",
+        session_id: call.sessionId,
+        tool_name: call.toolName,
+        tool_use_id: call.toolUseId,
+      };
+      Object.defineProperties(post, {
+        tool_input: {
+          enumerable: true,
+          get() {
+            throw new Error("credential fence Post must not read tool_input");
+          },
+        },
+        tool_response: {
+          enumerable: true,
+          get() {
+            throw new Error(
+              "credential fence Post must not read tool_response",
+            );
+          },
+        },
+      });
+      outputs.push(await handleHookEvent(post, environment));
+    }
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("QUIESCENT");
+
+    const persisted = await Promise.all(
+      (await allFiles(environment.pluginData)).map((filename) =>
+        readFile(filename, "utf8"),
+      ),
+    );
+    expect(persisted.join("\n")).not.toContain(canary);
+    expect(JSON.stringify(outputs)).not.toContain(canary);
+  });
+
+  it.each(["ACTIVE", "CLEANUP_PENDING", "UNKNOWN"] as const)(
+    "blocks every tool before profile classification when the credential gate is %s",
+    async (state) => {
+      const environment = await setup();
+      await setCredentialGateState(environment.pluginData, state);
+
+      const output = await handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "blocked-before-profile-session",
+          tool_name: "fixture.other.tool",
+          tool_use_id: "blocked-before-profile-call",
+          get tool_input() {
+            throw new Error("blocked fence must not read tool_input");
+          },
+        },
+        environment,
+      );
+
+      expect(output).toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            state === "UNKNOWN"
+              ? "OXRAIL_VERIFICATION_INCONCLUSIVE"
+              : "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+          ),
+        },
+      });
+      expect(JSON.stringify(output)).toContain(
+        "Credential protection remains INACTIVE",
+      );
+    },
+  );
+
+  it("fails open with an explicit inactive status when an OPEN fence cannot journal", async () => {
+    const environment = await setup();
+    const root = hookCredentialFenceStateDirectory(environment.pluginData);
+    await writeFile(path.join(root, ".local-digest-key.json"), "{}\n", {
+      mode: 0o600,
+    });
+
+    const output = await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "degraded-open-session",
+        tool_name: "fixture.other.tool",
+        tool_use_id: "degraded-open-call",
+        tool_input: { untouched: true },
+      },
+      environment,
+    );
+
+    expect(output).toMatchObject({
+      systemMessage: expect.stringContaining(
+        "Oxrail optimization unavailable / BYPASSED",
+      ),
+    });
+    expect(JSON.stringify(output)).toContain(
+      "Oxrail credential protection: INACTIVE",
+    );
+    expect(JSON.stringify(output)).not.toContain("permissionDecision");
+  });
+
   it("fails open when the profile is missing or the hook hash changed", async () => {
     const pluginRoot = process.cwd();
     const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-hook-open-"));
@@ -585,23 +807,26 @@ describe("public Codex hooks", () => {
     expect(JSON.stringify(staleProfileOutput)).not.toContain("updatedInput");
   });
 
-  it("does not record browser-route evidence without a host session id", async () => {
+  it("blocks malformed tool identity without recording browser-route evidence", async () => {
     const environment = await setup();
     for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
-      await expect(
-        handleHookEvent(
-          {
-            hook_event_name,
-            tool_name: "fixture.native.browser",
-            tool_use_id: "sessionless-browser-call",
-            tool_input: { action: "fixture-no-op" },
-            ...(hook_event_name === "PostToolUse"
-              ? { tool_response: { ok: true } }
-              : {}),
-          },
-          environment,
-        ),
-      ).resolves.toEqual({});
+      const output = await handleHookEvent(
+        {
+          hook_event_name,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "sessionless-browser-call",
+          tool_input: { action: "fixture-no-op" },
+          ...(hook_event_name === "PostToolUse"
+            ? { tool_response: { ok: true } }
+            : {}),
+        },
+        environment,
+      );
+      expect(JSON.stringify(output)).toContain(
+        hook_event_name === "PreToolUse"
+          ? "OXRAIL_VERIFICATION_INCONCLUSIVE"
+          : "BYPASSED",
+      );
     }
 
     await expect(
@@ -689,6 +914,12 @@ describe("public Codex hooks", () => {
     await expect(handleHookEvent(post, environment)).resolves.toEqual({});
     expect(postInputRead).toBe(false);
     expect(responseRead).toBe(false);
+    await setCredentialGateState(environment.pluginData, "PREPARING");
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("QUIESCENT");
     await expect(
       readBrowserTaskState(runtimeRoot, scope),
     ).resolves.toMatchObject({ pendingNativeActionIds: [] });
@@ -985,7 +1216,7 @@ describe("public Codex hooks", () => {
     );
   });
 
-  it("denies a trusted high-impact action through the official PreToolUse shape", async () => {
+  it("keeps a denied high-impact call pending without Host terminal evidence", async () => {
     const environment = await setupActiveGuard();
     const input = {
       hook_event_name: "PreToolUse" as const,
@@ -998,16 +1229,28 @@ describe("public Codex hooks", () => {
 
     const first = await handleHookEvent(input, environment);
     const duplicate = await handleHookEvent(input, environment);
-    for (const output of [first, duplicate]) {
-      expect(output).toEqual({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason:
-            "OXRAIL_HUMAN_BOUNDARY: This action requires host-native approval; Oxrail cannot create approval proactively.",
-        },
-      });
-    }
+    expect(first).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "OXRAIL_HUMAN_BOUNDARY: This action requires host-native approval; Oxrail cannot create approval proactively.",
+      },
+    });
+    expect(duplicate).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+        ),
+      },
+    });
+    await setCredentialGateState(environment.pluginData, "PREPARING");
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("PENDING");
   });
 
   it("never replays an allowed native action for duplicate or mismatched Pre delivery", async () => {
@@ -1059,7 +1302,7 @@ describe("public Codex hooks", () => {
         hookSpecificOutput: {
           permissionDecision: "deny",
           permissionDecisionReason: expect.stringContaining(
-            "OXRAIL_VERIFICATION_INCONCLUSIVE",
+            "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
           ),
         },
       });
@@ -1100,15 +1343,17 @@ describe("public Codex hooks", () => {
       Array.from({ length: 2 }, () => handleHookEvent(highImpact, environment)),
     );
     expect(
-      denials.every(
-        (output) =>
-          "hookSpecificOutput" in output &&
-          output.hookSpecificOutput.permissionDecision === "deny" &&
-          output.hookSpecificOutput.permissionDecisionReason.includes(
-            "OXRAIL_HUMAN_BOUNDARY",
-          ),
+      denials.map((output) =>
+        "hookSpecificOutput" in output
+          ? output.hookSpecificOutput.permissionDecisionReason.split(":")[0]
+          : "ALLOW",
       ),
-    ).toBe(true);
+    ).toEqual(
+      expect.arrayContaining([
+        "OXRAIL_HUMAN_BOUNDARY",
+        "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+      ]),
+    );
   });
 
   it("preserves a computed high-impact deny when state persistence fails", async () => {
@@ -1143,7 +1388,10 @@ describe("public Codex hooks", () => {
     };
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await expect(
-        handleHookEvent(request, environment),
+        handleHookEvent(
+          { ...request, tool_use_id: `${request.tool_use_id}-${attempt}` },
+          environment,
+        ),
       ).resolves.toMatchObject({
         hookSpecificOutput: {
           permissionDecision: "deny",
@@ -1349,7 +1597,12 @@ describe("public Codex hooks", () => {
       tool_input: { action: "click", axis: "primary" },
     };
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      await expect(handleHookEvent(request, environment)).resolves.toEqual({});
+      await expect(
+        handleHookEvent(
+          { ...request, tool_use_id: `${request.tool_use_id}-${attempt}` },
+          environment,
+        ),
+      ).resolves.toEqual({});
     }
 
     await writeFile(
@@ -1361,7 +1614,12 @@ describe("public Codex hooks", () => {
       ),
       "{}\n",
     );
-    await expect(handleHookEvent(request, environment)).resolves.toEqual({});
+    await expect(
+      handleHookEvent(
+        { ...request, tool_use_id: `${request.tool_use_id}-drifted` },
+        environment,
+      ),
+    ).resolves.toEqual({});
   });
 
   it("fails open when the session state lock is unavailable", async () => {

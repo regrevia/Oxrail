@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.15
+# Oxrail — 唯一实现规范（SPEC）v1.0.16
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -4489,7 +4489,9 @@ Safe verifier enum        = ALLOW
 
 Core 的 fixture-only credential execution gate 只是一份全局保守阻断账本：显式 setup 创建私有 `OPEN` tombstone，之后仅允许代际单调的 `OPEN → PREPARING → ACTIVE → CLEANUP_PENDING → OPEN`，或 `PREPARING → CLEANUP_PENDING → OPEN` abort 路径。缺失已初始化状态、部分初始化、锁存在、损坏、权限异常、快照改变或任何非 `OPEN` 状态均产生 `BLOCK_AGENT_EXECUTION`；TTL 不得自动 reopen。只有已知 `OPEN` 产生 `NO_LEDGER_BLOCK`，它仅表示这份账本未要求阻断，不是执行许可。其 `FIXTURE_ONLY_NON_AUTHORIZING` 状态、binding digest、调用方提供的 quiescence receipt hash 与 cleanup evidence hash 都不是 attestation、授权或 capability evidence，也不得令 doctor/profile 显示 Credential `ACTIVE`。真实 Hook 集成必须在所有 Agent 路径的 admission lock 前后双读并比较完整快照；恢复 `OPEN` 还必须由独立可信 verifier 验证 cleanup evidence，不能只信任该 hash 字段或复用激活 receipt。
 
-Core 的 fixture-only Credential Tool Fence primitive 使用一个 reserved 全局 scope，把严格的 `sessionId + toolUseId` 在内存中先摘要、再经本机 HMAC 后写入现有 bounded active journal；它拒绝任何额外字段且不接收或持久化 `tool_input`。只有 runtime root 本身不存在时才返回 `BYPASS`；root 已存在但 gate 缺失、未知或损坏时返回 `UNKNOWN`。已知 `OPEN` 的 Pre 在全局 mutex 内复读 gate、清理已完成项、确认包含 legacy COMPLETE marker 在内的物理 active count `< 256`、登记调用并再次比较完整快照；duplicate、超限、变化与异常均不产生正向结果。Post 不依赖 gate 仍为 `OPEN`，必须幂等完成旧调用；PREPARING quiescence 只在 mutex 内前后快照一致且 bounded journal 可证明时返回 `PENDING/QUIESCENT`。`NO_LEDGER_BLOCK_TRACKED` 与 `QUIESCENT` 都只是非授权的本地事实。当前 gate PREPARE 不共享该 mutex，模块也未接入 Hook；最终 admission window、Hook 缺失/超时/崩溃及所有 Host 路径只能由未来 verified-current、Host-wide execution suspension/native fence 解决，在此前不得启动 secret prompt、通过 G15 或显示 Credential `ACTIVE`。
+Core 的 fixture-only Credential Tool Fence primitive 使用一个 reserved 全局 scope，把严格的 `sessionId + toolUseId` 在内存中先摘要、再经本机 HMAC 后写入现有 bounded active journal；它拒绝任何额外字段且不接收或持久化 `tool_input`。只有独立 credential fence root 本身不存在时才返回 `BYPASS`；root 已存在但 gate 缺失、未知或损坏时返回 `UNKNOWN`。已知 `OPEN` 的 Pre 在全局 mutex 内复读 gate、清理已完成项、确认包含 legacy COMPLETE marker 在内的物理 active count `< 256`、登记调用并再次比较完整快照；duplicate、超限、变化与异常均不产生正向结果。Post 不依赖 gate 仍为 `OPEN`，必须幂等完成旧调用；PREPARING quiescence 只在 mutex 内前后快照一致且 bounded journal 可证明时返回 `PENDING/QUIESCENT`。所有 gate transition 与 Pre/Post/quiescence 共享该 mutex；被本地 Guard 拒绝或登记后 gate 快照改变的 Pre 仍视为 pending，只有真实 Post 或未来 Host 签发且可认证的 deny-terminal receipt 才能结算，禁止本地伪造终态。`NO_LEDGER_BLOCK_TRACKED` 与 `QUIESCENT` 都只是非授权的本地事实。
+
+OpenAI Host fixture 在 profile、matcher、tool classifier 和完整 Hook input validation 之前，对所有 Hook 可见的 `PreToolUse`/`PostToolUse` 调用上述 fence；该层只提取有界调用身份，不读取 `tool_input` 或 `tool_response`。Credential 仍为 `INACTIVE` 时，macOS bootstrap 不创建或武装独立 fence root，因而普通 Native 路径直接 `BYPASS`。只有显式 fixture 初始化后，非 `OPEN`、已初始化但 `UNKNOWN`、畸形身份与重复 Pre 才固定 deny；仅在已成功取得共享 mutex 且锁内仍确认同一 `OPEN` snapshot 后，journal 满载、损坏或写失败才可原样继续既有 Native 路径并明确 `BYPASSED/INACTIVE`。mutex 获取/释放或锁外异常一律 `UNKNOWN`，禁止与并发 PREPARE 穿透。该降级不能成为 PREPARE、activation 或 G15 证据；当前 execution gate 全部状态仍是非授权 fixture 事实。Post fence 先于其余分支执行，因此 profile/registry drift 或下游 early return 不能漏掉真实 completion。当前 public Hook 合同仍未证明 `PermissionRequest` 的精确安全输出，也不覆盖 hosted/specialized tools、Hook 未启用/未信任/超时/崩溃、多个 plugin root 或所有 Host 内部路径；因此该接线仍为 `FIXTURE_ONLY_NON_AUTHORIZING`，不得启动 secret prompt、通过 G15 或显示 Credential `ACTIVE`。
 
 ## 21.4 Origin Binding
 
@@ -4892,6 +4894,7 @@ OXRAIL_NO_PROGRESS
 OXRAIL_OBSERVATION_BUDGET
 OXRAIL_HUMAN_BOUNDARY
 OXRAIL_USER_LEASE_ACTIVE
+OXRAIL_CREDENTIAL_FENCE_BLOCKED
 OXRAIL_UNSAFE_ORIGIN
 OXRAIL_VERIFICATION_INCONCLUSIVE
 OXRAIL_RECOVERY_EXHAUSTED
@@ -6353,6 +6356,7 @@ Credential fixture 由目标服务验证 canary 并只返回布尔成功状态�
 | `TEST-SEC-117` | 默认 doctor 不写 Keychain/不触发 UI；显式 extended probe 使用唯一临时 item 并在成功/失败路径清理 |
 | `TEST-SEC-118` | paste 后匹配 pasteboard 在 Agent resume 前清空；清理失败或 clipboard manager 场景保持 fail-closed |
 | `TEST-SEC-119` | fixture-only profile 不能 ACTIVE；至少一个 audited real consumer 的 origin/path/method/schema/output binding 通过真实服务 probe |
+| `TEST-SEC-120` | INACTIVE bootstrap 不武装 fence；显式 fixture root 下所有 Hook 可见 Pre/Post 在 profile/classifier 前共享 PREPARE mutex；非 OPEN、UNKNOWN 与畸形身份拒绝，OPEN journal 故障则 Native BYPASSED；只有真实 Post 结算，原始身份和 payload 不持久化，未覆盖 Host 路径使 Credential 保持 INACTIVE |
 
 ## 36.5 Gate
 
@@ -10574,12 +10578,13 @@ Prove one narrow macOS API-key path from the exact authenticated Chrome tab thro
 - [ ] Default doctor is read-only; explicit extended probe cleans its unique temporary Keychain item on success and failure.
 - [ ] Fixture-only capability is marked experimental/inactive; one audited real consumer passes its bound live-service probe before public activation.
 - [ ] Doctor reports Credential protection `ACTIVE` only after `GATE-G15` and current evidence pass; every other state is explicit `INACTIVE`.
-- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`119` pass with sanitized evidence.
+- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`120` pass with sanitized evidence.
 
 **测试 / 证据**
 
 - HandoffBench Credential Channel subset
 - SecretLeakBench Credential Channel subset
+- TEST-SEC-120 Host wildcard credential-fence integration
 - HostProfile v5 contract and doctor probes
 - Full BENCH-NIF handoff subset
 
@@ -10629,6 +10634,7 @@ Release only semantic, validated caching and a scoped macOS Credential Channel t
 - BENCH-NIF
 - SecretLeakBench
 - HandoffBench Credential Channel subset
+- TEST-SEC-120 Host wildcard credential-fence integration
 
 **阻断 / Kill**
 
@@ -11968,6 +11974,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.16 — 2026-09-04
+
+- Hook adapter 新增与 Browser state 分离的 credential fence root，并让所有 Hook 可见 Pre/Post 在 profile、matcher、classifier 与完整 payload validation 前进入全局凭据栅栏；该层从不读取或持久化 tool payload，INACTIVE bootstrap 不创建或武装 root；
+- credential gate transition 与 tool fence 共享同一 mutex，关闭 PREPARE/Pre registration 竞争窗口；本地 deny 或快照漂移不再伪造 completion，只有真实 Post 或未来 authenticated deny-terminal receipt 才能结算 pending call；
+- 非 OPEN、已初始化但 UNKNOWN、畸形身份与重复调用固定 deny；root 未初始化时仅 credential fence BYPASS，只有 mutex 内确认 OPEN 的 journal 故障才保留既有 Native 决策并明确 BYPASSED/INACTIVE，mutex 异常不得降级放行。上述局部事实不能用作 PREPARE/activation 证据；PermissionRequest、hosted/specialized、Hook failure 与多 root 覆盖仍未证明，故 `TEST-SEC-120` 只验收 fixture 接线，Credential protection 继续 `INACTIVE`。
 
 ### v1.0.15 — 2026-09-04
 

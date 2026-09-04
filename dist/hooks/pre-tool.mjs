@@ -7,7 +7,7 @@ var __export = (target, all) => {
 // packages/host-openai/src/hook.ts
 import { createHash as createHash10 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
-import path9 from "node:path";
+import path10 from "node:path";
 
 // packages/protocol/src/digest.ts
 import { createHash } from "node:crypto";
@@ -795,10 +795,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path10) {
-  if (!path10)
+function getElementAtPath(obj, path11) {
+  if (!path11)
     return obj;
-  return path10.reduce((acc, key) => acc?.[key], obj);
+  return path11.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1157,11 +1157,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path10, issues) {
+function prefixIssues(path11, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path10);
+    iss.path.unshift(path11);
     return iss;
   });
 }
@@ -1329,7 +1329,7 @@ function treeifyError(error43, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error44, path10 = []) => {
+  const processError = (error44, path11 = []) => {
     var _a, _b;
     for (const issue2 of error44.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -1339,7 +1339,7 @@ function treeifyError(error43, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path10, ...issue2.path];
+        const fullpath = [...path11, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1371,8 +1371,8 @@ function treeifyError(error43, _mapper) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path10 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path10) {
+  const path11 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path11) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -12080,6 +12080,7 @@ var REASON_CODES = [
   "OXRAIL_OBSERVATION_BUDGET",
   "OXRAIL_HUMAN_BOUNDARY",
   "OXRAIL_USER_LEASE_ACTIVE",
+  "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
   "OXRAIL_UNSAFE_ORIGIN",
   "OXRAIL_VERIFICATION_INCONCLUSIVE",
   "OXRAIL_RECOVERY_EXHAUSTED",
@@ -13486,12 +13487,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
     ["test_results", manifest.test_results.length],
     ["reviewers", manifest.reviewers.length]
   ];
-  for (const [path10, size] of requiredCollections) {
+  for (const [path11, size] of requiredCollections) {
     if (size === 0) {
       context.addIssue({
         code: "custom",
-        path: [path10],
-        message: `ACCEPTED evidence requires ${path10}`
+        path: [path11],
+        message: `ACCEPTED evidence requires ${path11}`
       });
     }
   }
@@ -13632,6 +13633,10 @@ var EvidenceTraceSchema = external_exports.strictObject({
     });
   }
 });
+
+// packages/core/src/credential-execution-gate.ts
+import { link as link2, lstat, mkdir as mkdir2, open as open2, rename as rename2, unlink as unlink2 } from "node:fs/promises";
+import path2 from "node:path";
 
 // packages/core/src/store.ts
 import { createHash as createHash3, randomUUID } from "node:crypto";
@@ -14031,36 +14036,203 @@ async function transitionBrowserTaskStateWithRetry(root, scope, transition) {
   throw new BrowserTaskStateStoreError("CONFLICT");
 }
 
+// packages/core/src/credential-tool-fence-lock.ts
+var CREDENTIAL_TOOL_FENCE_SCOPE = {
+  sessionId: "__oxrail_internal_credential_tool_fence_global_v1__",
+  taskId: "__oxrail_internal_credential_tool_fence_global_v1__"
+};
+var withCredentialToolFenceLock = async (root, operation) => transitionBrowserTaskStateWithRetry(
+  root,
+  CREDENTIAL_TOOL_FENCE_SCOPE,
+  async (state) => {
+    if (state) throw new Error("reserved credential fence scope is occupied");
+    return { value: await operation() };
+  }
+);
+
 // packages/core/src/credential-execution-gate.ts
+var DIRECTORY = "credential-execution-gate";
+var CURRENT = "current.json";
+var SENTINEL = ".initialized-v1";
+var LOCK = ".current.lock";
 var MAX_CURRENT_BYTES = 2 * 1024;
+var MAX_SENTINEL_BYTES = 256;
+var HASH = /^[a-f0-9]{64}$/;
 var AUTHORITY = "FIXTURE_ONLY_NON_AUTHORIZING";
+var EFFECT = "BLOCK_AGENT_EXECUTION_ONLY";
+var CredentialExecutionGateError = class extends Error {
+  constructor(code) {
+    super(`credential execution gate: ${code.toLowerCase()}`);
+    this.code = code;
+    this.name = "CredentialExecutionGateError";
+  }
+};
+var errorCode2 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+var gateDirectory = (root) => path2.join(root, DIRECTORY);
+var gatePath = (root, name) => path2.join(gateDirectory(root), name);
+function currentUid() {
+  if (typeof process.getuid !== "function") {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+  return process.getuid();
+}
+function isOwnedPrivateDirectory(metadata) {
+  return Number(metadata.uid) === currentUid() && (Number(metadata.mode) & 511) === 448;
+}
+function isOwnedPrivateFile(metadata, allowClaimLink = false) {
+  const links = Number(metadata.nlink);
+  return Number(metadata.uid) === currentUid() && (Number(metadata.mode) & 511) === 384 && (allowClaimLink ? links >= 1 : links === 1);
+}
+async function inspectPrivateDirectory(directory) {
+  try {
+    const metadata = await lstat(directory);
+    return metadata.isDirectory() && !metadata.isSymbolicLink() && isOwnedPrivateDirectory(metadata) ? "PRIVATE" : "UNSAFE";
+  } catch (error43) {
+    return errorCode2(error43) === "ENOENT" ? "MISSING" : "UNSAFE";
+  }
+}
+async function readPrivateFile(filename, maximumBytes, allowClaimLink = false) {
+  try {
+    const { contents, metadata } = await readBoundedPrivateFile(
+      filename,
+      maximumBytes,
+      "UNAVAILABLE"
+    );
+    if (!isOwnedPrivateFile(metadata, allowClaimLink)) {
+      throw new CredentialExecutionGateError("UNAVAILABLE");
+    }
+    return { contents, metadata };
+  } catch (error43) {
+    if (errorCode2(error43) === "ENOENT" || error43 instanceof CredentialExecutionGateError) {
+      throw error43;
+    }
+    if (error43 instanceof BrowserTaskStateStoreError) {
+      throw new CredentialExecutionGateError("UNAVAILABLE");
+    }
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+}
+function parseCurrent(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "authority,createdAt,effect,expiresAt,generation,operationDigest,outcome,receiptDigest,schemaVersion,state,updatedAt") {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+  const current = value;
+  if (current.schemaVersion !== 1 || current.authority !== AUTHORITY || current.effect !== EFFECT || !["ACTIVE", "CLEANUP_PENDING", "OPEN", "PREPARING"].includes(
+    current.state ?? ""
+  ) || !Number.isSafeInteger(current.generation) || current.generation < 0 || !Number.isSafeInteger(current.createdAt) || current.createdAt < 0 || !Number.isSafeInteger(current.updatedAt) || current.updatedAt < current.createdAt || (current.generation === 0 ? current.state !== "OPEN" || current.operationDigest !== null || current.outcome !== "NONE" || current.receiptDigest !== null || current.expiresAt !== null || current.createdAt !== current.updatedAt : !HASH.test(current.operationDigest ?? "") || !Number.isSafeInteger(current.expiresAt) || current.expiresAt < current.createdAt || !["ABORTED", "ACTIVATED", "NONE"].includes(current.outcome ?? "") || current.state === "PREPARING" && current.outcome !== "NONE" || current.state === "ACTIVE" && current.outcome !== "ACTIVATED" || current.state === "CLEANUP_PENDING" && !["ABORTED", "ACTIVATED"].includes(current.outcome ?? "") || current.state === "OPEN" && current.outcome === "NONE" || (["ACTIVE", "CLEANUP_PENDING"].includes(current.state ?? "") ? !HASH.test(current.receiptDigest ?? "") : current.receiptDigest !== null))) {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+  return current;
+}
+async function readCurrent(filename) {
+  const { contents } = await readPrivateFile(filename, MAX_CURRENT_BYTES);
+  try {
+    const current = parseCurrent(JSON.parse(contents.toString("utf8")));
+    if (contents.toString("utf8") !== serializeCurrent(current)) {
+      throw new CredentialExecutionGateError("UNAVAILABLE");
+    }
+    return current;
+  } catch {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+}
 var sentinelContents = `${JSON.stringify({
   authority: AUTHORITY,
   schemaVersion: 1,
   state: "INITIALIZED"
 })}
 `;
+async function readSentinel(filename) {
+  const { contents } = await readPrivateFile(filename, MAX_SENTINEL_BYTES);
+  if (contents.toString("utf8") !== sentinelContents) {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+}
+function serializeCurrent(current) {
+  const parsed = parseCurrent(current);
+  const contents = `${JSON.stringify({
+    authority: parsed.authority,
+    createdAt: parsed.createdAt,
+    effect: parsed.effect,
+    expiresAt: parsed.expiresAt,
+    generation: parsed.generation,
+    operationDigest: parsed.operationDigest,
+    outcome: parsed.outcome,
+    receiptDigest: parsed.receiptDigest,
+    schemaVersion: parsed.schemaVersion,
+    state: parsed.state,
+    updatedAt: parsed.updatedAt
+  })}
+`;
+  if (Buffer.byteLength(contents) > MAX_CURRENT_BYTES) {
+    throw new CredentialExecutionGateError("UNAVAILABLE");
+  }
+  return contents;
+}
+async function readCredentialExecutionGate(root) {
+  if (!root) return { kind: "UNKNOWN" };
+  try {
+    const rootState = await inspectPrivateDirectory(root);
+    if (rootState === "MISSING") return { kind: "UNINITIALIZED" };
+    if (rootState !== "PRIVATE") return { kind: "UNKNOWN" };
+    const directoryState = await inspectPrivateDirectory(gateDirectory(root));
+    if (directoryState === "MISSING") return { kind: "UNINITIALIZED" };
+    if (directoryState !== "PRIVATE") return { kind: "UNKNOWN" };
+    try {
+      await readSentinel(gatePath(root, SENTINEL));
+    } catch {
+      return { kind: "UNKNOWN" };
+    }
+    try {
+      await lstat(gatePath(root, LOCK));
+      return { kind: "UNKNOWN" };
+    } catch (error43) {
+      if (errorCode2(error43) !== "ENOENT") return { kind: "UNKNOWN" };
+    }
+    const snapshot = {
+      kind: "KNOWN",
+      ...await readCurrent(gatePath(root, CURRENT))
+    };
+    try {
+      await lstat(gatePath(root, LOCK));
+      return { kind: "UNKNOWN" };
+    } catch (error43) {
+      if (errorCode2(error43) !== "ENOENT") return { kind: "UNKNOWN" };
+    }
+    return snapshot;
+  } catch {
+    return { kind: "UNKNOWN" };
+  }
+}
+function compareCredentialExecutionGates(initial, current) {
+  if (initial.kind !== "KNOWN" || current.kind !== "KNOWN") return "UNKNOWN";
+  if (initial.state !== "OPEN" || current.state !== "OPEN") return "BLOCKED";
+  return initial.authority === current.authority && initial.createdAt === current.createdAt && initial.effect === current.effect && initial.expiresAt === current.expiresAt && initial.generation === current.generation && initial.operationDigest === current.operationDigest && initial.outcome === current.outcome && initial.receiptDigest === current.receiptDigest && initial.schemaVersion === current.schemaVersion && initial.updatedAt === current.updatedAt ? "OPEN" : "CHANGED";
+}
+
+// packages/core/src/credential-tool-fence.ts
+import { lstat as lstat4 } from "node:fs/promises";
 
 // packages/core/src/tool-call.ts
 import { createHash as createHash5, randomUUID as randomUUID3 } from "node:crypto";
 import { constants as constants2 } from "node:fs";
 import {
   chmod as chmod3,
-  link as link3,
-  lstat as lstat2,
-  mkdir as mkdir3,
-  open as open3,
+  link as link4,
+  lstat as lstat3,
+  mkdir as mkdir4,
+  open as open4,
   opendir,
   readdir,
-  rename as rename2,
-  unlink as unlink3
+  rename as rename3,
+  unlink as unlink4
 } from "node:fs/promises";
-import path3 from "node:path";
+import path4 from "node:path";
 
 // packages/core/src/local-digest.ts
 import { createHash as createHash4, createHmac, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
-import { chmod as chmod2, link as link2, lstat, mkdir as mkdir2, open as open2, unlink as unlink2 } from "node:fs/promises";
-import path2 from "node:path";
+import { chmod as chmod2, link as link3, lstat as lstat2, mkdir as mkdir3, open as open3, unlink as unlink3 } from "node:fs/promises";
+import path3 from "node:path";
 var KEY_BYTES = 32;
 var KEY_FILE = ".local-digest-key.json";
 var KEY_FILE_BYTES = 256;
@@ -14070,11 +14242,11 @@ var PURPOSES = /* @__PURE__ */ new Set([
   "action-target-v1",
   "tool-call-request-v1"
 ]);
-var errorCode2 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+var errorCode3 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
 var keyId = (key) => createHash4("sha256").update("oxrail-local-digest-key-id-v1\0").update(key).digest("hex");
 async function privateDirectory(directory) {
-  await mkdir2(directory, { recursive: true, mode: 448 });
-  const metadata = await lstat(directory);
+  await mkdir3(directory, { recursive: true, mode: 448 });
+  const metadata = await lstat2(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("local digest path is not a directory");
   }
@@ -14083,10 +14255,10 @@ async function privateDirectory(directory) {
 async function syncDirectory2(directory) {
   let handle;
   try {
-    handle = await open2(directory, "r");
+    handle = await open3(directory, "r");
     await handle.sync();
   } catch (error43) {
-    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode2(error43) ?? "")) {
+    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode3(error43) ?? "")) {
       throw error43;
     }
   } finally {
@@ -14114,11 +14286,11 @@ async function loadKeyRecord(filename) {
 }
 async function localDigestKey(root) {
   await privateDirectory(root);
-  const destination = path2.join(root, KEY_FILE);
+  const destination = path3.join(root, KEY_FILE);
   try {
     return await loadKeyRecord(destination);
   } catch (error43) {
-    if (errorCode2(error43) !== "ENOENT") throw error43;
+    if (errorCode3(error43) !== "ENOENT") throw error43;
   }
   const key = randomBytes(KEY_BYTES);
   const record2 = {
@@ -14127,26 +14299,26 @@ async function localDigestKey(root) {
     keyId: keyId(key),
     schemaVersion: 1
   };
-  const temporary = path2.join(root, `.${randomUUID2()}.key.tmp`);
+  const temporary = path3.join(root, `.${randomUUID2()}.key.tmp`);
   let handle;
   try {
-    handle = await open2(temporary, "wx", 384);
+    handle = await open3(temporary, "wx", 384);
     await handle.writeFile(`${JSON.stringify(record2)}
 `, "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     try {
-      await link2(temporary, destination);
+      await link3(temporary, destination);
       await syncDirectory2(root);
       return { key, record: record2 };
     } catch (error43) {
-      if (errorCode2(error43) !== "EEXIST") throw error43;
+      if (errorCode3(error43) !== "EEXIST") throw error43;
       return await loadKeyRecord(destination);
     }
   } finally {
     await handle?.close();
-    await unlink2(temporary).catch(() => void 0);
+    await unlink3(temporary).catch(() => void 0);
   }
 }
 async function createLocalDigestProtector(root) {
@@ -14165,6 +14337,13 @@ async function createLocalDigestProtector(root) {
     return;
   }
 }
+async function protectLocalDigest(root, purpose, digest3) {
+  try {
+    return (await createLocalDigestProtector(root))?.protect(purpose, digest3);
+  } catch {
+    return;
+  }
+}
 
 // packages/core/src/tool-call.ts
 var MAX_TOOL_CALL_MARKER_BYTES = 1024;
@@ -14178,7 +14357,7 @@ var ACTIVE_INDEX_TEMPORARY = /^\.active-index-v1\.[a-f0-9-]{36}\.tmp$/;
 var ACTIVE_MARKER_TEMPORARY = /^\.[a-f0-9]{64}\.[a-f0-9-]{36}\.tmp$/;
 var DIGEST2 = /^[a-f0-9]{64}$/;
 var PERSISTENT_ID = /^oxrail-id:[a-f0-9]{64}$/;
-var errorCode3 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+var errorCode4 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
 function digest(domain2, ...values) {
   const hash6 = createHash5("sha256").update(domain2);
   for (const value of values) {
@@ -14189,17 +14368,17 @@ function digest(domain2, ...values) {
 var validId = (value) => typeof value === "string" && value.length > 0 && value.length <= MAX_ID_LENGTH;
 var validScope = (scope) => Boolean(scope) && validId(scope.sessionId) && validId(scope.taskId);
 var toolDigestFor = (input) => digest("oxrail-tool-call-v2", input.sessionId, input.taskId, input.toolUseId);
-var journalDirectory = (root, scope) => path3.join(
+var journalDirectory = (root, scope) => path4.join(
   root,
   digest("oxrail-tool-call-session-v2", scope.sessionId),
   digest("oxrail-tool-call-task-v2", scope.taskId),
   "tool-calls"
 );
-var activeDirectory = (directory) => path3.join(directory, ACTIVE_DIRECTORY);
-var markerPath = (directory, toolDigest) => path3.join(directory, `${toolDigest}.json`);
-var activeMarkerPath = (directory, toolDigest) => path3.join(activeDirectory(directory), `${toolDigest}.json`);
-var indexingMarkerPath = (directory, toolDigest) => path3.join(activeDirectory(directory), `${toolDigest}.indexing`);
-var receiptPath = (directory, toolDigest) => path3.join(directory, `${toolDigest}.post`);
+var activeDirectory = (directory) => path4.join(directory, ACTIVE_DIRECTORY);
+var markerPath = (directory, toolDigest) => path4.join(directory, `${toolDigest}.json`);
+var activeMarkerPath = (directory, toolDigest) => path4.join(activeDirectory(directory), `${toolDigest}.json`);
+var indexingMarkerPath = (directory, toolDigest) => path4.join(activeDirectory(directory), `${toolDigest}.indexing`);
+var receiptPath = (directory, toolDigest) => path4.join(directory, `${toolDigest}.post`);
 var decisionLeavesNativeActionPending = (decision) => decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
 function parseMarker(value, expectedToolDigest) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
@@ -14225,7 +14404,7 @@ function parseMarker(value, expectedToolDigest) {
 async function readBounded(filename) {
   let handle;
   try {
-    handle = await open3(
+    handle = await open4(
       filename,
       constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK
     );
@@ -14255,7 +14434,7 @@ async function readBounded(filename) {
 }
 async function activeIndexReady(directory) {
   try {
-    return (await readBounded(path3.join(activeDirectory(directory), ACTIVE_INDEX))).toString("utf8") === ACTIVE_INDEX_CONTENTS;
+    return (await readBounded(path4.join(activeDirectory(directory), ACTIVE_INDEX))).toString("utf8") === ACTIVE_INDEX_CONTENTS;
   } catch {
     return false;
   }
@@ -14265,26 +14444,26 @@ async function initializeActiveIndex(directory) {
   const entries = await readdir(directory);
   if (entries.some((entry) => entry !== ACTIVE_DIRECTORY)) return;
   const active = activeDirectory(directory);
-  const filename = path3.join(active, ACTIVE_INDEX);
-  const temporary = path3.join(active, `${ACTIVE_INDEX}.${randomUUID3()}.tmp`);
+  const filename = path4.join(active, ACTIVE_INDEX);
+  const temporary = path4.join(active, `${ACTIVE_INDEX}.${randomUUID3()}.tmp`);
   let handle;
   try {
-    handle = await open3(temporary, "wx", 384);
+    handle = await open4(temporary, "wx", 384);
     await handle.writeFile(ACTIVE_INDEX_CONTENTS, "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     try {
-      await link3(temporary, filename);
+      await link4(temporary, filename);
     } catch (error43) {
-      if (errorCode3(error43) !== "EEXIST" || !await activeIndexReady(directory)) {
+      if (errorCode4(error43) !== "EEXIST" || !await activeIndexReady(directory)) {
         throw error43;
       }
     }
     await syncDirectory3(active);
   } finally {
     await handle?.close();
-    await unlink3(temporary).catch(() => void 0);
+    await unlink4(temporary).catch(() => void 0);
   }
 }
 async function readMarker(filename, expectedToolDigest) {
@@ -14295,12 +14474,12 @@ async function readMarker(filename, expectedToolDigest) {
     const marker = parseMarker(value, expectedToolDigest);
     return marker ? { kind: "VALID", marker } : { kind: "INVALID" };
   } catch (error43) {
-    return { kind: errorCode3(error43) === "ENOENT" ? "MISSING" : "INVALID" };
+    return { kind: errorCode4(error43) === "ENOENT" ? "MISSING" : "INVALID" };
   }
 }
 async function privateDirectory2(directory) {
-  await mkdir3(directory, { recursive: true, mode: 448 });
-  const metadata = await lstat2(directory);
+  await mkdir4(directory, { recursive: true, mode: 448 });
+  const metadata = await lstat3(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("journal path is not a directory");
   }
@@ -14309,20 +14488,23 @@ async function privateDirectory2(directory) {
 async function ensureJournalDirectory(root, scope) {
   const directory = journalDirectory(root, scope);
   await privateDirectory2(root);
-  await privateDirectory2(path3.dirname(path3.dirname(directory)));
-  await privateDirectory2(path3.dirname(directory));
+  await privateDirectory2(path4.dirname(path4.dirname(directory)));
+  await privateDirectory2(path4.dirname(directory));
   await privateDirectory2(directory);
   await privateDirectory2(activeDirectory(directory));
   await initializeActiveIndex(directory);
   return directory;
 }
+async function protectToolCallRequestDigest(root, unkeyedDigest) {
+  return protectLocalDigest(root, "tool-call-request-v1", unkeyedDigest);
+}
 async function syncDirectory3(directory) {
   let handle;
   try {
-    handle = await open3(directory, "r");
+    handle = await open4(directory, "r");
     await handle.sync();
   } catch (error43) {
-    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode3(error43) ?? "")) {
+    if (!["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(errorCode4(error43) ?? "")) {
       throw error43;
     }
   } finally {
@@ -14338,28 +14520,28 @@ function serializeMarker(marker) {
   return contents;
 }
 async function createMarker(directory, destination, marker) {
-  const temporary = path3.join(
+  const temporary = path4.join(
     directory,
     `.${marker.toolDigest}.${randomUUID3()}.tmp`
   );
   let handle;
   try {
-    handle = await open3(temporary, "wx", 384);
+    handle = await open4(temporary, "wx", 384);
     await handle.writeFile(serializeMarker(marker), "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     try {
-      await link3(temporary, destination);
+      await link4(temporary, destination);
     } catch (error43) {
-      if (errorCode3(error43) === "EEXIST") return "EXISTS";
+      if (errorCode4(error43) === "EEXIST") return "EXISTS";
       throw error43;
     }
     await syncDirectory3(directory);
     return "CREATED";
   } finally {
     await handle?.close();
-    await unlink3(temporary).catch(() => void 0);
+    await unlink4(temporary).catch(() => void 0);
   }
 }
 var sameMarker = (left, right) => left.schemaVersion === right.schemaVersion && (left.schemaVersion === 1 || right.schemaVersion === 2 && left.persistentToolUseId === right.persistentToolUseId) && left.bindingDigest === right.bindingDigest && left.requestDigest === right.requestDigest && left.status === right.status && left.toolDigest === right.toolDigest && left.decision.disposition === right.decision.disposition && left.decision.reasonCode === right.decision.reasonCode && left.decision.recoverable === right.decision.recoverable;
@@ -14390,9 +14572,9 @@ async function finishActiveIndexMutation(directory, marker) {
     throw new Error("active tool-call mutation mismatch");
   }
   try {
-    await unlink3(destination);
+    await unlink4(destination);
   } catch (error43) {
-    if (errorCode3(error43) === "ENOENT") return;
+    if (errorCode4(error43) === "ENOENT") return;
     throw error43;
   }
   await syncDirectory3(activeDirectory(directory));
@@ -14417,26 +14599,26 @@ async function reconcilePendingActiveIndex(directory, marker) {
   await finishActiveIndexMutation(directory, marker);
 }
 async function replaceMarker(directory, destination, marker) {
-  const temporary = path3.join(
+  const temporary = path4.join(
     directory,
     `.${marker.toolDigest}.${randomUUID3()}.tmp`
   );
   let handle;
   let committed = false;
   try {
-    handle = await open3(temporary, "wx", 384);
+    handle = await open4(temporary, "wx", 384);
     await handle.writeFile(serializeMarker(marker), "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
-    await rename2(temporary, destination);
+    await rename3(temporary, destination);
     committed = true;
     await syncDirectory3(directory);
   } catch (error43) {
     if (!committed) throw error43;
   } finally {
     await handle?.close();
-    await unlink3(temporary).catch(() => void 0);
+    await unlink4(temporary).catch(() => void 0);
   }
 }
 var sameBinding = (marker, input) => marker.bindingDigest === input.bindingDigest && marker.requestDigest === input.requestDigest && (marker.schemaVersion === 1 || marker.persistentToolUseId === persistentToolUseId(input.toolUseId));
@@ -14512,16 +14694,16 @@ async function scanToolCallJournal(root, scope) {
   const active = activeDirectory(directory);
   let directoryMetadata;
   try {
-    directoryMetadata = await lstat2(directory);
+    directoryMetadata = await lstat3(directory);
   } catch (error43) {
-    return errorCode3(error43) === "ENOENT" ? { kind: "KNOWN", calls: [] } : { kind: "UNKNOWN" };
+    return errorCode4(error43) === "ENOENT" ? { kind: "KNOWN", calls: [] } : { kind: "UNKNOWN" };
   }
   if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink() || (directoryMetadata.mode & 63) !== 0 || !await activeIndexReady(directory)) {
     return { kind: "UNKNOWN" };
   }
   let entries;
   try {
-    const metadata = await lstat2(active);
+    const metadata = await lstat3(active);
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 63) !== 0) {
       return { kind: "UNKNOWN" };
     }
@@ -14543,7 +14725,7 @@ async function scanToolCallJournal(root, scope) {
     if (!entry.isFile() || !match) return { kind: "UNKNOWN" };
     if (calls.length === MAX_ACTIVE_TOOL_CALLS) return { kind: "UNKNOWN" };
     const toolDigest = match[1];
-    const marker = await readMarker(path3.join(active, entry.name), toolDigest);
+    const marker = await readMarker(path4.join(active, entry.name), toolDigest);
     if (marker.kind !== "VALID" || marker.marker.status !== "PENDING" || !decisionLeavesNativeActionPending(marker.marker.decision)) {
       return { kind: "UNKNOWN" };
     }
@@ -14570,6 +14752,43 @@ async function scanToolCallJournal(root, scope) {
     calls.push({ marker: marker.marker, status: "COMPLETE" });
   }
   return { kind: "KNOWN", calls };
+}
+async function countActiveToolCalls(root, scope) {
+  try {
+    const scanned = await scanToolCallJournal(root, scope);
+    return scanned.kind === "KNOWN" ? scanned.calls.length : "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
+  }
+}
+async function inspectToolCallJournal(root, scope) {
+  try {
+    const scanned = await scanToolCallJournal(root, scope);
+    if (scanned.kind === "UNKNOWN") {
+      return { kind: "UNKNOWN" };
+    }
+    const completedToolUseIds = [];
+    const pendingToolUseIds = [];
+    for (const { marker, status } of scanned.calls) {
+      if (marker.schemaVersion === 1) continue;
+      (status === "COMPLETE" ? completedToolUseIds : pendingToolUseIds).push(
+        marker.persistentToolUseId
+      );
+    }
+    if ((/* @__PURE__ */ new Set([...completedToolUseIds, ...pendingToolUseIds])).size !== completedToolUseIds.length + pendingToolUseIds.length) {
+      return { kind: "UNKNOWN" };
+    }
+    return {
+      kind: "KNOWN",
+      completedToolUseIds: [...new Set(completedToolUseIds)].sort(),
+      legacyPending: scanned.calls.some(
+        ({ marker, status }) => marker.schemaVersion === 1 && status === "PENDING"
+      ),
+      pendingToolUseIds: [...new Set(pendingToolUseIds)].sort()
+    };
+  } catch {
+    return { kind: "UNKNOWN" };
+  }
 }
 async function completeToolCallPost(root, input) {
   try {
@@ -14628,6 +14847,52 @@ async function completeToolCallPost(root, input) {
     return "UNAVAILABLE";
   }
 }
+async function retireCompletedToolCall(root, input) {
+  try {
+    if (!validScope(input) || !validId(input.toolUseId)) return "UNAVAILABLE";
+    const directory = journalDirectory(root, input);
+    const toolDigest = toolDigestFor(input);
+    const current = await readMarker(
+      markerPath(directory, toolDigest),
+      toolDigest
+    );
+    const receipt = await readMarker(
+      receiptPath(directory, toolDigest),
+      toolDigest
+    );
+    if (current.kind !== "VALID" || receipt.kind !== "VALID" || current.marker.status !== "COMPLETE" || !decisionLeavesNativeActionPending(current.marker.decision) || !sameCompletion(receipt.marker, current.marker)) {
+      return "NOT_COMPLETE";
+    }
+    const active = activeMarkerPath(directory, toolDigest);
+    const indexed = await readMarker(active, toolDigest);
+    if (indexed.kind === "MISSING") {
+      if (await activeIndexReady(directory)) {
+        await finishActiveIndexMutation(directory, {
+          ...current.marker,
+          status: "PENDING"
+        });
+      }
+      return "ALREADY_RETIRED";
+    }
+    if (indexed.kind !== "VALID" || !sameCompletion(receipt.marker, indexed.marker)) {
+      return "UNAVAILABLE";
+    }
+    try {
+      await unlink4(active);
+    } catch (error43) {
+      if (errorCode4(error43) === "ENOENT") return "ALREADY_RETIRED";
+      throw error43;
+    }
+    await syncDirectory3(activeDirectory(directory));
+    await finishActiveIndexMutation(directory, {
+      ...current.marker,
+      status: "PENDING"
+    });
+    return "RETIRED";
+  } catch {
+    return "UNAVAILABLE";
+  }
+}
 async function retireCompletedToolCalls(root, scope, retainedPersistentToolUseIds) {
   try {
     if (!validScope(scope) || retainedPersistentToolUseIds.some((id) => !PERSISTENT_ID.test(id))) {
@@ -14649,9 +14914,9 @@ async function retireCompletedToolCalls(root, scope, retainedPersistentToolUseId
     const active = activeDirectory(journalDirectory(root, scope));
     for (const { marker } of completed) {
       try {
-        await unlink3(path3.join(active, `${marker.toolDigest}.json`));
+        await unlink4(path4.join(active, `${marker.toolDigest}.json`));
       } catch (error43) {
-        if (errorCode3(error43) !== "ENOENT") throw error43;
+        if (errorCode4(error43) !== "ENOENT") throw error43;
       }
     }
     await syncDirectory3(active);
@@ -14662,6 +14927,7 @@ async function retireCompletedToolCalls(root, scope, retainedPersistentToolUseId
 }
 
 // packages/core/src/credential-tool-fence.ts
+var MAX_ID_LENGTH2 = 4096;
 var BINDING_DIGEST = deterministicDigest(
   "oxrail-credential-tool-fence-binding-v1",
   {
@@ -14670,20 +14936,138 @@ var BINDING_DIGEST = deterministicDigest(
     schemaVersion: 1
   }
 );
+var TRACKING_DECISION = {
+  disposition: "PASS_THROUGH_ORIGINAL",
+  reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+  recoverable: true
+};
+var validId2 = (value) => typeof value === "string" && value.length > 0 && value.length <= MAX_ID_LENGTH2;
+var validCall = (input) => Boolean(input) && typeof input === "object" && Object.keys(input).sort().join(",") === "sessionId,toolUseId" && validId2(input.sessionId) && validId2(input.toolUseId);
+async function journalInput(root, input) {
+  if (!validCall(input)) return;
+  const unkeyedDigest = deterministicDigest(
+    "oxrail-credential-tool-fence-call-v1",
+    {
+      sessionId: input.sessionId,
+      toolUseId: input.toolUseId
+    }
+  );
+  const callDigest = await protectToolCallRequestDigest(root, unkeyedDigest);
+  if (!callDigest) return;
+  return {
+    ...CREDENTIAL_TOOL_FENCE_SCOPE,
+    bindingDigest: BINDING_DIGEST,
+    decision: TRACKING_DECISION,
+    requestDigest: callDigest,
+    toolUseId: callDigest
+  };
+}
+async function activeIndexHasCapacity(root) {
+  let active = await inspectToolCallJournal(root, CREDENTIAL_TOOL_FENCE_SCOPE);
+  if (active.kind !== "KNOWN" || active.legacyPending) return false;
+  if (active.completedToolUseIds.length > 0) {
+    if (await retireCompletedToolCalls(
+      root,
+      CREDENTIAL_TOOL_FENCE_SCOPE,
+      []
+    ) !== "RETIRED") {
+      return false;
+    }
+    active = await inspectToolCallJournal(root, CREDENTIAL_TOOL_FENCE_SCOPE);
+  }
+  const activeCount = await countActiveToolCalls(
+    root,
+    CREDENTIAL_TOOL_FENCE_SCOPE
+  );
+  return active.kind === "KNOWN" && !active.legacyPending && active.completedToolUseIds.length === 0 && activeCount !== "UNKNOWN" && activeCount < MAX_ACTIVE_TOOL_CALLS;
+}
+async function globalJournalIsKnownEmpty(root) {
+  const active = await inspectToolCallJournal(
+    root,
+    CREDENTIAL_TOOL_FENCE_SCOPE
+  );
+  return active.kind === "KNOWN" && !active.legacyPending && active.completedToolUseIds.length === 0 && active.pendingToolUseIds.length === 0;
+}
+async function runtimeRootIsMissing(root) {
+  try {
+    await lstat4(root);
+    return false;
+  } catch (error43) {
+    return error43 !== null && typeof error43 === "object" && "code" in error43 && String(error43.code) === "ENOENT";
+  }
+}
+async function credentialToolFencePre(root, input) {
+  try {
+    const initial = await readCredentialExecutionGate(root);
+    if (initial.kind === "UNINITIALIZED") {
+      return await runtimeRootIsMissing(root) ? "BYPASS" : "UNKNOWN";
+    }
+    if (initial.kind !== "KNOWN") return "UNKNOWN";
+    if (initial.state !== "OPEN") return "BLOCKED";
+    if (!validCall(input)) return "UNKNOWN";
+    return await withCredentialToolFenceLock(root, async () => {
+      const locked = await readCredentialExecutionGate(root);
+      const lockedComparison = compareCredentialExecutionGates(initial, locked);
+      if (lockedComparison !== "OPEN") {
+        return lockedComparison === "UNKNOWN" ? "UNKNOWN" : "BLOCKED";
+      }
+      const journal = await journalInput(root, input);
+      if (!journal || !await activeIndexHasCapacity(root)) {
+        return "OPEN_DEGRADED";
+      }
+      const claim = await recordToolCallPre(root, journal);
+      if (claim.kind === "MISMATCH" || claim.kind === "UNAVAILABLE") {
+        return "OPEN_DEGRADED";
+      }
+      const current = await readCredentialExecutionGate(root);
+      const comparison = compareCredentialExecutionGates(initial, current);
+      if (claim.kind === "RECORDED" && comparison === "OPEN") {
+        return "NO_LEDGER_BLOCK_TRACKED";
+      }
+      if (claim.kind === "REPLAY" && claim.journalStatus === "COMPLETE") {
+        await retireCompletedToolCall(root, journal);
+      }
+      return comparison === "UNKNOWN" ? "UNKNOWN" : "BLOCKED";
+    });
+  } catch {
+    return "UNKNOWN";
+  }
+}
+async function credentialToolFencePost(root, input) {
+  try {
+    const gate = await readCredentialExecutionGate(root);
+    if (gate.kind === "UNINITIALIZED") {
+      if (await runtimeRootIsMissing(root)) return "BYPASS";
+      if (await globalJournalIsKnownEmpty(root)) return "UNKNOWN";
+    }
+    const journal = await journalInput(root, input);
+    if (!journal) return "UNKNOWN";
+    return await withCredentialToolFenceLock(root, async () => {
+      const completed = await completeToolCallPost(root, journal);
+      if (completed === "OUT_OF_ORDER" || completed === "UNAVAILABLE") {
+        return "UNKNOWN";
+      }
+      const retired = await retireCompletedToolCall(root, journal);
+      return retired === "RETIRED" || retired === "ALREADY_RETIRED" ? "COMPLETED" : "UNKNOWN";
+    });
+  } catch {
+    return "UNKNOWN";
+  }
+}
 
 // packages/core/src/handoff-coordinator.ts
 import { createHash as createHash6, randomUUID as randomUUID4, timingSafeEqual } from "node:crypto";
 import {
   chmod as chmod4,
-  link as link4,
-  lstat as lstat3,
-  mkdir as mkdir4,
-  open as open4,
+  link as link5,
+  lstat as lstat5,
+  mkdir as mkdir5,
+  open as open5,
   readdir as readdir2,
-  rename as rename3,
-  unlink as unlink4
+  rename as rename4,
+  unlink as unlink5
 } from "node:fs/promises";
-import path4 from "node:path";
+import path5 from "node:path";
 
 // packages/core/src/policy.ts
 var pass = (reasonCode) => ({
@@ -14978,7 +15362,7 @@ function completePendingTool(state, toolUseId) {
 var BARRIER_DIRECTORY = "handoff-barriers";
 var MAX_BARRIER_BYTES = 1024;
 var TEMPORARY = /^\.lease-[0-9]+\.[a-f0-9-]{36}\.tmp$/;
-var HASH = /^[a-f0-9]{64}$/;
+var HASH2 = /^[a-f0-9]{64}$/;
 var PERSISTENT_ID2 = /^oxrail-id:[a-f0-9]{64}$/;
 function compareHandoffGates(initial, current) {
   if (initial.kind === "UNKNOWN" || current.kind === "UNKNOWN") {
@@ -14992,7 +15376,7 @@ function compareHandoffGates(initial, current) {
   }
   return initial.generation === current.generation ? "OPEN" : "CHANGED";
 }
-var errorCode4 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
+var errorCode5 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
 function digest2(domain2, ...values) {
   const hash6 = createHash6("sha256").update(domain2);
   for (const value of values) hash6.update("\0").update(String(value));
@@ -15000,7 +15384,7 @@ function digest2(domain2, ...values) {
 }
 var taskBindingDigest = (scope) => digest2("oxrail-handoff-task-binding-v1", scope.sessionId, scope.taskId);
 var safeTaskScope = (scope) => scope.sessionId.length > 0 && !scope.sessionId.includes("\0") && scope.taskId.length > 0 && !scope.taskId.includes("\0");
-var barrierDirectory = (root, scope) => path4.join(
+var barrierDirectory = (root, scope) => path5.join(
   root,
   BARRIER_DIRECTORY,
   digest2("oxrail-handoff-session-v1", scope.sessionId),
@@ -15011,7 +15395,7 @@ function parseBarrier(value) {
     throw new Error("invalid handoff barrier");
   }
   const barrier = value;
-  if (barrier.schemaVersion !== 1 || !PERSISTENT_ID2.test(barrier.handoffId ?? "") || !Number.isSafeInteger(barrier.leaseEpoch) || barrier.leaseEpoch <= 0 || !Number.isSafeInteger(barrier.createdAt) || barrier.createdAt < 0 || !Number.isSafeInteger(barrier.updatedAt) || barrier.updatedAt < barrier.createdAt || !Number.isSafeInteger(barrier.expiresAt) || barrier.expiresAt <= barrier.createdAt || !HASH.test(barrier.nonceDigest ?? "") || !HASH.test(barrier.scopeDigest ?? "") || !HASH.test(barrier.taskBindingDigest ?? "") || !HASH.test(barrier.hostProfileBindingHash ?? "") || !HASH.test(barrier.hostProfileIdHash ?? "") || barrier.browserInstanceBindingHash !== null && !HASH.test(barrier.browserInstanceBindingHash ?? "") || barrier.nativeActionFenceHash !== null && !HASH.test(barrier.nativeActionFenceHash ?? "") || barrier.tabBindingReceiptHash !== null && !HASH.test(barrier.tabBindingReceiptHash ?? "") || barrier.state === "ACTIVE" && (barrier.browserInstanceBindingHash === null || barrier.nativeActionFenceHash === null || barrier.tabBindingReceiptHash === null) || barrier.state !== "ACTIVE" && (barrier.browserInstanceBindingHash !== null || barrier.nativeActionFenceHash !== null || barrier.tabBindingReceiptHash !== null) || !["ACTIVE", "CANCELLED", "PREPARING"].includes(barrier.state ?? "")) {
+  if (barrier.schemaVersion !== 1 || !PERSISTENT_ID2.test(barrier.handoffId ?? "") || !Number.isSafeInteger(barrier.leaseEpoch) || barrier.leaseEpoch <= 0 || !Number.isSafeInteger(barrier.createdAt) || barrier.createdAt < 0 || !Number.isSafeInteger(barrier.updatedAt) || barrier.updatedAt < barrier.createdAt || !Number.isSafeInteger(barrier.expiresAt) || barrier.expiresAt <= barrier.createdAt || !HASH2.test(barrier.nonceDigest ?? "") || !HASH2.test(barrier.scopeDigest ?? "") || !HASH2.test(barrier.taskBindingDigest ?? "") || !HASH2.test(barrier.hostProfileBindingHash ?? "") || !HASH2.test(barrier.hostProfileIdHash ?? "") || barrier.browserInstanceBindingHash !== null && !HASH2.test(barrier.browserInstanceBindingHash ?? "") || barrier.nativeActionFenceHash !== null && !HASH2.test(barrier.nativeActionFenceHash ?? "") || barrier.tabBindingReceiptHash !== null && !HASH2.test(barrier.tabBindingReceiptHash ?? "") || barrier.state === "ACTIVE" && (barrier.browserInstanceBindingHash === null || barrier.nativeActionFenceHash === null || barrier.tabBindingReceiptHash === null) || barrier.state !== "ACTIVE" && (barrier.browserInstanceBindingHash !== null || barrier.nativeActionFenceHash !== null || barrier.tabBindingReceiptHash !== null) || !["ACTIVE", "CANCELLED", "PREPARING"].includes(barrier.state ?? "")) {
     throw new Error("invalid handoff barrier");
   }
   return barrier;
@@ -15030,13 +15414,13 @@ async function readHandoffGate(root, scope) {
     const directory = barrierDirectory(root, scope);
     let entries;
     try {
-      const metadata = await lstat3(directory);
+      const metadata = await lstat5(directory);
       if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 63) !== 0) {
         return { kind: "UNKNOWN" };
       }
       entries = await readdir2(directory, { withFileTypes: true });
     } catch (error43) {
-      return errorCode4(error43) === "ENOENT" ? { generation: 0, kind: "KNOWN", status: "OPEN" } : { kind: "UNKNOWN" };
+      return errorCode5(error43) === "ENOENT" ? { generation: 0, kind: "KNOWN", status: "OPEN" } : { kind: "UNKNOWN" };
     }
     const barriers = [];
     for (const entry of entries) {
@@ -15045,7 +15429,7 @@ async function readHandoffGate(root, scope) {
       if (!entry.isFile() || !match) {
         return { kind: "UNKNOWN" };
       }
-      const barrier = await readBarrier(path4.join(directory, entry.name));
+      const barrier = await readBarrier(path5.join(directory, entry.name));
       if (barrier.taskBindingDigest !== taskBindingDigest(scope) || barrier.leaseEpoch !== Number(match[1])) {
         return { kind: "UNKNOWN" };
       }
@@ -15418,33 +15802,33 @@ function runGuardPreToolUse(input) {
 
 // packages/host-openai/src/profile.ts
 import { createHash as createHash7, randomUUID as randomUUID5 } from "node:crypto";
-import path6 from "node:path";
+import path7 from "node:path";
 
 // packages/host-openai/src/bounded-file.ts
 import { constants as constants3 } from "node:fs";
-import { chmod as chmod5, lstat as lstat4, mkdir as mkdir5, open as open5 } from "node:fs/promises";
-import path5 from "node:path";
+import { chmod as chmod5, lstat as lstat6, mkdir as mkdir6, open as open6 } from "node:fs/promises";
+import path6 from "node:path";
 function relativePath(root, filename) {
-  const relative = path5.relative(path5.resolve(root), path5.resolve(filename));
-  if (relative === ".." || relative.startsWith(`..${path5.sep}`) || path5.isAbsolute(relative)) {
+  const relative = path6.relative(path6.resolve(root), path6.resolve(filename));
+  if (relative === ".." || relative.startsWith(`..${path6.sep}`) || path6.isAbsolute(relative)) {
     throw new Error("path escapes its local root");
   }
   return relative;
 }
 async function rejectSymlinkPath(root, filename) {
   const relative = relativePath(root, filename);
-  let current = path5.resolve(root);
-  for (const segment of ["", ...relative.split(path5.sep).filter(Boolean)]) {
-    if (segment) current = path5.join(current, segment);
-    const stats = await lstat4(current);
+  let current = path6.resolve(root);
+  for (const segment of ["", ...relative.split(path6.sep).filter(Boolean)]) {
+    if (segment) current = path6.join(current, segment);
+    const stats = await lstat6(current);
     if (stats.isSymbolicLink())
       throw new Error("symbolic links are not allowed");
-    if (current !== path5.resolve(filename) && !stats.isDirectory()) {
+    if (current !== path6.resolve(filename) && !stats.isDirectory()) {
       throw new Error("path ancestor is not a directory");
     }
   }
 }
-async function readBoundedRegularFile(filename, maximumBytes, root = path5.dirname(filename)) {
+async function readBoundedRegularFile(filename, maximumBytes, root = path6.dirname(filename)) {
   if (process.platform === "win32") {
     throw new Error("bounded no-follow reads are unsupported on Windows");
   }
@@ -15452,7 +15836,7 @@ async function readBoundedRegularFile(filename, maximumBytes, root = path5.dirna
     throw new TypeError("maximumBytes must be a non-negative safe integer");
   }
   await rejectSymlinkPath(root, filename);
-  const handle = await open5(
+  const handle = await open6(
     filename,
     constants3.O_RDONLY | constants3.O_NOFOLLOW | constants3.O_NONBLOCK
   );
@@ -15487,7 +15871,7 @@ var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
 var CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR = "credential activation denied: independent macOS attestation verifier unavailable";
 var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 var sha256 = (value) => createHash7("sha256").update(value).digest("hex");
-var profileDirectory = (pluginData, profileId) => path6.join(pluginData, HOSTS_DIRECTORY, profileId);
+var profileDirectory = (pluginData, profileId) => path7.join(pluginData, HOSTS_DIRECTORY, profileId);
 function validateHostProfile(value, constraints = {}) {
   const schemaVersion = value && typeof value === "object" ? value.schemaVersion : void 0;
   if (schemaVersion === 3 || schemaVersion === 4) {
@@ -15561,11 +15945,11 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   try {
     if (explicitProfilePath) {
       profilePath = explicitProfilePath;
-      profileId = path6.basename(path6.dirname(profilePath));
+      profileId = path7.basename(path7.dirname(profilePath));
     } else {
       const active = JSON.parse(
         (await readBoundedRegularFile(
-          path6.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
+          path7.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
           16384,
           pluginData
         )).toString("utf8")
@@ -15574,7 +15958,7 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
         throw new Error("invalid active profile selection");
       }
       profileId = active.profileId;
-      profilePath = path6.join(
+      profilePath = path7.join(
         profileDirectory(pluginData, profileId),
         HOST_PROFILE_FILENAME
       );
@@ -15590,11 +15974,11 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
   try {
     if (!safeProfileId(profileId))
       throw new Error("unsafe host profile identifier");
-    const readRoot = explicitProfilePath ? path6.dirname(profilePath) : pluginData;
+    const readRoot = explicitProfilePath ? path7.dirname(profilePath) : pluginData;
     const [rawProfile, rawManifest] = await Promise.all([
       readBoundedRegularFile(profilePath, 1048576, readRoot),
       readBoundedRegularFile(
-        path6.join(path6.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        path7.join(path7.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
         16384,
         readRoot
       )
@@ -15618,7 +16002,7 @@ async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath
 
 // packages/host-openai/src/registry-bundle.ts
 import { createHash as createHash8 } from "node:crypto";
-import path7 from "node:path";
+import path8 from "node:path";
 var TOOL_SCHEMA_REGISTRY_FILENAME = "tool-schema-registry.json";
 var hash5 = external_exports.string().regex(/^[a-f0-9]{64}$/i);
 var safeProfileId2 = external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
@@ -15697,24 +16081,24 @@ async function loadToolSchemaRegistryBundle(pluginData, profile) {
   } catch {
     return bypassed("Host Profile has no complete external tool registry pins");
   }
-  const directory = path7.join(pluginData, HOSTS_DIRECTORY, active.profileId);
+  const directory = path8.join(pluginData, HOSTS_DIRECTORY, active.profileId);
   let rawProfile;
   let rawRegistry;
   let rawManifest;
   try {
     [rawProfile, rawRegistry, rawManifest] = await Promise.all([
       readBoundedRegularFile(
-        path7.join(directory, HOST_PROFILE_FILENAME),
+        path8.join(directory, HOST_PROFILE_FILENAME),
         1048576,
         pluginData
       ),
       readBoundedRegularFile(
-        path7.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
+        path8.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
         1048576,
         pluginData
       ),
       readBoundedRegularFile(
-        path7.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+        path8.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
         16384,
         pluginData
       )
@@ -15848,9 +16232,9 @@ async function loadToolSchemaRegistryBundle(pluginData, profile) {
 
 // packages/host-openai/src/state.ts
 import { createHash as createHash9, randomUUID as randomUUID6 } from "node:crypto";
-import { mkdir as mkdir6, readFile, readdir as readdir3, rename as rename4, writeFile } from "node:fs/promises";
+import { mkdir as mkdir7, readFile, readdir as readdir3, rename as rename5, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import path8 from "node:path";
+import path9 from "node:path";
 var HOOK_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
@@ -15858,7 +16242,7 @@ var HOOK_EVENTS = [
   "PermissionRequest",
   "PostToolUse"
 ];
-var oxrailDataDirectory = (home = homedir()) => path8.join(home, ".oxrail");
+var oxrailDataDirectory = (home = homedir()) => path9.join(home, ".oxrail");
 var digestSessionId = (sessionId) => createHash9("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
 var digestToolUseId = (toolUseId) => createHash9("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
@@ -15868,9 +16252,9 @@ var markerNames = {
   PermissionRequest: "permission-request.json",
   PostToolUse: "post-tool-use.json"
 };
-var stateDirectory = (pluginData) => path8.join(pluginData, "setup-verification");
-var browserRouteDirectory = (pluginData) => path8.join(stateDirectory(pluginData), "browser-route");
-var markerPath2 = (pluginData, event, browserHook) => path8.join(
+var stateDirectory = (pluginData) => path9.join(pluginData, "setup-verification");
+var browserRouteDirectory = (pluginData) => path9.join(stateDirectory(pluginData), "browser-route");
+var markerPath2 = (pluginData, event, browserHook) => path9.join(
   stateDirectory(pluginData),
   `${browserHook ? "browser-" : ""}${markerNames[event]}`
 );
@@ -15882,8 +16266,8 @@ function isBrowserRouteObservation(value) {
 }
 async function recordBrowserHookPhase(pluginData, phase, observation, now = Date.now()) {
   const directory = browserRouteDirectory(pluginData);
-  await mkdir6(directory, { recursive: true, mode: 448 });
-  const destination = path8.join(
+  await mkdir7(directory, { recursive: true, mode: 448 });
+  const destination = path9.join(
     directory,
     `${observation.toolUseDigest.slice(0, 2)}.json`
   );
@@ -15903,21 +16287,21 @@ async function recordBrowserHookPhase(pluginData, phase, observation, now = Date
     ...phase === "PreToolUse" ? { preObservedAt: previous?.preObservedAt ?? observedAt } : { postObservedAt: previous?.postObservedAt ?? observedAt },
     schemaVersion: 1
   };
-  const temporary = path8.join(
+  const temporary = path9.join(
     directory,
     `.${observation.toolUseDigest}.${randomUUID6()}`
   );
   await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
-  await rename4(temporary, destination);
+  await rename5(temporary, destination);
 }
 async function recordHookMarker(pluginData, marker, now = Date.now()) {
   const directory = stateDirectory(pluginData);
-  await mkdir6(directory, { recursive: true, mode: 448 });
+  await mkdir7(directory, { recursive: true, mode: 448 });
   const destination = markerPath2(pluginData, marker.event, marker.browserHook);
-  const temporary = path8.join(
+  const temporary = path9.join(
     directory,
-    `.${path8.basename(destination)}.${randomUUID6()}`
+    `.${path9.basename(destination)}.${randomUUID6()}`
   );
   const value = {
     ...marker,
@@ -15927,7 +16311,7 @@ async function recordHookMarker(pluginData, marker, now = Date.now()) {
   };
   await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
-  await rename4(temporary, destination);
+  await rename5(temporary, destination);
 }
 
 // packages/host-openai/src/hook.ts
@@ -15936,7 +16320,8 @@ var isHookInput = (value) => {
   const input = value;
   return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string" && input.session_id.length <= 4096) && (input.tool_name === void 0 || typeof input.tool_name === "string" && input.tool_name.length <= 256) && (input.tool_use_id === void 0 || typeof input.tool_use_id === "string" && input.tool_use_id.length <= 4096) && (input.turn_id === void 0 || typeof input.turn_id === "string" && input.turn_id.length <= 4096);
 };
-var hookRuntimeStateDirectory = (pluginData) => path9.join(pluginData, "runtime-state");
+var hookRuntimeStateDirectory = (pluginData) => path10.join(pluginData, "runtime-state");
+var hookCredentialFenceStateDirectory = (pluginData) => path10.join(pluginData, "credential-fence-state");
 function hookBrowserTaskScope(sessionId) {
   const sessionDigest = digestSessionId(sessionId);
   const taskDigest = createHash10("sha256").update("oxrail-hook-browser-task-v1\0").update(sessionDigest).digest("hex");
@@ -15950,7 +16335,7 @@ async function hookDefinitionHash(pluginRoot) {
     "dist/hooks/post-tool.mjs"
   ];
   const files = await Promise.all(
-    filenames.map((filename) => readFile2(path9.join(pluginRoot, filename)))
+    filenames.map((filename) => readFile2(path10.join(pluginRoot, filename)))
   );
   const digest3 = createHash10("sha256").update("oxrail-hook-definition-v2\0");
   for (const [index, filename] of filenames.entries()) {
@@ -15960,6 +16345,30 @@ async function hookDefinitionHash(pluginRoot) {
 }
 var bypassMessage = "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. Oxrail credential protection: INACTIVE.";
 var bypassOutput = () => ({ systemMessage: bypassMessage });
+var credentialFenceOutput = (result) => {
+  const reasonCode = result === "BLOCKED" ? "OXRAIL_CREDENTIAL_FENCE_BLOCKED" : "OXRAIL_VERIFICATION_INCONCLUSIVE";
+  const explanation = result === "BLOCKED" ? "Oxrail's local credential fence did not admit this Agent tool call." : "Oxrail could not verify its local credential fence; this Agent tool call was not admitted.";
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `${reasonCode}: ${explanation} Credential protection remains INACTIVE until Host-wide isolation is verified.`
+    }
+  };
+};
+var rawToolEvent = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const event = value.hook_event_name;
+  return event === "PreToolUse" || event === "PostToolUse" ? event : void 0;
+};
+var boundedFenceId = (value) => typeof value === "string" && value.length > 0 && value.length <= 4096 ? value : "";
+var credentialFenceCall = (value) => {
+  const input = value;
+  return {
+    sessionId: boundedFenceId(input.session_id),
+    toolUseId: boundedFenceId(input.tool_use_id)
+  };
+};
 var decisionOutput = (decision) => buildPreToolUseOutput(decision);
 var inconclusiveOutput = () => decisionOutput({
   disposition: "BLOCK_BEFORE_EXECUTION",
@@ -16062,8 +16471,7 @@ async function completePostTool(runtimeRoot, scope, toolUseId) {
     };
   });
 }
-async function handleHookEvent(value, environment) {
-  if (!isHookInput(value)) return {};
+async function handleHookEventAfterCredentialFence(value, environment) {
   const now = environment.now?.() ?? Date.now();
   const sessionDigest = value.session_id ? digestSessionId(value.session_id) : null;
   const definitionHash = await hookDefinitionHash(environment.pluginRoot);
@@ -16268,6 +16676,36 @@ async function handleHookEvent(value, environment) {
     }
     return bypassOutput();
   }
+}
+async function handleHookEvent(value, environment) {
+  const toolEvent = rawToolEvent(value);
+  if (!toolEvent) {
+    return isHookInput(value) ? handleHookEventAfterCredentialFence(value, environment) : {};
+  }
+  const root = hookCredentialFenceStateDirectory(environment.pluginData);
+  const call = credentialFenceCall(value);
+  if (toolEvent === "PreToolUse") {
+    const admission = await credentialToolFencePre(root, call);
+    if (admission === "BYPASS") {
+      return isHookInput(value) ? handleHookEventAfterCredentialFence(value, environment) : {};
+    }
+    if (admission === "BLOCKED" || admission === "UNKNOWN") {
+      return credentialFenceOutput(admission);
+    }
+    if (admission === "OPEN_DEGRADED") {
+      if (!isHookInput(value)) return bypassOutput();
+      const output2 = await handleHookEventAfterCredentialFence(
+        value,
+        environment
+      );
+      return Object.keys(output2).length === 0 ? bypassOutput() : output2;
+    }
+    if (!isHookInput(value)) return credentialFenceOutput("UNKNOWN");
+    return handleHookEventAfterCredentialFence(value, environment);
+  }
+  const completion = await credentialToolFencePost(root, call);
+  const output = isHookInput(value) ? await handleHookEventAfterCredentialFence(value, environment) : {};
+  return completion === "UNKNOWN" ? bypassOutput() : output;
 }
 async function readStdin(maximumBytes = 1048576) {
   const chunks = [];

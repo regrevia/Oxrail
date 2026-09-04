@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Wired the fixture-only credential fence through every Hook-visible Pre/Post tool event before profile or payload classification, using a dedicated opt-in state root and one mutex shared with gate transitions; only real Post events settle tracked calls, while INACTIVE bootstrap leaves the fence unarmed and lock-held OPEN journal faults preserve Native execution with explicit `BYPASSED/INACTIVE` without weakening mutex failures.
 - Added the single-attempt locked Handoff completion consume/CAS: it revalidates the active barrier, bounded journal, global exclusive-tab lease, suspended Agent lanes, fresh same-tab receipt, monotonic deadlines, and atomically commits only a digest marker with Human-owned `HANDOFF_VERIFYING`; a bounded process-local attempt ledger prevents fixture retries, while runtime remains non-authorizing until real Host transport and challenge-ledger evidence exist.
 - Added a runtime-only non-secret Handoff verification sample and pure completion-candidate gate based on authenticated active probes, receiver monotonic time, continuous origin-only coverage, and a required later locked Core recheck; it cannot verify, resume, or release the user lease.
 - Split minimal Agent-facing Handoff input/result from strict runtime-only Host request, completion, and result contracts; only the exactly equivalent tool-input JSON Schema is published, all validation is non-authorizing, and Handoff remains inactive.
@@ -20,7 +21,7 @@ All notable project changes are documented here. The normative specification his
 - Bound credential provisioning to one allowlisted ID, the active real-tab Handoff scope, a fixed registry, a non-authorizing fixture ticket, and a fixed secret-free public result.
 - Added an explicit, input-free macOS Keychain synthetic round-trip probe with fixed secret-free output and cleanup on every post-locator path; it remains fixture-only and cannot activate Credential protection.
 - Added a durable, fail-closed credential execution gate ledger with monotonic prepare/active/cleanup transitions, distinct cleanup evidence, bounded private state, conservative crash recovery, and exact replay detection; it remains fixture-only and is not authorization or attestation.
-- Added a fixture-only global Credential Tool Fence primitive with locally keyed call identities, a serialized 256-marker active ceiling across legacy and current schemas, exact gate snapshot checks, durable Post cleanup, and bounded quiescence reporting; it is not connected to Hooks and cannot satisfy G15.
+- Added a fixture-only global Credential Tool Fence primitive with locally keyed call identities, a serialized 256-marker active ceiling across legacy and current schemas, exact gate snapshot checks, durable Post cleanup, and bounded quiescence reporting; this local primitive alone cannot satisfy G15.
 
 ## [0.1.0-alpha.0] - 2026-09-04
 

@@ -15,6 +15,8 @@ import {
   completePendingTool,
   completeToolCallPost,
   compareHandoffGates,
+  credentialToolFencePost,
+  credentialToolFencePre,
   createLocalDigestProtector,
   createBrowserTaskState,
   migrateLegacyActionSignatureBaseline,
@@ -83,6 +85,9 @@ const isHookInput = (value: unknown): value is HookInput => {
 export const hookRuntimeStateDirectory = (pluginData: string): string =>
   path.join(pluginData, "runtime-state");
 
+export const hookCredentialFenceStateDirectory = (pluginData: string): string =>
+  path.join(pluginData, "credential-fence-state");
+
 export function hookBrowserTaskScope(sessionId: string) {
   const sessionDigest = digestSessionId(sessionId);
   const taskDigest = createHash("sha256")
@@ -120,6 +125,45 @@ const bypassMessage =
   "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. " +
   "Oxrail credential protection: INACTIVE.";
 const bypassOutput = (): HookOutput => ({ systemMessage: bypassMessage });
+
+const credentialFenceOutput = (result: "BLOCKED" | "UNKNOWN"): HookOutput => {
+  const reasonCode =
+    result === "BLOCKED"
+      ? "OXRAIL_CREDENTIAL_FENCE_BLOCKED"
+      : "OXRAIL_VERIFICATION_INCONCLUSIVE";
+  const explanation =
+    result === "BLOCKED"
+      ? "Oxrail's local credential fence did not admit this Agent tool call."
+      : "Oxrail could not verify its local credential fence; this Agent tool call was not admitted.";
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `${reasonCode}: ${explanation} Credential protection remains INACTIVE until Host-wide isolation is verified.`,
+    },
+  };
+};
+
+const rawToolEvent = (
+  value: unknown,
+): "PostToolUse" | "PreToolUse" | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const event = (value as { hook_event_name?: unknown }).hook_event_name;
+  return event === "PreToolUse" || event === "PostToolUse" ? event : undefined;
+};
+
+const boundedFenceId = (value: unknown): string =>
+  typeof value === "string" && value.length > 0 && value.length <= 4_096
+    ? value
+    : "";
+
+const credentialFenceCall = (value: unknown) => {
+  const input = value as { session_id?: unknown; tool_use_id?: unknown };
+  return {
+    sessionId: boundedFenceId(input.session_id),
+    toolUseId: boundedFenceId(input.tool_use_id),
+  };
+};
 
 const decisionOutput = (decision: PolicyDecision): HookOutput =>
   buildPreToolUseOutput(decision);
@@ -282,13 +326,10 @@ async function completePostTool(
   });
 }
 
-/** Handle one host event. Any error is deliberately fail-open in runHookCli. */
-export async function handleHookEvent(
-  value: unknown,
+async function handleHookEventAfterCredentialFence(
+  value: HookInput,
   environment: HookEnvironment,
 ): Promise<HookOutput> {
-  if (!isHookInput(value)) return {};
-
   const now = environment.now?.() ?? Date.now();
   const sessionDigest = value.session_id
     ? digestSessionId(value.session_id)
@@ -544,6 +585,49 @@ export async function handleHookEvent(
     }
     return bypassOutput();
   }
+}
+
+/** Handle one host event. Any error is deliberately fail-open in runHookCli. */
+export async function handleHookEvent(
+  value: unknown,
+  environment: HookEnvironment,
+): Promise<HookOutput> {
+  const toolEvent = rawToolEvent(value);
+  if (!toolEvent) {
+    return isHookInput(value)
+      ? handleHookEventAfterCredentialFence(value, environment)
+      : {};
+  }
+
+  const root = hookCredentialFenceStateDirectory(environment.pluginData);
+  const call = credentialFenceCall(value);
+  if (toolEvent === "PreToolUse") {
+    const admission = await credentialToolFencePre(root, call);
+    if (admission === "BYPASS") {
+      return isHookInput(value)
+        ? handleHookEventAfterCredentialFence(value, environment)
+        : {};
+    }
+    if (admission === "BLOCKED" || admission === "UNKNOWN") {
+      return credentialFenceOutput(admission);
+    }
+    if (admission === "OPEN_DEGRADED") {
+      if (!isHookInput(value)) return bypassOutput();
+      const output = await handleHookEventAfterCredentialFence(
+        value,
+        environment,
+      );
+      return Object.keys(output).length === 0 ? bypassOutput() : output;
+    }
+    if (!isHookInput(value)) return credentialFenceOutput("UNKNOWN");
+    return handleHookEventAfterCredentialFence(value, environment);
+  }
+
+  const completion = await credentialToolFencePost(root, call);
+  const output = isHookInput(value)
+    ? await handleHookEventAfterCredentialFence(value, environment)
+    : {};
+  return completion === "UNKNOWN" ? bypassOutput() : output;
 }
 
 async function readStdin(maximumBytes = 1_048_576): Promise<unknown> {

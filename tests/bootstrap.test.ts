@@ -20,8 +20,10 @@ import {
 } from "../packages/host-openai/src/bootstrap.js";
 import {
   handleHookEvent,
+  hookCredentialFenceStateDirectory,
   runDoctor,
 } from "../packages/host-openai/src/index.js";
+import { readCredentialExecutionGate } from "../packages/core/src/index.js";
 import {
   loadHostProfile,
   validateHostProfile,
@@ -94,6 +96,11 @@ describe("host profile bootstrap", () => {
     });
     expect(profile.route.toolSchemaRegistryHash).toBeUndefined();
     expect(profile.route.toolSchemaRegistryEvidenceId).toBeUndefined();
+    await expect(
+      readCredentialExecutionGate(
+        hookCredentialFenceStateDirectory(pluginData),
+      ),
+    ).resolves.toEqual({ kind: "UNINITIALIZED" });
     expect(validateHostProfile(profile).valid).toBe(true);
     const profilePath = path.join(
       pluginData,
@@ -232,6 +239,11 @@ describe("host profile bootstrap", () => {
     });
 
     expect(profile.setup.chromeComputerUseDetectable).toBe("unknown");
+    await expect(
+      readCredentialExecutionGate(
+        hookCredentialFenceStateDirectory(pluginData),
+      ),
+    ).resolves.toEqual({ kind: "UNINITIALIZED" });
     const report = await runDoctor({
       currentIdentity: {
         surface: linuxInventory.surface,

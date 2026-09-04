@@ -188,7 +188,7 @@ describe("credential tool fence", () => {
         sessionId: "ceiling-session",
         toolUseId: "ceiling-call",
       }),
-    ).resolves.toBe("UNKNOWN");
+    ).resolves.toBe("OPEN_DEGRADED");
     expect(record).not.toHaveBeenCalled();
   });
 
@@ -232,7 +232,10 @@ describe("credential tool fence", () => {
       }),
     ]);
 
-    expect(results.sort()).toEqual(["NO_LEDGER_BLOCK_TRACKED", "UNKNOWN"]);
+    expect(results.sort()).toEqual([
+      "NO_LEDGER_BLOCK_TRACKED",
+      "OPEN_DEGRADED",
+    ]);
     expect(record).toHaveBeenCalledTimes(1);
   });
 
@@ -259,7 +262,7 @@ describe("credential tool fence", () => {
     await expect(credentialToolFencePost(root, call)).resolves.toBe("UNKNOWN");
   });
 
-  it("settles a new registration when the complete OPEN snapshot changes", async () => {
+  it("keeps a changed-snapshot registration pending until a real Post", async () => {
     const root = await makeRoot();
     await executionGate.initializeCredentialExecutionGate(root, 1);
     const initial = await executionGate.readCredentialExecutionGate(root);
@@ -273,8 +276,15 @@ describe("credential tool fence", () => {
 
     await expect(credentialToolFencePre(root, call)).resolves.toBe("BLOCKED");
     vi.restoreAllMocks();
+    await setPreparing(root);
+    await expect(readCredentialToolFenceQuiescence(root)).resolves.toBe(
+      "PENDING",
+    );
     await expect(credentialToolFencePost(root, call)).resolves.toBe(
       "COMPLETED",
+    );
+    await expect(readCredentialToolFenceQuiescence(root)).resolves.toBe(
+      "QUIESCENT",
     );
   });
 
