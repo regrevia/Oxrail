@@ -133,7 +133,7 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HOST-009**：安装验证不得强制下一次真实浏览器任务；有无害 synthetic probe 时优先使用，否则首次真实 Browser 调用只可被动记录 Hook 命中并原样透传。
 - **REQ-HOST-010**：安装生命周期只使用 `INSTALLED → CONFIGURED → VERIFIED`；等待首个真实 Browser 调用时显示 `READY — awaiting first native browser call`。
 - **REQ-HOST-011**：Oxrail Hook 缺失、未信任、被禁用、超时或故障时必须让 Native Chrome Computer Use fail-open，并明确显示 `Oxrail optimization unavailable / BYPASSED`。
-- **REQ-HOST-012**：Safety/Handoff 只有在对应能力已验证且当前实际生效时才可显示 `ACTIVE`；否则必须显示 `INACTIVE` 及原因，不得暗示 secret/handoff protection 正在工作。
+- **REQ-HOST-012**：Safety/Handoff/Credential protection 只有在对应能力由独立 verifier 验证且当前实际生效时才可显示 `ACTIVE`；否则必须显示 `INACTIVE` 及原因，不得暗示 secret/handoff protection 正在工作。
 - **REQ-HOST-013**：Secure Credential Channel 必须按 `OS + helper build/signature + template registry + consumer registry` 独立验证；首版只支持 macOS，Windows 默认为 `UNSUPPORTED`。
 
 ### 动作与结果

@@ -3,7 +3,7 @@
   "generated_at": "2026-09-04",
   "canonical_file": "OXRAIL_SPEC.md",
   "spec_version": "1.0.0",
-  "spec_sha256": "a0c55d45be5944f5609eb38192916513a9dd421e6ab3d6b638b1e7c1c53a3c1b",
+  "spec_sha256": "b2769f1dba368c1fe860ab2d9d0e547dc4ff8ec5383bc45bac53f89ec6f7843e",
   "counts": {
     "sections": 51,
     "requirements": 123,
@@ -4786,7 +4786,7 @@
       ]
     },
     "REQ-HOST-012": {
-      "text": "Safety/Handoff 只有在对应能力已验证且当前实际生效时才可显示 ACTIVE；否则必须显示 INACTIVE 及原因，不得暗示 secret/handoff protection 正在工作。",
+      "text": "Safety/Handoff/Credential protection 只有在独立验证且当前实际生效时才可显示 ACTIVE；否则必须显示 INACTIVE 及原因。",
       "section": "SEC-00",
       "line": 134,
       "explicit_work_packages": [
