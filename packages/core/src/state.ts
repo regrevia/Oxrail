@@ -2,6 +2,7 @@ import {
   BrowserTaskStateSchema,
   type ActionEnvelope,
   type BrowserTaskState,
+  type HandoffVerificationMarker,
   type HostMode,
   type PolicyDecision,
   type StateFingerprint,
@@ -35,6 +36,19 @@ export interface NewBrowserTaskState {
   taskId: string;
   hostProfileId: string;
   mode: HostMode;
+}
+
+function incrementCounter(value: number, name: string): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw new RangeError(
+      `${name} cannot advance beyond the safe integer range`,
+    );
+  }
+  return value + 1;
 }
 
 function assertActionSignatureKey(
@@ -133,7 +147,7 @@ export function stageToolDecision(
     },
     actionSignatureKeyId: signatureProtector.keyId,
     pendingNativeActionIds,
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -154,7 +168,7 @@ export function completePendingTool(
     pendingNativeActionIds: state.pendingNativeActionIds
       .map(canonicalPersistentToolUseId)
       .filter((pendingId) => pendingId !== persistentId),
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -190,7 +204,7 @@ export function recordActionOutcome(
   if (!executed) {
     return BrowserTaskStateSchema.parse({
       ...state,
-      stateVersion: state.stateVersion + 1,
+      stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
     });
   }
   assertActionSignatureKey(state, signatureProtector);
@@ -209,9 +223,9 @@ export function recordActionOutcome(
     noProgressCount: outcome.meaningfulProgress
       ? 0
       : sameAsLast
-        ? state.noProgressCount + 1
+        ? incrementCounter(state.noProgressCount, "noProgressCount")
         : 1,
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -245,9 +259,50 @@ export function activateUserLease(
     ...state,
     phase: "USER_LEASE_ACTIVE",
     activeHandoffId: persistentHandoffId(handoffId),
-    leaseEpoch: state.leaseEpoch + 1,
+    leaseEpoch: incrementCounter(state.leaseEpoch, "leaseEpoch"),
     pointerOwner: "HUMAN",
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
+  });
+}
+
+export interface BeginHandoffVerificationInput {
+  currentDocumentBinding: string;
+  currentOrigin: string;
+  expectedStateVersion: number;
+  handoffId: string;
+  leaseEpoch: number;
+  marker: HandoffVerificationMarker;
+}
+
+/** Atomically records the fixture-only consume proof while Human keeps ownership. */
+export function beginHandoffVerification(
+  state: BrowserTaskState,
+  input: BeginHandoffVerificationInput,
+): BrowserTaskState {
+  assertVersion(state, input.expectedStateVersion);
+  if (
+    state.phase !== "USER_LEASE_ACTIVE" ||
+    state.pointerOwner !== "HUMAN" ||
+    !state.activeHandoffId ||
+    state.activeHandoffId !== persistentHandoffId(input.handoffId) ||
+    state.leaseEpoch !== input.leaseEpoch ||
+    input.marker.leaseEpoch !== input.leaseEpoch ||
+    state.pendingNativeActionIds.length > 0 ||
+    state.handoffVerificationMarker !== undefined
+  ) {
+    throw new Error(
+      "Only the unconsumed active Human lease may begin verification",
+    );
+  }
+  const { currentUrlKey: _currentUrlKey, ...safeState } = state;
+  return BrowserTaskStateSchema.parse({
+    ...safeState,
+    currentOrigin: input.currentOrigin,
+    documentBinding: input.currentDocumentBinding,
+    handoffVerificationMarker: input.marker,
+    phase: "HANDOFF_VERIFYING",
+    pointerOwner: "HUMAN",
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -274,10 +329,13 @@ export function beginResume(
     ...safeState,
     phase: "RESUMING",
     pointerOwner: "NONE",
-    revision: state.revision + 1,
-    targetCacheEpoch: state.targetCacheEpoch + 1,
+    revision: incrementCounter(state.revision, "revision"),
+    targetCacheEpoch: incrementCounter(
+      state.targetCacheEpoch,
+      "targetCacheEpoch",
+    ),
     pendingNativeActionIds: [],
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -302,6 +360,6 @@ export function finishResume(
     ...safeState,
     phase: "RUNNING",
     pointerOwner: "NATIVE",
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }

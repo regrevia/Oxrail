@@ -210,7 +210,9 @@ function alignStateToProfile(
   if (
     saved.phase !== "RUNNING" ||
     saved.pointerOwner !== "NATIVE" ||
-    saved.pendingNativeActionIds.length > 0
+    saved.pendingNativeActionIds.length > 0 ||
+    saved.revision === Number.MAX_SAFE_INTEGER ||
+    saved.targetCacheEpoch === Number.MAX_SAFE_INTEGER
   ) {
     return undefined;
   }

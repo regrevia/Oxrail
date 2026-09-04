@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   activateUserLease,
   createBrowserTaskState,
-  evaluateCompletionCandidate,
   persistentHandoffId,
   prepareHandoffLease,
   transitionHandoffLease,
-  type CompletionCandidateInput,
 } from "../packages/core/src/index.js";
+import {
+  evaluateCompletionCandidate,
+  type CompletionCandidateInput,
+} from "../packages/core/src/handoff-completion.js";
 
 const nonce = "A".repeat(43);
 const contextHash = "a".repeat(64);

@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.14
+# Oxrail — 唯一实现规范（SPEC）v1.0.15
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.14
+  spec_version: 1.0.15
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -179,6 +179,7 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HO-017**：USER lease 激活必须依赖新鲜 Host-minted same-tab/browser-instance/native-action-fence receipt；receipt 必须绑定本代 admission generation，且只能在 Host 确认该 barrier 之前已准入或排队的 native Browser calls 全部终结后签发；裸 `tabId`、Agent/page 声明或仅本地 journal 清空不是权限。
 - **REQ-HO-018**：Handoff 使用 lock 前 write-ahead、单调 generation、终态 tombstone 与 Browser Pre 持锁前后复读，阻断并发/ABA 穿透。
 - **REQ-HO-019**：Handoff activation 只扫描有界 active ToolCall index；pending 发布必须以 mutation intent 覆盖 canonical/index crash window，Post 与 task state 在同一锁内协调，state 提交后才可回收完成项；缺失、超限、旧格式或不一致索引一律 `UNKNOWN` 并停用 Handoff，不得猜测为空。
+- **REQ-HO-020**：completion candidate 只能由 coordinator 在同一内部调用中生成并经单次 task lock 消费；锁内必须重验 current state、ACTIVE barrier、Host-wide exclusive-tab/fence receipt 与同一真实 tab，再以一次 CAS 原子写入 digest-only consume marker 和 `HANDOFF_VERIFYING + HUMAN`。candidate/nonce 禁止持久化、记录、外部提交、排队重试或复用；任一不确定性保持 Human ownership。
 
 ### 安全凭据通道
 
@@ -4068,9 +4069,53 @@ FAILED_SAFE
 READY_FOR_LOCKED_VERIFY
 ```
 
-`READY_FOR_LOCKED_VERIFY` 不是 `VERIFIED` 或 resume authority。它必须携带仅供 Core 使用的 exact `handoffId/sessionId/taskId/leaseEpoch/nonce/tabId/initialDocumentBinding/observedDocumentBinding/origin/expectedStateVersion`、verifier context/state epoch、两次 probe sequence、第二次 receiver acceptance time、phase/basis、Handoff monotonic deadline 与 automatic candidate deadline；除这些 control-plane binding 外不含页面内容或用户 secret。candidate 及其 nonce 禁止进入模型、日志或持久化，且不得跨 event loop 排队或复用。第二份 sample 后，Core 必须立即取得 per-task lock，确认这些 sequence 尚未被 candidate consume ledger 使用，再重新读取当前 task/lease/gate/barrier/active ToolCall index，把全部 identity/document/origin/stateVersion 与 candidate 逐字段精确核对（nonce 使用常量时间比较），确认无 competing lease，重新读取同一真实 tab 的 origin/document binding，并仅从 candidate 的 `expectedStateVersion` 执行 CAS 原子进入 `HANDOFF_VERIFYING`，同时一次性消费 candidate binding；任一 deadline 到期、重复、mutation、mismatch 或 crash recovery 均保持 Human ownership 或安全失败。浏览器 sample 无权上报或证明 `leaseConflict=NONE`。candidate evaluator 禁止生成 `HandoffResult`、调用 `transitionHandoffLease`/`beginResume`/`finishResume`、恢复 tab、释放 USER lease、归还 Agent ownership 或标记任何 VERIFIED 状态。
+`READY_FOR_LOCKED_VERIFY` 不是 `VERIFIED` 或 resume authority。它必须携带仅供 Core 使用的 exact `handoffId/sessionId/taskId/leaseEpoch/nonce/tabId/initialDocumentBinding/observedDocumentBinding/origin/expectedStateVersion`、verifier context/state epoch、两次 probe sequence、第二次 receiver acceptance time、phase/basis、Handoff monotonic deadline 与 automatic candidate deadline；除这些 control-plane binding 外不含页面内容或用户 secret。READY candidate 作为整体及其中的 nonce 禁止离开 Core 进入模型、日志、通用 IPC、持久化或外部/跨调用队列，也不得复用；本限制不禁止 19.9 strict authenticated Handoff protocol 为建立 request/signal/sample binding 而在其限定 transport 内传递 nonce。第二份 sample 后，Core coordinator 必须在同一内部调用中立即开始 19.10A 的单次 locked consume；除该有界 lock/receipt 调用外不得把 candidate 交还 event loop 或调度重试。浏览器 sample 无权上报或证明 `leaseConflict=NONE`。candidate evaluator 禁止生成 `HandoffResult`、调用 `transitionHandoffLease`/`beginResume`/`finishResume`、恢复 tab、释放 USER lease、归还 Agent ownership 或标记任何 VERIFIED 状态。
 
 不确定时保持用户租约并显示一键 Done/Cancel，不自动交回。
+
+### 19.10A Locked completion consume / CAS
+
+`READY_FOR_LOCKED_VERIFY` 只能由 Core coordinator 在同一进程、同一内部 control flow 中调用 `evaluateCompletionCandidate()` 后取得。外部 Host、extension、Agent、page、IPC 或普通调用方不得提交、反序列化或重建 READY candidate；对外形似 READY 的对象一律是非可信输入。coordinator 必须先 strict-parse 并复制唯一允许的 candidate 字段，额外字段直接拒绝且不得被序列化、散列或写进错误；随后立即发起一次且仅一次的 task-lock acquisition。禁止使用 retry helper、延迟队列、background job 或在 lock conflict/存储结果不确定后重试同一 candidate；每次 consume 尝试无论结果如何都终结该 candidate 并丢弃引用，只有新的 active probes 可以产生下一 candidate。
+
+单次 task lock 内的检查顺序固定为：
+
+1. 重读 `BrowserTaskState`，要求 `USER_LEASE_ACTIVE + HUMAN`、exact active handoff/session/task/lease epoch、空 pending native action、current Host Profile `VALID`，并要求 `stateVersion` 与 candidate 精确相等且仍可安全递增；
+2. 重读 Handoff gate，要求 `KNOWN + ACTIVE + generation=leaseEpoch`；
+3. 重读本代 `ACTIVE` barrier，逐项核对 persistent handoff/task/scope digest、nonce digest、Host Profile binding、browser-instance binding、activation tab-binding receipt 与 native-action fence；原始 nonce 只在内存中使用常量时间比较；
+4. 使用与 activation 相同的 bounded active ToolCall index 检查 journal 与 state 一致，要求 inspection 为 `KNOWN`，且没有 legacy pending、仍被 state 引用或未终结的 pending call、dirty intent、marker/receipt mutation 或 ceiling overflow；已经完成且 durable state 不再引用的 crash residue 可以保留并由既有安全清理路径退休，不能仅因存在这种 residue 就拒绝 candidate；本地空 journal 不能代替 Host fence；
+5. 在仍持有 task lock 时，通过当前 Host Profile 认证的有界 callback 发出新的 one-shot challenge，取得 fresh completion fence/receipt；
+6. callback 返回后再次读取 receiver monotonic clock，并在任何 state write 前重验全部 binding、consume high-water 和 deadline。
+
+fresh completion fence/receipt 必须由实际认证的 Host verifier/transport 产生，并绑定 strict canonical candidate digest、current Host Profile、同一 browser instance、原 activation tab-binding receipt、handoff/session/task/scope/tab、本代 admission generation、当前 verifier context/state epoch 及组成 candidate 的两次已接受 probe sequence。它还必须由 Host-wide authority 证明：该 `(Host Profile, browser instance, tab)` 的 global exclusive-tab lease 仍由当前 handoff 唯一持有，Agent browser action lane 与 observation lane 均为 `SUSPENDED`，且 fresh completion fence 之前已准入或排队的相关调用全部终结。completion/tab/navigation/redirect/sensitive 状态只能使用 19.9 的固定非敏感枚举，不得携带 sender time。receipt 中自报的 Hash、布尔值、`tabId`、`HELD` 或 `SUSPENDED` 字符串本身不构成 authority；若 Host 不能证明跨 task/session 的 global exclusivity 或所有 action/observation bypass，locked consume 必须失败并保持 Handoff `INACTIVE`。
+
+callback 只可返回 control-plane binding、canonical current origin 与 opaque current document binding，禁止返回完整 URL/path/query、页面文本、DOM、selector、字段值、输入事件、clipboard、Cookie、Token、screenshot 或用户 secret。challenge、完整 receipt 与 candidate 只存在于本次调用内；不得持久化或记录。current receipt 必须精确引用 barrier 中的 activation receipt/browser instance/generation，并证明 tab incarnation 未关闭或复用。current origin 必须仍命中 Host-derived top/redirect allowlist，且 current origin/document/context/state epoch/probe pair 必须与 candidate 精确一致；允许的页面变化若已使 candidate stale，只能保持 Human 并重新采样，不能把“仍在 allowlist”当成完成证明。
+
+所有 expiry/freshness 判断只使用当前进程、当前 monotonic epoch 的 receiver clock。candidate 中的 deadline 必须与 coordinator 保存的原始 runtime deadline 精确相等，不能自行延长；在完成所有异步 callback 和重读之后，最后一次 `now` 必须同时满足 `now <= handoffDeadlineAtMonotonicMs` 与 `now <= automaticCandidateDeadlineAtMonotonicMs`。wall clock、wire `observedAt`、barrier wall-time expiry 或重启后的时间换算不能替代该判断。clock rollback、epoch 变化、非安全整数或 overflow 均失败并保持 Human。
+
+只有上述检查全部成功时，coordinator 才能以 candidate 的 `expectedStateVersion` 执行一次 CAS，并在同一个 `BrowserTaskState` temporary-file `fsync + rename + directory fsync` commit 中同时写入：
+
+```text
+phase = HANDOFF_VERIFYING
+pointerOwner = HUMAN
+activeHandoffId / leaseEpoch = unchanged
+pendingNativeActionIds = []
+currentOrigin = fresh canonical origin
+documentBinding = persistent digest of fresh opaque document binding
+stateVersion = expectedStateVersion + 1
+handoffVerificationMarker = strict digest-only marker
+```
+
+禁止使用独立 sidecar 先后写 marker 与 state。digest-only marker 只包含固定 `authority="FIXTURE_ONLY_NON_AUTHORIZING"`、schema version、lease epoch、domain-separated `candidateDigest/activationAnchorDigest/currentTabReceiptDigest`、verifier context binding Hash、state epoch、first/second probe sequence 以及固定 `basis/phaseSignal` 枚举；不得包含 raw nonce、完整 candidate/receipt、原始 handoff/session/task/document binding、页面内容、secret 或 monotonic timestamp。`candidateDigest` 只对 strict canonical candidate 的已知字段计算，且必须覆盖 nonce、全部 locked/verification binding、basis、phase 与两条 deadline；不得对带额外字段的 unknown object 直接散列。marker 与其 authority 只是一次性 consume/high-water 事实，不是 verification、resume 或 release authority。
+
+同一 verifier context 中，新 pair 的 first sequence 必须严格大于已持久 marker 的 second sequence；相同 candidate digest、相同/重叠 pair、旧 stateVersion、旧 context/channel/monotonic epoch、旧 activation receipt、旧 browser instance 或旧 lease generation 一律终结为 replay/stale，state 不变。不同 context 只有在 fresh authenticated channel/monotonic epoch 与全部 Host binding 重新建立后才可取代 high-water；context identifier 永不复用。该 high-water 是未来 verification-inconclusive retry 的前置合同；当前 foundation slice 不实现 `HANDOFF_VERIFYING → USER_LEASE_ACTIVE` retry，也不得借 marker 自动生成新 candidate。
+
+当前 fixture foundation 还必须以 `handoff/session/task/lease/nonce/tab/initial-document/verifier-context` 的域分离 digest 为键维护最多 256 个进程内 context high-water，并在第一次 lock/receipt 尝试前同步把 second probe sequence 登记为该 context 的 attempted-through；相同或 first sequence 不大于 high-water 的重叠 pair 一律为 replay，即使 caller 改变 basis/phase/deadline 等其它 candidate 字段也不能绕过。同一进程内即使第一次 observer 失败、超时或 lock conflict，也不得再次消费该 pair；只有严格更新的 active probe pair 可重试。达到 context ceiling 后，任何新 context 必须 `FAILED_SAFE`；已登记 context 只可继续严格更高的 pair，禁止淘汰旧项换取新 context。该 map 不持久化且不能解决多进程或重启重放，只是 non-authorizing fixture 的最小防误用措施；生产路径必须以 authenticated one-shot challenge/acceptance ledger 替代，且不能把该 map 当成权限证据。
+
+原子 commit 的 crash truth 只允许两种：rename 前仍是原 `USER_LEASE_ACTIVE` 且没有新 marker；rename 后是 `HANDOFF_VERIFYING + HUMAN + 新 marker`。若 `fsync`、返回或进程终止使 commit 结果不确定，调用方只能重读状态，不能重试 candidate。重启使所有内存 candidate、challenge ledger、receipt 与 monotonic deadline 失效；已提交 marker 只证明 candidate 已消费，重启后必须保持 Human/ACTIVE gate，恢复 UI 并重新建立 Host receipt 与验证，或由 authenticated Cancel 终止，绝不能凭 marker 自动标记 `VERIFIED` 或恢复 Agent。
+
+该 foundation 的输出只允许固定 `KEEP_USER_LEASE | CANCEL_REQUESTED | FAILED_SAFE | FIXTURE_ONLY_HANDOFF_VERIFYING | FIXTURE_ONLY_REPLAY`，每个分支都必须携带固定 `authority=FIXTURE_ONLY_NON_AUTHORIZING` 与 `activation=INACTIVE`，且不得包含 candidate binding、nonce、receipt、origin/document 或自由文本；reason 只能是固定非敏感 enum。它不得生成 `HandoffResult`、更新 lease 为 released、恢复 tab、调用 `beginResume`/`finishResume`、交付 continuation 或归还 Agent ownership。任一 lock conflict、deadline、current-tab mutation、closed/reused tab、unexpected origin、competing lease、Host/barrier/journal/receipt mismatch、存储错误或 crash recovery 都必须保持现有 Human ownership 与 ACTIVE barrier，或进入同等严格的显式 user-lease recovery；相同已提交 marker 的准确 replay 只能返回非授权的 `FIXTURE_ONLY_REPLAY`，不能重复写 state 或推进流程。已激活的安全 lease 不得按普通 Hook fail-open 规则放行 Agent。
+
+当前 runtime locked-consume foundation 只允许 build-fixed `http://127.0.0.1:4173` controlled fixture；其 runtime-only strict receipt 和 marker 的 `authority` 必须固定为 `FIXTURE_ONLY_NON_AUTHORIZING`，公开能力固定报告 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`。receipt 中的 `candidateDigest`、activation anchors、fresh fence/receipt Hash、`exclusiveTabLease=HELD`、双 lane `SUSPENDED`、tab/document/origin、verifier context/epoch/sequence 与 fixed completion/tab/navigation/redirect/sensitive enums 只验证 fixture 结构，不能自证真实 Host authority；receipt 不含 sender time。该 foundation 不得接入 production Hook、extension、Doctor/Profile activation 或真实账户。只有真实 Host verifier、authenticated transport、one-shot challenge/acceptance ledger、Host-wide exclusive-tab lease 与 action/observation completion fence 全部实现并通过当前 Host Profile Gate 后，才可允许其它 origin 或令 Handoff 进入 `ACTIVE`。
 
 ## 19.11 标签页恢复
 
@@ -4187,6 +4232,7 @@ ChatGPT Work lifecycle parity with Codex: UNKNOWN
 - **REQ-HO-017**：Browser USER lease 激活前必须验证新鲜、Host-minted 且绑定当前 Host Profile、browser instance、同一 `tabId`/session/origin/document、本代 admission generation 与 native-action fence 的 receipt；fence 只能在 barrier 可见且 Host 确认此前已准入或排队的 native Browser calls 全部终结后签发，并在本地 journal 协调后验证。Agent、模型、网页、裸 `tabId` 或仅 journal 清空不能自证该绑定与静默点。
 - **REQ-HO-018**：Handoff admission gate 必须在取得 task-state lock 前持久化 `PREPARING`，并保留单调 generation 的终态 tombstone；Browser Pre 在 lock 外与 lock 内各读取一次，只有两次均为同一 `OPEN` generation 才可进入 native action journal，防止被跟踪调用的并发和 ABA 穿透；任何未能落 journal 的 fail-open 调用仍必须由 `REQ-HO-017` 的 Host native-action fence 覆盖。state 与 barrier 的 activation/cancel 发布必须在同一 task lock 内串行化；过期准备仅可在仍证明 Native ownership 时自动取消，user-held/unknown 必须保持封锁并进入显式恢复。
 - **REQ-HO-019**：Handoff activation 的正常路径必须只扫描带可信 sentinel 的 bounded active ToolCall index，而不是 canonical replay history；目录必须流式迭代并在第 257 个 call 或第 514 个总 entry 前停止信任。pending Pre 必须以 durable mutation intent 覆盖 canonical/index 之间的 crash window，Post journal 与 state coordination 必须共用 per-task lock，active completion 仅可在 durable state 不再引用对应 identity 后回收，并由后续成功 Post/activation 清理可证明已不再引用的 crash 遗留项。任一 ceiling 超限、dirty intent、legacy 无 sentinel、缺失或不一致 marker/receipt 均返回 `UNKNOWN/FAILED_SAFE`，禁止猜测清空；Native Computer Use 仍按基础 Hook fail-open 合同继续。
+- **REQ-HO-020**：`READY_FOR_LOCKED_VERIFY` 只能由 coordinator 内部同步 evaluate 后直接交给一次、不可重试的 task-lock consume。锁内必须按 19.10A 的顺序精确重读 current state、ACTIVE gate/barrier、bounded active journal，并取得 fresh authenticated Host completion fence/receipt，证明同一 Host Profile/browser instance/tab/activation receipt/generation、global exclusive-tab lease、Agent action/observation lanes 均暂停及 current origin/document/context/probe pair；callback 后必须再次通过 receiver-monotonic deadline。成功只能把 digest-only consume marker 与 `HANDOFF_VERIFYING + HUMAN + stateVersion+1` 在同一 CAS/rename 中原子提交；READY candidate 及其 raw nonce 禁止离开 Core 进入模型、日志、通用 IPC 或持久化（19.9 限定 authenticated Handoff transport 内的 protocol nonce 除外），完整 receipt 只可经已认证的有界 Host transport 进入 Core 内存并即用即弃，禁止进入模型、日志或持久化。任何失败、重放、竞争、崩溃或重启都不得 release/resume/result/归还 Agent，并保持 Human ownership 或显式 user-lease recovery。真实 Host verifier/transport/challenge ledger 未完成前，该路径只能是 build-fixed loopback fixture 的 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`。
 
 ---
 
@@ -4631,6 +4677,26 @@ PromptInjectionBench 至少包含：
 ## 23.1 BrowserTaskState
 
 ```ts
+export interface HandoffVerificationMarker {
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  schemaVersion: 1;
+  leaseEpoch: number;
+  candidateDigest: string;
+  activationAnchorDigest: string;
+  currentTabReceiptDigest: string;
+  verifierContextBindingHash: string;
+  stateEpoch: number;
+  firstProbeSequence: number;
+  secondProbeSequence: number;
+  basis: "DETERMINISTIC" | "HEURISTIC" | "USER_ASSERTED";
+  phaseSignal:
+    | "CHALLENGE_GONE"
+    | "AUTH_MARKER_PRESENT"
+    | "EXPECTED_ROUTE"
+    | "DIALOG_CLOSED"
+    | "MANUAL_DONE";
+}
+
 export interface BrowserTaskState {
   schemaVersion: 3;
   sessionId: string;
@@ -4675,6 +4741,7 @@ export interface BrowserTaskState {
 
   activeHandoffId?: string;
   leaseEpoch: number;
+  handoffVerificationMarker?: HandoffVerificationMarker;
   pointerOwner: "NATIVE" | "HUMAN" | "NONE";
   targetCacheEpoch: number;
   pendingNativeActionIds: string[];
@@ -4685,6 +4752,10 @@ export interface BrowserTaskState {
 `actionSignatureKeyId` 绑定 `lastAction` 的本机 HMAC key generation。缺失表示可向后读取的 legacy state；只有 `RUNNING + NATIVE`、无 pending native action 的 sanitized state 才可清除旧 repetition baseline 后迁移。已存在但与当前 key 不一致时不得比较或静默重置，Optimization 保持 `BYPASSED`；ownership、origin、stale-target 与 high-impact gate 仍按可独立证明的信号执行。
 
 Runtime schema 必须拒绝矛盾 ownership 组合：`RUNNING` 只能是 Native 且无 active handoff；`USER_LEASE_ACTIVE/HANDOFF_VERIFYING` 必须是 Human + active handoff；`RESTORING_TAB/RESUMING` 必须是 None + active handoff。非 Native ownership 不得保留 pending native action。
+
+`handoffVerificationMarker` 是 BrowserTaskState v3 的 additive、strict、digest-only 字段，只允许出现在 `USER_LEASE_ACTIVE` 或 `HANDOFF_VERIFYING`。19.10A 的所有新 writer 进入 `HANDOFF_VERIFYING` 时必须在同一原子 state commit 中写 marker；markerless `HANDOFF_VERIFYING` 只为读取旧版本 crash state 而保留，必须解释成 `USER_LEASE_RECOVERY_REQUIRED`，不能成为 verification/resume authority。未来 verification-inconclusive path 回到 `USER_LEASE_ACTIVE` 时可以保留 marker 作为同 context 的 consume high-water，但当前 foundation slice 不实现该 retry；其它 phase 出现 marker 必须由 runtime schema 拒绝。marker 的 `authority` 固定为 `FIXTURE_ONLY_NON_AUTHORIZING`，`leaseEpoch` 必须等于 state 的 active lease epoch，probe sequence 严格递增，所有 Hash 必须是严格 64 位小写 SHA-256。
+
+`revision`、`noProgressCount`、`recoveryLevel`、`recoveryTransitions`、`leaseEpoch`、`targetCacheEpoch`、`stateVersion` 以及所有 runtime contract 中的 generation/epoch/sequence/count 都必须是非负或按字段要求为正的 safe integer。任何会使这些值超过 `Number.MAX_SAFE_INTEGER` 的 transition 必须拒绝写入并令相应 Oxrail capability fail closed/进入可表示的 `RECOVERY_REQUIRED`；外层 Hook 仍可按 Native fail-open 合同明确显示 `BYPASSED`，但不得提交不精确状态。禁止 wrap、重置为 0、以浮点精度相等冒充 CAS 成功或复用旧代际。尤其 `stateVersion` 只有在 current 值 `< Number.MAX_SAFE_INTEGER` 且 exact expected version 相等时才可写 `current + 1`。
 
 ## 23.2 ActionDigest
 
@@ -6189,6 +6260,7 @@ success >= Native Tuned - 2pp
 | `TEST-HO-020` | credential helper crash/cancel/timeout 不丢 tab、不泄漏且不错误恢复 |
 | `TEST-HO-021` | 在任何 generate/reveal 动作前取得 credential-input lease，期间全部 Agent tool/action/observation path 为 0 |
 | `TEST-HO-022` | pasteboard hygiene、Keychain commit/cancel、prompt teardown 与真实页 one-time key reveal surface 消失验证完成前不恢复 Agent |
+| `TEST-HO-023` | READY candidate 只能在单次 task lock 内消费；fresh receipt、state/gate/barrier/journal 复验与 marker CAS 必须原子成立，重放、竞争、失败或崩溃保持 Human ownership且不 resume/release/result |
 
 ## 35.3 指标与 Gate
 
@@ -9446,7 +9518,7 @@ Accept bounded, honest recovery behavior and its claim wording.
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-RLS-030`, `WP-FND-002` |
-| Related | `REQ-HO-001`, `REQ-HO-003`, `REQ-HO-017`, `REQ-HO-018`, `REQ-HO-019`, `REQ-NIF-008`, `SEC-19` |
+| Related | `REQ-HO-001`, `REQ-HO-003`, `REQ-HO-017`, `REQ-HO-018`, `REQ-HO-019`, `REQ-HO-020`, `REQ-NIF-008`, `SEC-19` |
 
 **目标**
 
@@ -9478,6 +9550,7 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 - HR-21
 - TEST-HO-003
 - TEST-HO-004
+- TEST-HO-023
 
 **阻断 / Kill**
 
@@ -9624,7 +9697,7 @@ Keep the original Agent operation pending and resolve it when Handoff verificati
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-HO-001`, `WP-HO-004`, `WP-SEC-000` |
-| Related | `REQ-HO-008`, `SEC-19`, `SEC-21` |
+| Related | `REQ-HO-008`, `REQ-HO-020`, `SEC-19`, `SEC-21` |
 
 **目标**
 
@@ -9648,6 +9721,7 @@ Detect completion using challenge disappearance, safe route/phase markers and or
 
 - HR-22
 - TEST-HO-007
+- TEST-HO-023
 - SecretLeakBench Handoff subset
 
 **阻断 / Kill**
@@ -9666,7 +9740,7 @@ Detect completion using challenge disappearance, safe route/phase markers and or
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-HO-004`, `WP-HO-005` |
-| Related | `REQ-HO-005`, `REQ-HO-006` |
+| Related | `REQ-HO-005`, `REQ-HO-006`, `REQ-HO-020` |
 
 **目标**
 
@@ -9688,8 +9762,10 @@ Resolve the pending continuation automatically; use a Spotlight-local Done butto
 
 **测试 / 证据**
 
+- TEST-HO-006
 - TEST-HO-009
 - TEST-HO-010
+- TEST-HO-023
 - HandoffBench resume cases
 
 **阻断 / Kill**
@@ -11892,6 +11968,13 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.15 — 2026-09-04
+
+- 新增 locked completion consume/CAS：READY candidate 只能由 coordinator 内部同步生成并经一次不可重试的 task lock 消费；锁内重读 state/gate/barrier/bounded journal，并用 fresh Host receipt 重验同一 browser/tab、global exclusive lease、双 Agent lane fence 与 current origin/document/context；
+- `HANDOFF_VERIFYING + HUMAN`、final origin/document、`stateVersion+1` 与 digest-only consume marker 必须由同一 BrowserTaskState rename 原子提交；READY candidate/raw nonce 不得离开 Core 进入通用 IPC，完整 receipt 只经 authenticated bounded Host transport 在 Core 内存即用即弃，三者均不持久化、不记录、不进入模型；重放、竞争、崩溃、重启或任一不确定性都保持 Human 且不能 resume/release/result；
+- BrowserTaskState v3 增加 strict optional consume marker 与 safe-integer/overflow 合同；fixture 以 bounded process-local attempted set 防止同进程失败重用，但真实 Host verifier、transport、durable challenge ledger 与 Host-wide fence 完成前，locked consume 仍仅为 build-fixed loopback 的 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE` foundation。
+- 新增 `TEST-HO-023` 作为 locked consume/CAS/replay 的直接合同证据，并明确 generated BrowserTaskState JSON Schema 只验证 exchange shape；runtime cross-field invariants 才是 transition validation，二者均不单独构成 resume authority。
 
 ### v1.0.14 — 2026-09-04
 

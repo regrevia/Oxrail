@@ -189,6 +189,11 @@ describe("session-local Workflow Cache", () => {
       recipe,
     );
     rejectWithoutEcho(key({ documentFingerprint: marker }), recipe);
+    rejectWithoutEcho(key({ revision: Number.MAX_SAFE_INTEGER + 1 }), recipe);
+    rejectWithoutEcho(
+      key({ targetCacheEpoch: Number.MAX_SAFE_INTEGER + 1 }),
+      recipe,
+    );
     rejectWithoutEcho(key(), { ...recipe, goalSignature: digest("c") });
     rejectWithoutEcho(key(), {
       ...recipe,
@@ -245,6 +250,12 @@ describe("session-local Workflow Cache", () => {
         key({ taskId: "task-2" }),
         () => null as unknown as CacheValidation,
       ),
+    ).toEqual({ status: "MISS", reason: "VALIDATION_FAILED" });
+    expect(
+      cache.lookup(key({ taskId: "task-2" }), () => ({
+        ...valid,
+        targetResolvedRevision: Number.MAX_SAFE_INTEGER + 1,
+      })),
     ).toEqual({ status: "MISS", reason: "VALIDATION_FAILED" });
 
     now = Number.NaN;

@@ -3,7 +3,6 @@ export * from "./credential-admission.js";
 export * from "./credential-execution-gate.js";
 export * from "./credential-tool-fence.js";
 export * from "./handoff.js";
-export * from "./handoff-completion.js";
 export * from "./handoff-coordinator.js";
 export * from "./local-digest.js";
 export * from "./policy.js";

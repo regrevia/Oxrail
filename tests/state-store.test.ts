@@ -17,7 +17,13 @@ import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
-import { createBrowserTaskState } from "../packages/core/src/state.js";
+import {
+  activateUserLease,
+  beginHandoffVerification,
+  beginResume,
+  createBrowserTaskState,
+  finishResume,
+} from "../packages/core/src/state.js";
 import {
   MAX_BROWSER_TASK_STATE_BYTES,
   readBoundedPrivateFile,
@@ -26,6 +32,21 @@ import {
 } from "../packages/core/src/store.js";
 
 const run = promisify(execFile);
+
+const verificationMarker = () => ({
+  schemaVersion: 1 as const,
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING" as const,
+  leaseEpoch: 1,
+  candidateDigest: "a".repeat(64),
+  activationAnchorDigest: "b".repeat(64),
+  currentTabReceiptDigest: "c".repeat(64),
+  verifierContextBindingHash: "d".repeat(64),
+  stateEpoch: 3,
+  firstProbeSequence: 10,
+  secondProbeSequence: 11,
+  basis: "DETERMINISTIC" as const,
+  phaseSignal: "AUTH_MARKER_PRESENT" as const,
+});
 
 async function storedStatePath(root: string): Promise<string> {
   const [sessionDirectory] = await readdir(root);
@@ -171,6 +192,116 @@ describe("BrowserTaskState store", () => {
         initial.stateVersion,
       ),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("atomically persists the fixture-only verification consume marker with Human ownership", async () => {
+    const root = path.join(
+      await mkdtemp(path.join(tmpdir(), "oxrail-state-")),
+      "state",
+    );
+    const handoffId = "raw-handoff-content-canary";
+    const initialDocument = "raw-initial-document-content-canary";
+    const currentDocument = "raw-current-document-content-canary";
+    const running = {
+      ...createBrowserTaskState({
+        sessionId: "session-1",
+        taskId: "task-1",
+        hostProfileId: "profile-1",
+        mode: "MICRO_ACTION_GUARD",
+      }),
+      currentOrigin: "https://login.example.test",
+      currentUrlKey: "stale-route-key",
+      documentBinding: initialDocument,
+    };
+    await writeBrowserTaskState(root, running, null);
+    const active = activateUserLease(running, handoffId);
+    await writeBrowserTaskState(root, active, running.stateVersion);
+    const persistedActive = await readBrowserTaskState(
+      root,
+      taskScope(running),
+    );
+    if (!persistedActive) throw new Error("active state was not persisted");
+
+    const verifying = beginHandoffVerification(persistedActive, {
+      currentDocumentBinding: currentDocument,
+      currentOrigin: "https://app.example.test",
+      expectedStateVersion: persistedActive.stateVersion,
+      handoffId,
+      leaseEpoch: active.leaseEpoch,
+      marker: verificationMarker(),
+    });
+    await writeBrowserTaskState(root, verifying, persistedActive.stateVersion);
+
+    await expect(
+      readBrowserTaskState(root, taskScope(running)),
+    ).resolves.toMatchObject({
+      currentOrigin: "https://app.example.test",
+      documentBinding: expect.stringMatching(/^oxrail-id:[a-f0-9]{64}$/),
+      handoffVerificationMarker: verificationMarker(),
+      phase: "HANDOFF_VERIFYING",
+      pointerOwner: "HUMAN",
+      stateVersion: persistedActive.stateVersion + 1,
+    });
+    const stored = await readFile(await storedStatePath(root), "utf8");
+    expect(stored).not.toContain(handoffId);
+    expect(stored).not.toContain(initialDocument);
+    expect(stored).not.toContain(currentDocument);
+    expect(stored).not.toContain("stale-route-key");
+    expect(stored).toContain('"candidateDigest":"');
+  });
+
+  it("rejects verification marker replay and counter overflow before mutation", () => {
+    const handoffId = "handoff-1";
+    const running = createBrowserTaskState({
+      sessionId: "session-1",
+      taskId: "task-1",
+      hostProfileId: "profile-1",
+      mode: "MICRO_ACTION_GUARD",
+    });
+    const active = activateUserLease(running, handoffId);
+    const input = {
+      currentDocumentBinding: "document-2",
+      currentOrigin: "https://example.test",
+      expectedStateVersion: active.stateVersion,
+      handoffId,
+      leaseEpoch: active.leaseEpoch,
+      marker: verificationMarker(),
+    };
+    const verifying = beginHandoffVerification(active, input);
+    expect(() =>
+      beginHandoffVerification(
+        { ...active, activeHandoffId: handoffId },
+        input,
+      ),
+    ).toThrow("Only the unconsumed active Human lease");
+    expect(() =>
+      beginHandoffVerification(
+        { ...verifying, phase: "USER_LEASE_ACTIVE" },
+        { ...input, expectedStateVersion: verifying.stateVersion },
+      ),
+    ).toThrow("Only the unconsumed active Human lease");
+
+    expect(() =>
+      activateUserLease(
+        { ...running, stateVersion: Number.MAX_SAFE_INTEGER },
+        handoffId,
+      ),
+    ).toThrow("stateVersion cannot advance");
+    expect(() =>
+      beginHandoffVerification(
+        { ...active, stateVersion: Number.MAX_SAFE_INTEGER },
+        { ...input, expectedStateVersion: Number.MAX_SAFE_INTEGER },
+      ),
+    ).toThrow("stateVersion cannot advance");
+
+    const resuming = beginResume(active, handoffId, active.leaseEpoch);
+    expect(() =>
+      finishResume(
+        { ...resuming, stateVersion: Number.MAX_SAFE_INTEGER },
+        handoffId,
+        active.leaseEpoch,
+      ),
+    ).toThrow("stateVersion cannot advance");
   });
 
   it("rejects an oversized update without damaging the current state", async () => {

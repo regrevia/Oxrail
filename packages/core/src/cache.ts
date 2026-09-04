@@ -169,7 +169,11 @@ function hash(value: unknown): string {
 }
 
 function integer(value: unknown, minimum: number): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum)
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum
+  )
     invalidInput();
   return value as number;
 }
@@ -277,7 +281,7 @@ function normalizeValidation(value: unknown): CacheValidation {
     typeof input.routeMatches !== "boolean" ||
     typeof input.prerequisiteSignalsMatch !== "boolean" ||
     (input.targetResolvedRevision !== null &&
-      (!Number.isInteger(input.targetResolvedRevision) ||
+      (!Number.isSafeInteger(input.targetResolvedRevision) ||
         (input.targetResolvedRevision as number) < 0)) ||
     !["UNCHANGED", "APPROVAL_REQUIRED", "HANDOFF_REQUIRED", "INVALID"].includes(
       input.risk as string,
@@ -323,7 +327,7 @@ export class WorkflowCache {
   }) {
     if (!Number.isFinite(options.ttlMs) || options.ttlMs <= 0) invalidInput();
     const maxEntries = options.maxEntries ?? 256;
-    if (!Number.isInteger(maxEntries) || maxEntries <= 0) invalidInput();
+    if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) invalidInput();
     this.#ttlMs = options.ttlMs;
     this.#maxEntries = maxEntries;
     this.#now = options.now ?? Date.now;

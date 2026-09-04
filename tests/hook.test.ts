@@ -948,6 +948,43 @@ describe("public Codex hooks", () => {
     });
   });
 
+  it("fails open without overflowing an exhausted profile-migration counter", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "profile-migration-overflow-session";
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const exhausted = {
+      ...createBrowserTaskState({
+        ...scope,
+        hostProfileId: "hp_previous_fixture",
+        mode: "ADVISORY_ONLY",
+      }),
+      revision: Number.MAX_SAFE_INTEGER,
+      targetCacheEpoch: Number.MAX_SAFE_INTEGER,
+    };
+    await writeBrowserTaskState(runtimeRoot, exhausted, null);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "profile-migration-overflow-call",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({
+      systemMessage: expect.stringContaining(
+        "Oxrail optimization unavailable / BYPASSED",
+      ),
+    });
+    await expect(readBrowserTaskState(runtimeRoot, scope)).resolves.toEqual(
+      exhausted,
+    );
+  });
+
   it("denies a trusted high-impact action through the official PreToolUse shape", async () => {
     const environment = await setupActiveGuard();
     const input = {

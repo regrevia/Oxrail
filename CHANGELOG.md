@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Added the single-attempt locked Handoff completion consume/CAS: it revalidates the active barrier, bounded journal, global exclusive-tab lease, suspended Agent lanes, fresh same-tab receipt, monotonic deadlines, and atomically commits only a digest marker with Human-owned `HANDOFF_VERIFYING`; a bounded process-local attempt ledger prevents fixture retries, while runtime remains non-authorizing until real Host transport and challenge-ledger evidence exist.
 - Added a runtime-only non-secret Handoff verification sample and pure completion-candidate gate based on authenticated active probes, receiver monotonic time, continuous origin-only coverage, and a required later locked Core recheck; it cannot verify, resume, or release the user lease.
 - Split minimal Agent-facing Handoff input/result from strict runtime-only Host request, completion, and result contracts; only the exactly equivalent tool-input JSON Schema is published, all validation is non-authorizing, and Handoff remains inactive.
 - Added a process-local, fixture-only macOS opaque credential-reference lifecycle with Security.framework randomness and exact scope, TTL, generation, registry-hash, revocation, and one-shot replay checks; the public observation never returns the reference and remains inactive.

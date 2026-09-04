@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   chmod,
   link,
@@ -12,16 +12,26 @@ import {
 import path from "node:path";
 
 import {
+  HandoffCurrentTabReceiptSchema,
   deterministicDigest,
   type BrowserTaskState,
+  type HandoffCurrentTabReceipt,
 } from "../../protocol/src/index.js";
+import {
+  evaluateCompletionCandidate,
+  type CompletionCandidate,
+  type CompletionCandidateInput,
+} from "./handoff-completion.js";
+export type { CompletionCandidateInput } from "./handoff-completion.js";
 import { type HandoffLease, transitionHandoffLease } from "./handoff.js";
 import {
+  canonicalPersistentDocumentBinding,
+  canonicalPersistentHandoffId,
   canonicalPersistentToolUseId,
   persistentDocumentBinding,
   persistentHandoffId,
 } from "./safe-state.js";
-import { activateUserLease } from "./state.js";
+import { activateUserLease, beginHandoffVerification } from "./state.js";
 import {
   readBoundedPrivateFile,
   transitionBrowserTaskState,
@@ -38,6 +48,12 @@ const TEMPORARY = /^\.lease-[0-9]+\.[a-f0-9-]{36}\.tmp$/;
 const HASH = /^[a-f0-9]{64}$/;
 const PERSISTENT_ID = /^oxrail-id:[a-f0-9]{64}$/;
 const SAFE_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const COMPLETION_OBSERVER_TIMEOUT_MS = 1_000;
+const MAX_ATTEMPTED_VERIFIER_CONTEXTS = 256;
+const FIXTURE_ORIGIN = "http://127.0.0.1:4173";
+// ponytail: process-local fixture ceiling; replace with the authenticated
+// challenge-consumption ledger before enabling a production Host adapter.
+const attemptedCompletionPairs = new Map<string, number>();
 
 type PersistedHandoffBarrierState = "ACTIVE" | "CANCELLED" | "PREPARING";
 
@@ -135,6 +151,40 @@ export type HandoffPreparationRecoveryResult =
   | "NOT_PREPARING"
   | "UNKNOWN"
   | "USER_LEASE_RECOVERY_REQUIRED";
+
+export interface HandoffCurrentTabQuery {
+  activationNativeActionFenceHash: string;
+  activationTabBindingReceiptHash: string;
+  admissionGeneration: number;
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  browserInstanceBindingHash: string;
+  candidateDigest: string;
+  hostProfileBindingHash: string;
+  lastAcceptedProbeSequence: number;
+  schemaVersion: 1;
+  stateEpoch: number;
+  tabId: number;
+  verifierContextBindingHash: string;
+}
+
+export type ObserveHandoffCurrentTab = (
+  query: HandoffCurrentTabQuery,
+  signal: AbortSignal,
+) =>
+  | HandoffCurrentTabReceipt
+  | undefined
+  | Promise<HandoffCurrentTabReceipt | undefined>;
+
+export type HandoffCompletionAdmissionResult = {
+  activation: "INACTIVE";
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  kind:
+    | "CANCEL_REQUESTED"
+    | "FAILED_SAFE"
+    | "FIXTURE_ONLY_HANDOFF_VERIFYING"
+    | "FIXTURE_ONLY_REPLAY"
+    | "KEEP_USER_LEASE";
+};
 
 const errorCode = (error: unknown): string | undefined =>
   error && typeof error === "object" && "code" in error
@@ -647,6 +697,212 @@ function matchesPreparedState(
   );
 }
 
+type ReadyCompletionCandidate = Extract<
+  CompletionCandidate,
+  { kind: "READY_FOR_LOCKED_VERIFY" }
+>;
+
+const completionResult = (
+  kind: HandoffCompletionAdmissionResult["kind"],
+): HandoffCompletionAdmissionResult => ({
+  activation: "INACTIVE",
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+  kind,
+});
+
+function sameHash(left: string, right: string): boolean {
+  return (
+    HASH.test(left) &&
+    HASH.test(right) &&
+    timingSafeEqual(Buffer.from(left, "ascii"), Buffer.from(right, "ascii"))
+  );
+}
+
+function matchesCompletionState(
+  state: BrowserTaskState,
+  candidate: ReadyCompletionCandidate,
+): boolean {
+  const binding = candidate.lockedBinding;
+  return (
+    state.phase === "USER_LEASE_ACTIVE" &&
+    state.pointerOwner === "HUMAN" &&
+    state.hostProfileStatus === "VALID" &&
+    state.sessionId === binding.sessionId &&
+    state.taskId === binding.taskId &&
+    state.leaseEpoch === binding.leaseEpoch &&
+    state.stateVersion === binding.expectedStateVersion &&
+    state.activeHandoffId !== undefined &&
+    canonicalPersistentHandoffId(state.activeHandoffId) ===
+      persistentHandoffId(binding.handoffId) &&
+    state.currentOrigin === FIXTURE_ORIGIN &&
+    state.documentBinding !== undefined &&
+    canonicalPersistentDocumentBinding(state.documentBinding) ===
+      persistentDocumentBinding(binding.initialDocumentBinding) &&
+    state.pendingNativeActionIds.length === 0 &&
+    state.handoffVerificationMarker === undefined
+  );
+}
+
+function matchesCompletionReplay(
+  state: BrowserTaskState,
+  candidate: ReadyCompletionCandidate,
+  candidateDigest: string,
+): boolean {
+  return (
+    state.phase === "HANDOFF_VERIFYING" &&
+    state.pointerOwner === "HUMAN" &&
+    state.sessionId === candidate.lockedBinding.sessionId &&
+    state.taskId === candidate.lockedBinding.taskId &&
+    state.leaseEpoch === candidate.lockedBinding.leaseEpoch &&
+    state.stateVersion === candidate.lockedBinding.expectedStateVersion + 1 &&
+    state.activeHandoffId !== undefined &&
+    canonicalPersistentHandoffId(state.activeHandoffId) ===
+      persistentHandoffId(candidate.lockedBinding.handoffId) &&
+    state.handoffVerificationMarker?.candidateDigest === candidateDigest
+  );
+}
+
+function matchesActiveCompletionBarrier(
+  barrier: PersistedHandoffBarrier,
+  state: BrowserTaskState,
+  lease: HandoffLease,
+  candidate: ReadyCompletionCandidate,
+): boolean {
+  return (
+    barrier.state === "ACTIVE" &&
+    barrier.leaseEpoch === candidate.lockedBinding.leaseEpoch &&
+    barrier.handoffId ===
+      persistentHandoffId(candidate.lockedBinding.handoffId) &&
+    barrier.expiresAt === lease.expiresAt &&
+    barrier.updatedAt === lease.acquiredAt &&
+    barrier.hostProfileIdHash ===
+      digest("oxrail-handoff-host-profile-id-v1", state.hostProfileId) &&
+    sameHash(
+      barrier.nonceDigest,
+      digest("oxrail-handoff-nonce-v1", candidate.lockedBinding.nonce),
+    ) &&
+    sameHash(barrier.scopeDigest, handoffScopeBindingHash(lease.scope)) &&
+    sameHash(barrier.taskBindingDigest, taskBindingDigest(lease.scope)) &&
+    barrier.browserInstanceBindingHash !== null &&
+    barrier.nativeActionFenceHash !== null &&
+    barrier.tabBindingReceiptHash !== null
+  );
+}
+
+function completionQuery(
+  barrier: PersistedHandoffBarrier,
+  candidate: ReadyCompletionCandidate,
+  candidateDigest: string,
+): HandoffCurrentTabQuery {
+  return {
+    activationNativeActionFenceHash: barrier.nativeActionFenceHash!,
+    activationTabBindingReceiptHash: barrier.tabBindingReceiptHash!,
+    admissionGeneration: barrier.leaseEpoch,
+    authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+    browserInstanceBindingHash: barrier.browserInstanceBindingHash!,
+    candidateDigest,
+    hostProfileBindingHash: barrier.hostProfileBindingHash,
+    lastAcceptedProbeSequence:
+      candidate.verificationBinding.secondProbeSequence,
+    schemaVersion: 1,
+    stateEpoch: candidate.verificationBinding.stateEpoch,
+    tabId: candidate.lockedBinding.tabId,
+    verifierContextBindingHash:
+      candidate.verificationBinding.verifierContextBindingHash,
+  };
+}
+
+async function observeWithTimeout(
+  observe: ObserveHandoffCurrentTab,
+  query: HandoffCurrentTabQuery,
+  timeoutMs: number,
+): Promise<HandoffCurrentTabReceipt | undefined> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = new Promise<undefined>((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        resolve(undefined);
+      }, timeoutMs);
+    });
+    return await Promise.race([
+      Promise.resolve().then(() => observe(query, controller.signal)),
+      timedOut,
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function matchesCurrentTabReceipt(
+  receipt: HandoffCurrentTabReceipt,
+  query: HandoffCurrentTabQuery,
+  candidate: ReadyCompletionCandidate,
+): boolean {
+  const expectedAutomaticPhase =
+    candidate.phaseSignal === "MANUAL_DONE" ? undefined : candidate.phaseSignal;
+  return (
+    receipt.authority === query.authority &&
+    receipt.candidateDigest === query.candidateDigest &&
+    receipt.admissionGeneration === query.admissionGeneration &&
+    sameHash(receipt.hostProfileBindingHash, query.hostProfileBindingHash) &&
+    sameHash(
+      receipt.browserInstanceBindingHash,
+      query.browserInstanceBindingHash,
+    ) &&
+    sameHash(
+      receipt.activationNativeActionFenceHash,
+      query.activationNativeActionFenceHash,
+    ) &&
+    sameHash(
+      receipt.activationTabBindingReceiptHash,
+      query.activationTabBindingReceiptHash,
+    ) &&
+    !sameHash(
+      receipt.completionNativeActionFenceHash,
+      query.activationNativeActionFenceHash,
+    ) &&
+    !sameHash(
+      receipt.completionNativeActionFenceHash,
+      query.activationTabBindingReceiptHash,
+    ) &&
+    !sameHash(
+      receipt.completionReceiptHash,
+      query.activationNativeActionFenceHash,
+    ) &&
+    !sameHash(
+      receipt.completionReceiptHash,
+      query.activationTabBindingReceiptHash,
+    ) &&
+    !sameHash(
+      receipt.completionReceiptHash,
+      receipt.completionNativeActionFenceHash,
+    ) &&
+    receipt.exclusiveTabLease === "HELD" &&
+    receipt.agentActionLane === "SUSPENDED" &&
+    receipt.agentObservationLane === "SUSPENDED" &&
+    receipt.tabId === query.tabId &&
+    receipt.initialDocumentBinding ===
+      candidate.lockedBinding.initialDocumentBinding &&
+    receipt.observedDocumentBinding ===
+      candidate.lockedBinding.observedDocumentBinding &&
+    receipt.origin === candidate.lockedBinding.origin &&
+    receipt.origin === FIXTURE_ORIGIN &&
+    receipt.verifierContextBindingHash === query.verifierContextBindingHash &&
+    receipt.stateEpoch === query.stateEpoch &&
+    receipt.lastAcceptedProbeSequence === query.lastAcceptedProbeSequence &&
+    receipt.completionState === "CONFIRMED" &&
+    receipt.automaticPhase === expectedAutomaticPhase &&
+    receipt.tabState === "BOUND" &&
+    receipt.navigationState === "IDLE" &&
+    receipt.redirectState === "CONTINUOUSLY_ALLOWED" &&
+    receipt.sensitivePhase === "CLEARED"
+  );
+}
+
 /** Activate only after exact journal reconciliation while holding the task lock. */
 export async function activatePreparedHandoff(
   root: string,
@@ -813,6 +1069,226 @@ export async function activatePreparedHandoff(
     );
   } catch {
     return { kind: "FAILED_SAFE" };
+  }
+}
+
+/**
+ * Evaluates and consumes one completion candidate under the same task lock.
+ * This fixture foundation never releases the user lease or activates Handoff.
+ */
+export async function admitHandoffCompletionCandidate(
+  root: string,
+  input: CompletionCandidateInput,
+  observeCurrentTab: ObserveHandoffCurrentTab,
+  monotonicClock: () => number = () => Math.floor(performance.now()),
+): Promise<HandoffCompletionAdmissionResult> {
+  try {
+    const candidate = evaluateCompletionCandidate(input);
+    if (candidate.kind === "KEEP_USER_LEASE") {
+      return completionResult("KEEP_USER_LEASE");
+    }
+    if (candidate.kind === "CANCEL_REQUESTED") {
+      return completionResult("CANCEL_REQUESTED");
+    }
+    if (candidate.kind === "FAILED_SAFE") {
+      return completionResult("FAILED_SAFE");
+    }
+    if (
+      candidate.lockedBinding.expectedStateVersion >= Number.MAX_SAFE_INTEGER ||
+      candidate.lockedBinding.origin !== FIXTURE_ORIGIN ||
+      input.lease.scope.topOrigin !== FIXTURE_ORIGIN
+    ) {
+      return completionResult("FAILED_SAFE");
+    }
+
+    const evaluatedAt = input.nowMonotonicMs;
+    const lease: HandoffLease = {
+      schemaVersion: input.lease.schemaVersion,
+      handoffId: input.lease.handoffId,
+      leaseEpoch: input.lease.leaseEpoch,
+      nonce: input.lease.nonce,
+      holder: input.lease.holder,
+      scope: { ...input.lease.scope },
+      acquiredAt: input.lease.acquiredAt,
+      expiresAt: input.lease.expiresAt,
+      state: input.lease.state,
+    };
+    const candidateDigest = deterministicDigest(
+      "oxrail-handoff-verification-consume-v1",
+      candidate,
+    );
+    const attemptKey = deterministicDigest(
+      "oxrail-handoff-verification-attempt-context-v1",
+      {
+        handoffId: candidate.lockedBinding.handoffId,
+        initialDocumentBinding: candidate.lockedBinding.initialDocumentBinding,
+        leaseEpoch: candidate.lockedBinding.leaseEpoch,
+        nonce: candidate.lockedBinding.nonce,
+        sessionId: candidate.lockedBinding.sessionId,
+        tabId: candidate.lockedBinding.tabId,
+        taskId: candidate.lockedBinding.taskId,
+        verifierContextBindingHash:
+          candidate.verificationBinding.verifierContextBindingHash,
+      },
+    );
+    const attemptedThrough = attemptedCompletionPairs.get(attemptKey);
+    if (
+      attemptedThrough !== undefined &&
+      candidate.verificationBinding.firstProbeSequence <= attemptedThrough
+    ) {
+      return completionResult("FIXTURE_ONLY_REPLAY");
+    }
+    if (
+      attemptedThrough === undefined &&
+      attemptedCompletionPairs.size >= MAX_ATTEMPTED_VERIFIER_CONTEXTS
+    ) {
+      return completionResult("FAILED_SAFE");
+    }
+    attemptedCompletionPairs.set(
+      attemptKey,
+      candidate.verificationBinding.secondProbeSequence,
+    );
+    const scope = {
+      sessionId: candidate.lockedBinding.sessionId,
+      taskId: candidate.lockedBinding.taskId,
+    };
+
+    return await transitionBrowserTaskState<HandoffCompletionAdmissionResult>(
+      root,
+      scope,
+      async (state) => {
+        if (!state) return { value: completionResult("FAILED_SAFE") };
+        if (matchesCompletionReplay(state, candidate, candidateDigest)) {
+          return { value: completionResult("FIXTURE_ONLY_REPLAY") };
+        }
+        if (!matchesCompletionState(state, candidate)) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+
+        const gate = await readHandoffGate(root, scope);
+        if (
+          gate.kind !== "KNOWN" ||
+          gate.status !== "ACTIVE" ||
+          gate.generation !== candidate.lockedBinding.leaseEpoch
+        ) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+        const barrier = await readBarrier(
+          barrierPath(root, scope, candidate.lockedBinding.leaseEpoch),
+        );
+        if (!matchesActiveCompletionBarrier(barrier, state, lease, candidate)) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+        const journal = await inspectToolCallJournal(root, scope);
+        if (
+          journal.kind !== "KNOWN" ||
+          journal.legacyPending ||
+          journal.pendingToolUseIds.length > 0
+        ) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+
+        const deadline = Math.min(
+          candidate.verificationBinding.handoffDeadlineAtMonotonicMs,
+          candidate.verificationBinding.automaticCandidateDeadlineAtMonotonicMs,
+        );
+        const beforeObservation = monotonicClock();
+        if (
+          !Number.isSafeInteger(beforeObservation) ||
+          beforeObservation < evaluatedAt ||
+          beforeObservation <
+            candidate.verificationBinding.secondAcceptedAtMonotonicMs ||
+          beforeObservation > deadline
+        ) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+
+        const activationAnchorDigest = deterministicDigest(
+          "oxrail-handoff-activation-anchor-v1",
+          barrier,
+        );
+        const query = Object.freeze(
+          completionQuery(barrier, candidate, candidateDigest),
+        );
+        const observed = await observeWithTimeout(
+          observeCurrentTab,
+          query,
+          Math.min(
+            COMPLETION_OBSERVER_TIMEOUT_MS,
+            Math.max(0, deadline - beforeObservation),
+          ),
+        );
+        const afterObservation = monotonicClock();
+        const parsedReceipt =
+          HandoffCurrentTabReceiptSchema.safeParse(observed);
+        if (
+          !Number.isSafeInteger(afterObservation) ||
+          afterObservation < beforeObservation ||
+          afterObservation > deadline ||
+          !parsedReceipt.success ||
+          !matchesCurrentTabReceipt(parsedReceipt.data, query, candidate)
+        ) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+
+        const finalGate = await readHandoffGate(root, scope);
+        const finalBarrier = await readBarrier(
+          barrierPath(root, scope, candidate.lockedBinding.leaseEpoch),
+        );
+        const finalJournal = await inspectToolCallJournal(root, scope);
+        const finalNow = monotonicClock();
+        if (
+          !Number.isSafeInteger(finalNow) ||
+          finalNow < afterObservation ||
+          finalNow > deadline ||
+          finalGate.kind !== "KNOWN" ||
+          finalGate.status !== "ACTIVE" ||
+          finalGate.generation !== candidate.lockedBinding.leaseEpoch ||
+          deterministicDigest(
+            "oxrail-handoff-activation-anchor-v1",
+            finalBarrier,
+          ) !== activationAnchorDigest ||
+          finalJournal.kind !== "KNOWN" ||
+          finalJournal.legacyPending ||
+          finalJournal.pendingToolUseIds.length > 0
+        ) {
+          return { value: completionResult("FAILED_SAFE") };
+        }
+
+        return {
+          state: beginHandoffVerification(state, {
+            currentDocumentBinding: parsedReceipt.data.observedDocumentBinding,
+            currentOrigin: parsedReceipt.data.origin,
+            expectedStateVersion: candidate.lockedBinding.expectedStateVersion,
+            handoffId: candidate.lockedBinding.handoffId,
+            leaseEpoch: candidate.lockedBinding.leaseEpoch,
+            marker: {
+              activationAnchorDigest,
+              authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+              basis: candidate.basis,
+              candidateDigest,
+              currentTabReceiptDigest: deterministicDigest(
+                "oxrail-handoff-current-tab-receipt-v1",
+                parsedReceipt.data,
+              ),
+              firstProbeSequence:
+                candidate.verificationBinding.firstProbeSequence,
+              leaseEpoch: candidate.lockedBinding.leaseEpoch,
+              phaseSignal: candidate.phaseSignal,
+              schemaVersion: 1,
+              secondProbeSequence:
+                candidate.verificationBinding.secondProbeSequence,
+              stateEpoch: candidate.verificationBinding.stateEpoch,
+              verifierContextBindingHash:
+                candidate.verificationBinding.verifierContextBindingHash,
+            },
+          }),
+          value: completionResult("FIXTURE_ONLY_HANDOFF_VERIFYING"),
+        };
+      },
+    );
+  } catch {
+    return completionResult("FAILED_SAFE");
   }
 }
 

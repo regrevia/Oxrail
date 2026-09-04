@@ -12092,6 +12092,7 @@ var ReasonCodeSchema = external_exports.enum(REASON_CODES);
 // packages/protocol/src/schemas.ts
 var nonEmpty = external_exports.string().min(1);
 var hash3 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+var lowercaseHash = external_exports.string().regex(/^[a-f0-9]{64}$/, "expected a lowercase SHA-256 hex digest");
 var codeDirectoryHash = external_exports.string().regex(
   /^[a-f0-9]{40}$/,
   "expected a lowercase 20-byte CodeDirectory hash (CDHash)"
@@ -12101,7 +12102,8 @@ var exactToolName = external_exports.string().min(1).max(256).regex(
   "expected an exact tool name, not a matcher expression"
 );
 var finiteNonNegative = external_exports.number().finite().nonnegative();
-var nonNegativeInt = external_exports.number().int().nonnegative();
+var nonNegativeInt = external_exports.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+var positiveInt = nonNegativeInt.min(1);
 var noCredentialKinds = external_exports.array(external_exports.literal("API_KEY")).length(0);
 var apiKeyOnly = external_exports.array(external_exports.literal("API_KEY")).length(1);
 var credentialRegistryId = external_exports.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._:-]*$/);
@@ -12279,6 +12281,19 @@ var handoffAutomaticPhase = external_exports.enum([
   "EXPECTED_ROUTE",
   "DIALOG_CLOSED"
 ]);
+var handoffCompletionState = external_exports.enum([
+  "CONFIRMED",
+  "NOT_CONFIRMED",
+  "UNKNOWN"
+]);
+var handoffTabState = external_exports.enum(["BOUND", "CLOSED", "MISMATCH", "UNKNOWN"]);
+var handoffNavigationState = external_exports.enum(["IDLE", "CHANGING", "UNKNOWN"]);
+var handoffRedirectState = external_exports.enum([
+  "CONTINUOUSLY_ALLOWED",
+  "UNSAFE_SEEN",
+  "UNKNOWN"
+]);
+var handoffSensitivePhase = external_exports.enum(["CLEARED", "ACTIVE", "UNKNOWN"]);
 var handoffPhaseSignal = external_exports.enum([
   "CHALLENGE_GONE",
   "AUTH_MARKER_PRESENT",
@@ -12409,12 +12424,12 @@ var HandoffVerificationSampleSchema = external_exports.strictObject({
   observedDocumentBinding: handoffText,
   origin: handoffOrigin,
   stateEpoch: handoffSafePositiveInt,
-  completionState: external_exports.enum(["CONFIRMED", "NOT_CONFIRMED", "UNKNOWN"]),
+  completionState: handoffCompletionState,
   automaticPhase: handoffAutomaticPhase.optional(),
-  tabState: external_exports.enum(["BOUND", "CLOSED", "MISMATCH", "UNKNOWN"]),
-  navigationState: external_exports.enum(["IDLE", "CHANGING", "UNKNOWN"]),
-  redirectState: external_exports.enum(["CONTINUOUSLY_ALLOWED", "UNSAFE_SEEN", "UNKNOWN"]),
-  sensitivePhase: external_exports.enum(["CLEARED", "ACTIVE", "UNKNOWN"])
+  tabState: handoffTabState,
+  navigationState: handoffNavigationState,
+  redirectState: handoffRedirectState,
+  sensitivePhase: handoffSensitivePhase
 }).superRefine((sample, context) => {
   if (sample.completionState !== "CONFIRMED" && sample.automaticPhase !== void 0) {
     context.addIssue({
@@ -12425,6 +12440,44 @@ var HandoffVerificationSampleSchema = external_exports.strictObject({
   }
 }).describe(
   "Strict runtime-only non-secret Handoff verification sample. It is non-authorizing and is not published as portable JSON Schema; authenticated transport provenance and current Host bindings must still be verified, and the context hash is not authentication."
+);
+var HandoffCurrentTabReceiptSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  authority: external_exports.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  candidateDigest: lowercaseHash,
+  admissionGeneration: handoffSafePositiveInt,
+  hostProfileBindingHash: lowercaseHash,
+  browserInstanceBindingHash: lowercaseHash,
+  activationNativeActionFenceHash: lowercaseHash,
+  activationTabBindingReceiptHash: lowercaseHash,
+  completionNativeActionFenceHash: lowercaseHash,
+  completionReceiptHash: lowercaseHash,
+  exclusiveTabLease: external_exports.enum(["HELD", "NOT_HELD", "UNKNOWN"]),
+  agentActionLane: external_exports.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]),
+  agentObservationLane: external_exports.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]),
+  tabId: handoffSafeNonNegativeInt,
+  initialDocumentBinding: handoffText,
+  observedDocumentBinding: handoffText,
+  origin: handoffOrigin,
+  verifierContextBindingHash: lowercaseHash,
+  stateEpoch: handoffSafePositiveInt,
+  lastAcceptedProbeSequence: handoffSafePositiveInt,
+  completionState: handoffCompletionState,
+  automaticPhase: handoffAutomaticPhase.optional(),
+  tabState: handoffTabState,
+  navigationState: handoffNavigationState,
+  redirectState: handoffRedirectState,
+  sensitivePhase: handoffSensitivePhase
+}).superRefine((receipt, context) => {
+  if (receipt.completionState !== "CONFIRMED" && receipt.automaticPhase !== void 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["automaticPhase"],
+      message: "only a confirmed completion may report an automatic phase"
+    });
+  }
+}).describe(
+  "Strict runtime-only fixture current-tab receipt. It is non-authorizing, contains no sender time or page content, and is not published as portable JSON Schema."
 );
 var HandoffResultBodySchema = external_exports.strictObject({
   outcome: handoffOutcome,
@@ -12520,9 +12573,9 @@ var CredentialUseRegistryEntrySchema = external_exports.strictObject({
   purposeId: credentialRegistryId,
   consumerId: credentialRegistryId,
   grantTtlSeconds: external_exports.number().int().positive().max(31536e3),
-  generation: external_exports.number().int().positive(),
+  generation: positiveInt,
   readiness: external_exports.literal("FIXTURE_ONLY"),
-  registryVersion: external_exports.number().int().positive(),
+  registryVersion: positiveInt,
   templateRegistryHash: hash3,
   consumerRegistryHash: hash3,
   registryManifestHash: hash3
@@ -12539,8 +12592,8 @@ var CredentialEnclaveTicketSchema = external_exports.strictObject({
   purposeId: credentialRegistryId,
   consumerId: credentialRegistryId,
   grantTtlSeconds: external_exports.number().int().positive().max(31536e3),
-  generation: external_exports.number().int().positive(),
-  registryVersion: external_exports.number().int().positive(),
+  generation: positiveInt,
+  registryVersion: positiveInt,
   templateRegistryHash: hash3,
   consumerRegistryHash: hash3,
   registryManifestHash: hash3,
@@ -12552,7 +12605,7 @@ var CredentialEnclaveTicketSchema = external_exports.strictObject({
     tabId: nonNegativeInt,
     topOrigin: canonicalHttpsOrigin,
     documentBinding: nonEmpty.max(4096),
-    leaseEpoch: external_exports.number().int().positive(),
+    leaseEpoch: positiveInt,
     acquiredAt: nonNegativeInt,
     expiresAt: nonNegativeInt,
     bindingHash: hash3
@@ -12639,8 +12692,8 @@ var InactiveMacosCredentialChannelSchema = external_exports.strictObject({
   consumerRegistryHash: hash3.optional(),
   registryManifestHash: hash3.optional(),
   registryManifestVerification: ProbeVerdictSchema,
-  registryVersion: external_exports.number().int().positive().optional(),
-  registryRollbackFloor: external_exports.number().int().positive().optional(),
+  registryVersion: positiveInt.optional(),
+  registryRollbackFloor: positiveInt.optional(),
   credentialEvidenceManifestHash: hash3.optional(),
   secretLeakBench: ProbeVerdictSchema,
   realConsumerProbe: ProbeVerdictSchema,
@@ -12681,8 +12734,8 @@ var ActiveMacosCredentialChannelSchema = external_exports.strictObject({
   consumerRegistryHash: hash3,
   registryManifestHash: hash3,
   registryManifestVerification: external_exports.literal("passed"),
-  registryVersion: external_exports.number().int().positive(),
-  registryRollbackFloor: external_exports.number().int().positive(),
+  registryVersion: positiveInt,
+  registryRollbackFloor: positiveInt,
   credentialEvidenceManifestHash: hash3,
   secretLeakBench: external_exports.literal("passed"),
   realConsumerProbe: external_exports.literal("passed"),
@@ -13118,6 +13171,28 @@ var StateFingerprintSchema = external_exports.strictObject({
   blockerHash: hash3.optional(),
   revision: nonNegativeInt
 });
+var HandoffVerificationMarkerSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  authority: external_exports.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  leaseEpoch: handoffSafePositiveInt,
+  candidateDigest: lowercaseHash,
+  activationAnchorDigest: lowercaseHash,
+  currentTabReceiptDigest: lowercaseHash,
+  verifierContextBindingHash: lowercaseHash,
+  stateEpoch: handoffSafePositiveInt,
+  firstProbeSequence: handoffSafePositiveInt,
+  secondProbeSequence: handoffSafePositiveInt,
+  basis: external_exports.enum(["DETERMINISTIC", "HEURISTIC", "USER_ASSERTED"]),
+  phaseSignal: handoffPhaseSignal
+}).superRefine((marker, context) => {
+  if (marker.firstProbeSequence >= marker.secondProbeSequence) {
+    context.addIssue({
+      code: "custom",
+      path: ["secondProbeSequence"],
+      message: "probe sequences must be strictly increasing"
+    });
+  }
+});
 var BrowserTaskStateSchema = external_exports.strictObject({
   schemaVersion: external_exports.literal(3),
   sessionId: nonEmpty,
@@ -13157,6 +13232,7 @@ var BrowserTaskStateSchema = external_exports.strictObject({
     "MANUAL_BOUNDARY"
   ]),
   activeHandoffId: nonEmpty.optional(),
+  handoffVerificationMarker: HandoffVerificationMarkerSchema.optional(),
   leaseEpoch: nonNegativeInt,
   pointerOwner: PointerOwnerSchema,
   targetCacheEpoch: nonNegativeInt,
@@ -13168,6 +13244,9 @@ var BrowserTaskStateSchema = external_exports.strictObject({
     "USER_LEASE_ACTIVE"
   ].includes(state.phase);
   const noOwnerPhase = ["RESTORING_TAB", "RESUMING"].includes(state.phase);
+  const markerAllowed = ["HANDOFF_VERIFYING", "USER_LEASE_ACTIVE"].includes(
+    state.phase
+  );
   if (state.phase === "RUNNING" && (state.pointerOwner !== "NATIVE" || state.activeHandoffId) || activeHumanPhase && (state.pointerOwner !== "HUMAN" || !state.activeHandoffId) || noOwnerPhase && (state.pointerOwner !== "NONE" || !state.activeHandoffId) || state.phase === "HANDOFF_PREPARING" && state.pointerOwner !== "NATIVE") {
     context.addIssue({
       code: "custom",
@@ -13182,7 +13261,16 @@ var BrowserTaskStateSchema = external_exports.strictObject({
       message: "Non-Native ownership cannot retain pending native actions"
     });
   }
-});
+  if (state.handoffVerificationMarker && (!markerAllowed || state.handoffVerificationMarker.leaseEpoch !== state.leaseEpoch)) {
+    context.addIssue({
+      code: "custom",
+      path: ["handoffVerificationMarker"],
+      message: "Handoff verification marker is outside its active lease"
+    });
+  }
+}).describe(
+  "The runtime BrowserTaskStateSchema enforces phase, ownership, lease, marker, and sequence invariants; its generated JSON Schema validates the exchange shape only and is not transition or resume authority."
+);
 var NativeActionDispositionSchema = external_exports.enum([
   "PASS_THROUGH_ORIGINAL",
   "SEMANTIC_HINT_ONLY",
@@ -13471,7 +13559,7 @@ var EvidenceTraceSchema = external_exports.strictObject({
   model_id: nonEmpty,
   variant: external_exports.enum(["NATIVE_TUNED", "OXRAIL_GUARD"]),
   pair_id: nonEmpty,
-  run_index: external_exports.number().int().positive(),
+  run_index: positiveInt,
   seed: nonEmpty,
   control_hash: hash3,
   model_settings_hash: hash3,

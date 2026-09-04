@@ -242,13 +242,13 @@
               "type": "string"
             },
             "registryRollbackFloor": {
-              "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
+              "minimum": 1,
               "type": "integer"
             },
             "registryVersion": {
-              "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
+              "minimum": 1,
               "type": "integer"
             },
             "scopeBinding": {
@@ -386,13 +386,13 @@
               "type": "string"
             },
             "registryRollbackFloor": {
-              "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
+              "minimum": 1,
               "type": "integer"
             },
             "registryVersion": {
-              "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
+              "minimum": 1,
               "type": "integer"
             },
             "scopeBinding": { "const": "passed", "type": "string" },

@@ -13,11 +13,13 @@ import {
 } from "../packages/host-openai/src/profile.js";
 import {
   BrowserTaskStateSchema,
+  HandoffCurrentTabReceiptSchema,
   HandoffCompletionSignalSchema,
   HandoffRequestSchema,
   HandoffResultSchema,
   HandoffToolInputSchema,
   HandoffToolResultSchema,
+  HandoffVerificationMarkerSchema,
   HandoffVerificationSampleSchema,
   HostProfileSchema,
   NativePrimitiveSchema,
@@ -89,6 +91,50 @@ const handoffVerificationSample = () => ({
   observedDocumentBinding: "document-2",
   origin: "https://accounts.example.test",
   stateEpoch: 3,
+  completionState: "CONFIRMED" as const,
+  automaticPhase: "AUTH_MARKER_PRESENT" as const,
+  tabState: "BOUND" as const,
+  navigationState: "IDLE" as const,
+  redirectState: "CONTINUOUSLY_ALLOWED" as const,
+  sensitivePhase: "CLEARED" as const,
+});
+
+const handoffVerificationMarker = () => ({
+  schemaVersion: 1 as const,
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING" as const,
+  leaseEpoch: 2,
+  candidateDigest: "a".repeat(64),
+  activationAnchorDigest: "b".repeat(64),
+  currentTabReceiptDigest: "c".repeat(64),
+  verifierContextBindingHash: "d".repeat(64),
+  stateEpoch: 3,
+  firstProbeSequence: 10,
+  secondProbeSequence: 11,
+  basis: "DETERMINISTIC" as const,
+  phaseSignal: "AUTH_MARKER_PRESENT" as const,
+});
+
+const handoffCurrentTabReceipt = () => ({
+  schemaVersion: 1 as const,
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING" as const,
+  candidateDigest: "a".repeat(64),
+  admissionGeneration: 2,
+  hostProfileBindingHash: "b".repeat(64),
+  browserInstanceBindingHash: "c".repeat(64),
+  activationNativeActionFenceHash: "d".repeat(64),
+  activationTabBindingReceiptHash: "e".repeat(64),
+  completionNativeActionFenceHash: "f".repeat(64),
+  completionReceiptHash: "1".repeat(64),
+  exclusiveTabLease: "HELD" as const,
+  agentActionLane: "SUSPENDED" as const,
+  agentObservationLane: "SUSPENDED" as const,
+  tabId: 17,
+  initialDocumentBinding: "document-1",
+  observedDocumentBinding: "document-2",
+  origin: "http://127.0.0.1:4173",
+  verifierContextBindingHash: "2".repeat(64),
+  stateEpoch: 3,
+  lastAcceptedProbeSequence: 11,
   completionState: "CONFIRMED" as const,
   automaticPhase: "AUTH_MARKER_PRESENT" as const,
   tabState: "BOUND" as const,
@@ -912,6 +958,28 @@ describe("versioned protocol", () => {
     }
   });
 
+  it("accepts only strict, timestamp-free fixture current-tab receipts", () => {
+    const receipt = handoffCurrentTabReceipt();
+    expect(HandoffCurrentTabReceiptSchema.parse(receipt)).toEqual(receipt);
+
+    for (const invalid of [
+      { ...receipt, candidateDigest: "A".repeat(64) },
+      { ...receipt, admissionGeneration: Number.MAX_SAFE_INTEGER + 1 },
+      {
+        ...receipt,
+        completionState: "UNKNOWN",
+        automaticPhase: "AUTH_MARKER_PRESENT",
+      },
+      { ...receipt, observedAt: 1_000 },
+      { ...receipt, fullUrl: "http://127.0.0.1:4173/private?secret=x" },
+      { ...receipt, secret: "content-canary" },
+    ]) {
+      expect(HandoffCurrentTabReceiptSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+  });
+
   it("allows only consistent, secret-free Handoff results", () => {
     const result = handoffResult();
     const {
@@ -1121,6 +1189,104 @@ describe("versioned protocol", () => {
     ).toBe(false);
   });
 
+  it("binds a strict fixture-only verification marker to the active Human lease", () => {
+    const active = {
+      schemaVersion: 3,
+      sessionId: "s",
+      taskId: "t",
+      goalSummary: "safe",
+      hostProfileId: "hp",
+      hostProfileStatus: "VALID",
+      mode: "ADVISORY_ONLY",
+      phase: "USER_LEASE_ACTIVE",
+      revision: 0,
+      noProgressCount: 0,
+      recoveryLevel: 0,
+      recoveryTransitions: 0,
+      authState: "UNKNOWN",
+      activeHandoffId: "handoff",
+      leaseEpoch: 2,
+      pointerOwner: "HUMAN",
+      targetCacheEpoch: 0,
+      pendingNativeActionIds: [],
+      stateVersion: 1,
+    } as const;
+    const marker = handoffVerificationMarker();
+
+    expect(HandoffVerificationMarkerSchema.safeParse(marker).success).toBe(
+      true,
+    );
+    expect(
+      BrowserTaskStateSchema.safeParse({
+        ...active,
+        handoffVerificationMarker: marker,
+      }).success,
+    ).toBe(true);
+    expect(
+      BrowserTaskStateSchema.safeParse({
+        ...active,
+        phase: "HANDOFF_VERIFYING",
+      }).success,
+    ).toBe(true); // markerless v3 is retained only for legacy recovery.
+
+    for (const invalid of [
+      { ...marker, secondProbeSequence: marker.firstProbeSequence },
+      { ...marker, candidateDigest: "A".repeat(64) },
+      { ...marker, secret: "must-not-become-a-field" },
+    ]) {
+      expect(HandoffVerificationMarkerSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+    for (const invalid of [
+      {
+        ...active,
+        handoffVerificationMarker: { ...marker, leaseEpoch: 3 },
+      },
+      {
+        ...active,
+        activeHandoffId: undefined,
+        handoffVerificationMarker: marker,
+        leaseEpoch: 2,
+        phase: "RUNNING",
+        pointerOwner: "NATIVE",
+      },
+    ]) {
+      expect(BrowserTaskStateSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
+  it("bounds every shared non-negative integer at Number.MAX_SAFE_INTEGER", () => {
+    const state = {
+      schemaVersion: 3,
+      sessionId: "s",
+      taskId: "t",
+      goalSummary: "safe",
+      hostProfileId: "hp",
+      hostProfileStatus: "VALID",
+      mode: "ADVISORY_ONLY",
+      phase: "RUNNING",
+      revision: 0,
+      noProgressCount: 0,
+      recoveryLevel: 0,
+      recoveryTransitions: 0,
+      authState: "UNKNOWN",
+      leaseEpoch: 0,
+      pointerOwner: "NATIVE",
+      targetCacheEpoch: 0,
+      pendingNativeActionIds: [],
+      stateVersion: Number.MAX_SAFE_INTEGER,
+    } as const;
+
+    expect(BrowserTaskStateSchema.safeParse(state).success).toBe(true);
+    expect(
+      BrowserTaskStateSchema.safeParse({
+        ...state,
+        stateVersion: Number.MAX_SAFE_INTEGER + 1,
+      }).success,
+    ).toBe(false);
+  });
+
   it("generates byte-deterministic, stable JSON schema filenames", async () => {
     const first = await mkdtemp(join(tmpdir(), "oxrail-schema-a-"));
     const second = await mkdtemp(join(tmpdir(), "oxrail-schema-b-"));
@@ -1142,9 +1308,20 @@ describe("versioned protocol", () => {
       "Neither authorizes credential activation",
     );
     expect(names).toContain("browser-task-state.schema.json");
+    const browserTaskStateJson = await readFile(
+      join(first, "browser-task-state.schema.json"),
+      "utf8",
+    );
+    expect(browserTaskStateJson).toContain(
+      "generated JSON Schema validates the exchange shape only",
+    );
+    expect(browserTaskStateJson).toContain(
+      "is not transition or resume authority",
+    );
     expect(names).toContain("handoff-tool-input.schema.json");
     for (const runtimeOnly of [
       "handoff-completion-signal.schema.json",
+      "handoff-current-tab-receipt.schema.json",
       "handoff-request.schema.json",
       "handoff-result.schema.json",
       "handoff-tool-result.schema.json",

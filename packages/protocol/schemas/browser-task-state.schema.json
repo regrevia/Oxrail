@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "The runtime BrowserTaskStateSchema enforces phase, ownership, lease, marker, and sequence invariants; its generated JSON Schema validates the exchange shape only and is not transition or resume authority.",
   "properties": {
     "actionSignatureKeyId": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
     "activeHandoffId": { "minLength": 1, "type": "string" },
@@ -18,6 +19,78 @@
     "currentUrlKey": { "minLength": 1, "type": "string" },
     "documentBinding": { "minLength": 1, "type": "string" },
     "goalSummary": { "maxLength": 500, "type": "string" },
+    "handoffVerificationMarker": {
+      "additionalProperties": false,
+      "properties": {
+        "activationAnchorDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "authority": {
+          "const": "FIXTURE_ONLY_NON_AUTHORIZING",
+          "type": "string"
+        },
+        "basis": {
+          "enum": ["DETERMINISTIC", "HEURISTIC", "USER_ASSERTED"],
+          "type": "string"
+        },
+        "candidateDigest": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "currentTabReceiptDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "firstProbeSequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "leaseEpoch": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "phaseSignal": {
+          "enum": [
+            "CHALLENGE_GONE",
+            "AUTH_MARKER_PRESENT",
+            "EXPECTED_ROUTE",
+            "DIALOG_CLOSED",
+            "MANUAL_DONE"
+          ],
+          "type": "string"
+        },
+        "schemaVersion": { "const": 1, "type": "number" },
+        "secondProbeSequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stateEpoch": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "verifierContextBindingHash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "authority",
+        "leaseEpoch",
+        "candidateDigest",
+        "activationAnchorDigest",
+        "currentTabReceiptDigest",
+        "verifierContextBindingHash",
+        "stateEpoch",
+        "firstProbeSequence",
+        "secondProbeSequence",
+        "basis",
+        "phaseSignal"
+      ],
+      "type": "object"
+    },
     "hostProfileId": { "minLength": 1, "type": "string" },
     "hostProfileStatus": {
       "enum": ["VALID", "STALE", "DRIFTED", "UNSUPPORTED"],

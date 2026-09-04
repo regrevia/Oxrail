@@ -7,6 +7,9 @@ const nonEmpty = z.string().min(1);
 const hash = z
   .string()
   .regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+const lowercaseHash = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/, "expected a lowercase SHA-256 hex digest");
 const codeDirectoryHash = z
   .string()
   .regex(
@@ -22,7 +25,12 @@ const exactToolName = z
     "expected an exact tool name, not a matcher expression",
   );
 const finiteNonNegative = z.number().finite().nonnegative();
-const nonNegativeInt = z.number().int().nonnegative();
+const nonNegativeInt = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+const positiveInt = nonNegativeInt.min(1);
 const noCredentialKinds = z.array(z.literal("API_KEY")).length(0);
 const apiKeyOnly = z.array(z.literal("API_KEY")).length(1);
 const credentialRegistryId = z
@@ -255,6 +263,19 @@ const handoffAutomaticPhase = z.enum([
   "EXPECTED_ROUTE",
   "DIALOG_CLOSED",
 ]);
+const handoffCompletionState = z.enum([
+  "CONFIRMED",
+  "NOT_CONFIRMED",
+  "UNKNOWN",
+]);
+const handoffTabState = z.enum(["BOUND", "CLOSED", "MISMATCH", "UNKNOWN"]);
+const handoffNavigationState = z.enum(["IDLE", "CHANGING", "UNKNOWN"]);
+const handoffRedirectState = z.enum([
+  "CONTINUOUSLY_ALLOWED",
+  "UNSAFE_SEEN",
+  "UNKNOWN",
+]);
+const handoffSensitivePhase = z.enum(["CLEARED", "ACTIVE", "UNKNOWN"]);
 const handoffPhaseSignal = z.enum([
   "CHALLENGE_GONE",
   "AUTH_MARKER_PRESENT",
@@ -431,12 +452,12 @@ export const HandoffVerificationSampleSchema = z
     observedDocumentBinding: handoffText,
     origin: handoffOrigin,
     stateEpoch: handoffSafePositiveInt,
-    completionState: z.enum(["CONFIRMED", "NOT_CONFIRMED", "UNKNOWN"]),
+    completionState: handoffCompletionState,
     automaticPhase: handoffAutomaticPhase.optional(),
-    tabState: z.enum(["BOUND", "CLOSED", "MISMATCH", "UNKNOWN"]),
-    navigationState: z.enum(["IDLE", "CHANGING", "UNKNOWN"]),
-    redirectState: z.enum(["CONTINUOUSLY_ALLOWED", "UNSAFE_SEEN", "UNKNOWN"]),
-    sensitivePhase: z.enum(["CLEARED", "ACTIVE", "UNKNOWN"]),
+    tabState: handoffTabState,
+    navigationState: handoffNavigationState,
+    redirectState: handoffRedirectState,
+    sensitivePhase: handoffSensitivePhase,
   })
   .superRefine((sample, context) => {
     if (
@@ -455,6 +476,54 @@ export const HandoffVerificationSampleSchema = z
   );
 export type HandoffVerificationSample = z.infer<
   typeof HandoffVerificationSampleSchema
+>;
+
+export const HandoffCurrentTabReceiptSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    authority: z.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+    candidateDigest: lowercaseHash,
+    admissionGeneration: handoffSafePositiveInt,
+    hostProfileBindingHash: lowercaseHash,
+    browserInstanceBindingHash: lowercaseHash,
+    activationNativeActionFenceHash: lowercaseHash,
+    activationTabBindingReceiptHash: lowercaseHash,
+    completionNativeActionFenceHash: lowercaseHash,
+    completionReceiptHash: lowercaseHash,
+    exclusiveTabLease: z.enum(["HELD", "NOT_HELD", "UNKNOWN"]),
+    agentActionLane: z.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]),
+    agentObservationLane: z.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]),
+    tabId: handoffSafeNonNegativeInt,
+    initialDocumentBinding: handoffText,
+    observedDocumentBinding: handoffText,
+    origin: handoffOrigin,
+    verifierContextBindingHash: lowercaseHash,
+    stateEpoch: handoffSafePositiveInt,
+    lastAcceptedProbeSequence: handoffSafePositiveInt,
+    completionState: handoffCompletionState,
+    automaticPhase: handoffAutomaticPhase.optional(),
+    tabState: handoffTabState,
+    navigationState: handoffNavigationState,
+    redirectState: handoffRedirectState,
+    sensitivePhase: handoffSensitivePhase,
+  })
+  .superRefine((receipt, context) => {
+    if (
+      receipt.completionState !== "CONFIRMED" &&
+      receipt.automaticPhase !== undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["automaticPhase"],
+        message: "only a confirmed completion may report an automatic phase",
+      });
+    }
+  })
+  .describe(
+    "Strict runtime-only fixture current-tab receipt. It is non-authorizing, contains no sender time or page content, and is not published as portable JSON Schema.",
+  );
+export type HandoffCurrentTabReceipt = z.infer<
+  typeof HandoffCurrentTabReceiptSchema
 >;
 
 const HandoffResultBodySchema = z.strictObject({
@@ -599,9 +668,9 @@ export const CredentialUseRegistryEntrySchema = z.strictObject({
   purposeId: credentialRegistryId,
   consumerId: credentialRegistryId,
   grantTtlSeconds: z.number().int().positive().max(31_536_000),
-  generation: z.number().int().positive(),
+  generation: positiveInt,
   readiness: z.literal("FIXTURE_ONLY"),
-  registryVersion: z.number().int().positive(),
+  registryVersion: positiveInt,
   templateRegistryHash: hash,
   consumerRegistryHash: hash,
   registryManifestHash: hash,
@@ -626,8 +695,8 @@ export const CredentialEnclaveTicketSchema = z.strictObject({
   purposeId: credentialRegistryId,
   consumerId: credentialRegistryId,
   grantTtlSeconds: z.number().int().positive().max(31_536_000),
-  generation: z.number().int().positive(),
-  registryVersion: z.number().int().positive(),
+  generation: positiveInt,
+  registryVersion: positiveInt,
   templateRegistryHash: hash,
   consumerRegistryHash: hash,
   registryManifestHash: hash,
@@ -639,7 +708,7 @@ export const CredentialEnclaveTicketSchema = z.strictObject({
     tabId: nonNegativeInt,
     topOrigin: canonicalHttpsOrigin,
     documentBinding: nonEmpty.max(4_096),
-    leaseEpoch: z.number().int().positive(),
+    leaseEpoch: positiveInt,
     acquiredAt: nonNegativeInt,
     expiresAt: nonNegativeInt,
     bindingHash: hash,
@@ -746,8 +815,8 @@ const InactiveMacosCredentialChannelSchema = z.strictObject({
   consumerRegistryHash: hash.optional(),
   registryManifestHash: hash.optional(),
   registryManifestVerification: ProbeVerdictSchema,
-  registryVersion: z.number().int().positive().optional(),
-  registryRollbackFloor: z.number().int().positive().optional(),
+  registryVersion: positiveInt.optional(),
+  registryRollbackFloor: positiveInt.optional(),
   credentialEvidenceManifestHash: hash.optional(),
   secretLeakBench: ProbeVerdictSchema,
   realConsumerProbe: ProbeVerdictSchema,
@@ -789,8 +858,8 @@ const ActiveMacosCredentialChannelSchema = z.strictObject({
   consumerRegistryHash: hash,
   registryManifestHash: hash,
   registryManifestVerification: z.literal("passed"),
-  registryVersion: z.number().int().positive(),
-  registryRollbackFloor: z.number().int().positive(),
+  registryVersion: positiveInt,
+  registryRollbackFloor: positiveInt,
   credentialEvidenceManifestHash: hash,
   secretLeakBench: z.literal("passed"),
   realConsumerProbe: z.literal("passed"),
@@ -1325,6 +1394,34 @@ export const StateFingerprintSchema = z.strictObject({
 });
 export type StateFingerprint = z.infer<typeof StateFingerprintSchema>;
 
+export const HandoffVerificationMarkerSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    authority: z.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+    leaseEpoch: handoffSafePositiveInt,
+    candidateDigest: lowercaseHash,
+    activationAnchorDigest: lowercaseHash,
+    currentTabReceiptDigest: lowercaseHash,
+    verifierContextBindingHash: lowercaseHash,
+    stateEpoch: handoffSafePositiveInt,
+    firstProbeSequence: handoffSafePositiveInt,
+    secondProbeSequence: handoffSafePositiveInt,
+    basis: z.enum(["DETERMINISTIC", "HEURISTIC", "USER_ASSERTED"]),
+    phaseSignal: handoffPhaseSignal,
+  })
+  .superRefine((marker, context) => {
+    if (marker.firstProbeSequence >= marker.secondProbeSequence) {
+      context.addIssue({
+        code: "custom",
+        path: ["secondProbeSequence"],
+        message: "probe sequences must be strictly increasing",
+      });
+    }
+  });
+export type HandoffVerificationMarker = z.infer<
+  typeof HandoffVerificationMarkerSchema
+>;
+
 export const BrowserTaskStateSchema = z
   .strictObject({
     schemaVersion: z.literal(3),
@@ -1365,6 +1462,7 @@ export const BrowserTaskStateSchema = z
       "MANUAL_BOUNDARY",
     ]),
     activeHandoffId: nonEmpty.optional(),
+    handoffVerificationMarker: HandoffVerificationMarkerSchema.optional(),
     leaseEpoch: nonNegativeInt,
     pointerOwner: PointerOwnerSchema,
     targetCacheEpoch: nonNegativeInt,
@@ -1377,6 +1475,9 @@ export const BrowserTaskStateSchema = z
       "USER_LEASE_ACTIVE",
     ].includes(state.phase);
     const noOwnerPhase = ["RESTORING_TAB", "RESUMING"].includes(state.phase);
+    const markerAllowed = ["HANDOFF_VERIFYING", "USER_LEASE_ACTIVE"].includes(
+      state.phase,
+    );
     if (
       (state.phase === "RUNNING" &&
         (state.pointerOwner !== "NATIVE" || state.activeHandoffId)) ||
@@ -1402,7 +1503,21 @@ export const BrowserTaskStateSchema = z
         message: "Non-Native ownership cannot retain pending native actions",
       });
     }
-  });
+    if (
+      state.handoffVerificationMarker &&
+      (!markerAllowed ||
+        state.handoffVerificationMarker.leaseEpoch !== state.leaseEpoch)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["handoffVerificationMarker"],
+        message: "Handoff verification marker is outside its active lease",
+      });
+    }
+  })
+  .describe(
+    "The runtime BrowserTaskStateSchema enforces phase, ownership, lease, marker, and sequence invariants; its generated JSON Schema validates the exchange shape only and is not transition or resume authority.",
+  );
 export type BrowserTaskState = z.infer<typeof BrowserTaskStateSchema>;
 
 export const NativeActionDispositionSchema = z.enum([
@@ -1771,7 +1886,7 @@ export const EvidenceTraceSchema = z
     model_id: nonEmpty,
     variant: z.enum(["NATIVE_TUNED", "OXRAIL_GUARD"]),
     pair_id: nonEmpty,
-    run_index: z.number().int().positive(),
+    run_index: positiveInt,
     seed: nonEmpty,
     control_hash: hash,
     model_settings_hash: hash,
