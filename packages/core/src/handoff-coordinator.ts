@@ -25,7 +25,10 @@ import {
   transitionBrowserTaskState,
   transitionBrowserTaskStateWithRetry,
 } from "./store.js";
-import { inspectToolCallJournal } from "./tool-call.js";
+import {
+  inspectToolCallJournal,
+  retireCompletedToolCalls,
+} from "./tool-call.js";
 
 const BARRIER_DIRECTORY = "handoff-barriers";
 const MAX_BARRIER_BYTES = 1_024;
@@ -647,6 +650,9 @@ export async function activatePreparedHandoff(
             now,
           );
           return {
+            afterCommit: async () => {
+              await retireCompletedToolCalls(root, lease.scope, []);
+            },
             value: replay.accepted
               ? ({ kind: "ACTIVE", lease: replay.lease } as const)
               : ({ kind: "FAILED_SAFE" } as const),
@@ -708,7 +714,10 @@ export async function activatePreparedHandoff(
           return { value: { kind: "FAILED_SAFE" } as const };
         }
         return {
-          afterCommit: () => replaceBarrier(root, lease, now, verified),
+          afterCommit: async () => {
+            await replaceBarrier(root, lease, now, verified);
+            await retireCompletedToolCalls(root, lease.scope, []);
+          },
           ...(alreadyActive
             ? {}
             : {

@@ -686,6 +686,14 @@ describe("public Codex hooks", () => {
     await expect(
       readBrowserTaskState(runtimeRoot, scope),
     ).resolves.toMatchObject({ pendingNativeActionIds: [] });
+    expect(
+      (await allFiles(runtimeRoot)).filter(
+        (filename) =>
+          filename.includes(
+            `${path.sep}tool-calls${path.sep}active${path.sep}`,
+          ) && /\.(json|indexing)$/.test(path.basename(filename)),
+      ),
+    ).toEqual([]);
 
     const persisted = await Promise.all(
       (await allFiles(environment.pluginData)).map((filename) =>

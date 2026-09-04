@@ -377,7 +377,6 @@ async function persistState(
   }
   const temporary = path.join(directory, `.${randomUUID()}.tmp`);
   let handle;
-  let committed = false;
   try {
     handle = await open(temporary, "wx", 0o600);
     await handle.writeFile(contents, "utf8");
@@ -385,14 +384,11 @@ async function persistState(
     await handle.close();
     handle = undefined;
     await rename(temporary, destination);
-    committed = true;
     await chmod(destination, 0o600);
     await syncDirectory(directory);
   } catch (error) {
     await handle?.close();
     await unlink(temporary).catch(() => undefined);
-    // Rename is the visible commit point; do not report a committed decision as failed.
-    if (committed) return;
     if (error instanceof BrowserTaskStateStoreError) throw error;
     throw new BrowserTaskStateStoreError("UNAVAILABLE");
   }

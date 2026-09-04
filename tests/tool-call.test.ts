@@ -1,23 +1,30 @@
 import {
+  link,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  rename,
+  rmdir,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_ACTIVE_TOOL_CALLS,
   completeToolCallPost,
   hasPendingToolCalls,
   inspectToolCallJournal,
   protectToolCallRequestDigest,
   recordToolCallPre,
+  retireCompletedToolCall,
+  retireCompletedToolCalls,
 } from "../packages/core/src/tool-call.js";
 import { createLocalDigestProtector } from "../packages/core/src/local-digest.js";
 import { persistentToolUseId } from "../packages/core/src/safe-state.js";
@@ -161,6 +168,197 @@ describe("tool call journal", () => {
     }
   });
 
+  it("retires only the active index and keeps the durable replay decision", async () => {
+    const root = await makeRoot();
+    const input = baseInput("retired-call");
+    await recordToolCallPre(root, input);
+    await completeToolCallPost(root, input);
+
+    await expect(retireCompletedToolCall(root, input)).resolves.toBe("RETIRED");
+    await expect(retireCompletedToolCall(root, input)).resolves.toBe(
+      "ALREADY_RETIRED",
+    );
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      completedToolUseIds: [],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
+    await expect(recordToolCallPre(root, input)).resolves.toMatchObject({
+      journalStatus: "COMPLETE",
+      kind: "REPLAY",
+    });
+  });
+
+  it("sweeps completed entries only after state stops retaining them", async () => {
+    const root = await makeRoot();
+    const retained = baseInput("retained-complete-call");
+    const retired = baseInput("swept-complete-call");
+    for (const input of [retained, retired]) {
+      await recordToolCallPre(root, input);
+      await completeToolCallPost(root, input);
+    }
+
+    await expect(
+      retireCompletedToolCalls(root, retained, [
+        persistentToolUseId(retained.toolUseId),
+      ]),
+    ).resolves.toBe("RETIRED");
+    await expect(inspectToolCallJournal(root, retained)).resolves.toEqual({
+      completedToolUseIds: [persistentToolUseId(retained.toolUseId)],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
+    await expect(retireCompletedToolCalls(root, retained, [])).resolves.toBe(
+      "RETIRED",
+    );
+    await expect(inspectToolCallJournal(root, retained)).resolves.toEqual({
+      completedToolUseIds: [],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
+  });
+
+  it("recovers an interrupted pending-index commit from Post", async () => {
+    const root = await makeRoot();
+    const input = baseInput("index-intent-crash-call");
+    await recordToolCallPre(root, input);
+    const directory = await journalDirectory(root);
+    const [canonical] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    const active = path.join(directory, "active");
+    await rename(
+      path.join(active, canonical!),
+      path.join(active, canonical!.replace(/\.json$/, ".indexing")),
+    );
+    await unlink(path.join(directory, canonical!));
+
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+    await expect(completeToolCallPost(root, input)).resolves.toBe("COMPLETED");
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      completedToolUseIds: [persistentToolUseId(input.toolUseId)],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
+  });
+
+  it("does not erase a dirty intent that disagrees with canonical history", async () => {
+    const root = await makeRoot();
+    const input = baseInput("conflicting-index-intent-call");
+    await recordToolCallPre(root, input);
+    const directory = await journalDirectory(root);
+    const [canonical] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    const active = path.join(directory, "active");
+    await rename(
+      path.join(active, canonical!),
+      path.join(active, canonical!.replace(/\.json$/, ".indexing")),
+    );
+    await unlink(path.join(directory, canonical!));
+
+    await expect(
+      recordToolCallPre(root, { ...input, decision: block }),
+    ).resolves.toEqual({
+      decision: block,
+      journalStatus: "COMPLETE",
+      kind: "RECORDED",
+    });
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+  });
+
+  it("ignores only strict stale index temporaries", async () => {
+    const root = await makeRoot();
+    const input = baseInput("sentinel-temporary-call");
+    await recordToolCallPre(root, input);
+    const directory = await journalDirectory(root);
+    const active = path.join(directory, "active");
+    const [canonical] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    await writeFile(
+      path.join(
+        active,
+        ".active-index-v1.00000000-0000-4000-8000-000000000000.tmp",
+      ),
+      '{"schemaVersion":1}\n',
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(
+        active,
+        `.${canonical!.replace(/\.json$/, "")}.00000000-0000-4000-8000-000000000000.tmp`,
+      ),
+      "partial\n",
+      { mode: 0o600 },
+    );
+
+    await expect(inspectToolCallJournal(root, input)).resolves.toMatchObject({
+      kind: "KNOWN",
+      pendingToolUseIds: [persistentToolUseId(input.toolUseId)],
+    });
+  });
+
+  it("bounds activation work when the active index exceeds its ceiling", async () => {
+    const root = await makeRoot();
+    const inputs = Array.from(
+      { length: MAX_ACTIVE_TOOL_CALLS + 1 },
+      (_, index) => baseInput(`active-ceiling-${index}`),
+    );
+    for (let offset = 0; offset < inputs.length; offset += 64) {
+      await Promise.all(
+        inputs
+          .slice(offset, offset + 64)
+          .map((input) => recordToolCallPre(root, input)),
+      );
+    }
+
+    await expect(inspectToolCallJournal(root, inputs[0]!)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+  }, 60_000);
+
+  it("keeps an unindexed legacy journal unknown and preserves duplicate replay", async () => {
+    const root = await makeRoot();
+    const input = baseInput("legacy-layout-call");
+    await recordToolCallPre(root, input);
+    await recordToolCallPre(root, baseInput("legacy-layout-other-call"));
+    const directory = await journalDirectory(root);
+    const active = path.join(directory, "active");
+    for (const indexed of await readdir(active)) {
+      await unlink(path.join(active, indexed));
+    }
+    await rmdir(active);
+
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+    await expect(
+      recordToolCallPre(root, {
+        ...baseInput("unrelated-blocking-call"),
+        decision: block,
+      }),
+    ).resolves.toMatchObject({ kind: "RECORDED" });
+    await expect(recordToolCallPre(root, input)).resolves.toMatchObject({
+      journalStatus: "PENDING",
+      kind: "REPLAY",
+    });
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+    expect(
+      (await readdir(directory)).filter((name) => name.endsWith(".json")),
+    ).toHaveLength(3);
+  });
+
   it("makes one concurrent Pre the durable decision", async () => {
     const root = await makeRoot();
     const results = await Promise.all(
@@ -230,25 +428,58 @@ describe("tool call journal", () => {
     );
   });
 
-  it("directly addresses more than 1024 calls without exhausting slots", async () => {
+  it("keeps one active call fast after 1024 retired native calls", async () => {
     const root = await makeRoot();
-    const inputs = Array.from({ length: 1_025 }, (_, index) => ({
-      ...baseInput(`call-${index}`),
-      decision: block,
-    }));
-    for (let offset = 0; offset < inputs.length; offset += 64) {
+    const retired = Array.from({ length: 1_024 }, (_, index) =>
+      baseInput(`retired-call-${index}`),
+    );
+    for (let offset = 0; offset < retired.length; offset += 64) {
       const results = await Promise.all(
-        inputs
-          .slice(offset, offset + 64)
-          .map((input) => recordToolCallPre(root, input)),
+        retired.slice(offset, offset + 64).map(async (input) => ({
+          post: await recordToolCallPre(root, input).then(async (pre) =>
+            pre.kind === "RECORDED"
+              ? completeToolCallPost(root, input)
+              : "UNAVAILABLE",
+          ),
+          retired: await retireCompletedToolCall(root, input),
+        })),
       );
-      expect(results.every((result) => result.kind === "RECORDED")).toBe(true);
+      expect(
+        results.every(
+          (result) =>
+            result.post === "COMPLETED" && result.retired === "RETIRED",
+        ),
+      ).toBe(true);
     }
+    const pending = baseInput("pending-after-history");
+    await expect(recordToolCallPre(root, pending)).resolves.toMatchObject({
+      kind: "RECORDED",
+    });
 
-    const files = await readdir(await journalDirectory(root));
-    expect(files).toHaveLength(1_025);
-    expect(files.every((name) => /^[a-f0-9]{64}\.json$/.test(name))).toBe(true);
-  });
+    const directory = await journalDirectory(root);
+    const files = await readdir(directory);
+    expect(files.filter((name) => name.endsWith(".json"))).toHaveLength(1_025);
+    expect(files.filter((name) => name.endsWith(".post"))).toHaveLength(1_024);
+    expect(
+      (await readdir(path.join(directory, "active"))).filter((name) =>
+        name.endsWith(".json"),
+      ),
+    ).toHaveLength(1);
+
+    const durations: number[] = [];
+    for (let run = 0; run < 10; run += 1) {
+      const startedAt = performance.now();
+      await expect(inspectToolCallJournal(root, pending)).resolves.toEqual({
+        completedToolUseIds: [],
+        kind: "KNOWN",
+        legacyPending: false,
+        pendingToolUseIds: [persistentToolUseId(pending.toolUseId)],
+      });
+      durations.push(performance.now() - startedAt);
+    }
+    durations.sort((left, right) => left - right);
+    expect(durations[Math.ceil(durations.length * 0.95) - 1]).toBeLessThan(750);
+  }, 60_000);
 
   it("recovers a receipt-first Post crash without reporting a pending call", async () => {
     const root = await makeRoot();
@@ -316,6 +547,49 @@ describe("tool call journal", () => {
     );
   });
 
+  it.each(["missing", "replaced"] as const)(
+    "rejects a %s canonical marker behind a valid active index",
+    async (mutation) => {
+      const root = await makeRoot();
+      const input = baseInput(`canonical-${mutation}`);
+      await recordToolCallPre(root, input);
+      const directory = await journalDirectory(root);
+      const [canonical] = (await readdir(directory)).filter((name) =>
+        name.endsWith(".json"),
+      );
+      const canonicalPath = path.join(directory, canonical!);
+      if (mutation === "missing") {
+        await unlink(canonicalPath);
+      } else {
+        const replacement = `${canonicalPath}.replacement`;
+        await writeFile(replacement, "not-json\n", { mode: 0o600 });
+        await rename(replacement, canonicalPath);
+      }
+
+      await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+        kind: "UNKNOWN",
+      });
+    },
+  );
+
+  it("rejects a terminal marker forged into the active index", async () => {
+    const root = await makeRoot();
+    const input = baseInput("terminal-active-entry");
+    await recordToolCallPre(root, input);
+    await completeToolCallPost(root, input);
+    const directory = await journalDirectory(root);
+    const [canonical] = (await readdir(directory)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    const active = path.join(directory, "active", canonical!);
+    await unlink(active);
+    await link(path.join(directory, canonical!), active);
+
+    await expect(inspectToolCallJournal(root, input)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+  });
+
   it("flags legacy pending calls but ignores completed legacy decisions", async () => {
     const root = await makeRoot();
     const scope = baseInput("legacy-pending");
@@ -341,6 +615,13 @@ describe("tool call journal", () => {
       await writeFile(markerPath, `${JSON.stringify(marker)}\n`, {
         mode: 0o600,
       });
+      if (marker.status === "PENDING") {
+        await writeFile(
+          path.join(directory, "active", filename),
+          `${JSON.stringify(marker)}\n`,
+          { mode: 0o600 },
+        );
+      }
     }
 
     await expect(inspectToolCallJournal(root, scope)).resolves.toEqual({
@@ -350,6 +631,7 @@ describe("tool call journal", () => {
       pendingToolUseIds: [],
     });
     expect(pendingPath).toBeDefined();
+    await unlink(path.join(directory, "active", path.basename(pendingPath!)));
     await unlink(pendingPath!);
     await expect(inspectToolCallJournal(root, scope)).resolves.toEqual({
       completedToolUseIds: [],
@@ -401,28 +683,46 @@ describe("tool call journal", () => {
     const [task] = await readdir(sessionDirectory);
     const taskDirectory = path.join(sessionDirectory, task!);
     const directory = path.join(taskDirectory, "tool-calls");
-    const files = await readdir(directory);
+    const active = path.join(directory, "active");
+    const files = (await readdir(directory)).filter(
+      (name) => name !== "active",
+    );
+    const activeFiles = await readdir(active);
+    const activeJournalFiles = activeFiles.filter(
+      (name) => name !== ".active-index-v1",
+    );
     const persisted = (
       await Promise.all(
-        files.map((filename) =>
-          readFile(path.join(directory, filename), "utf8"),
-        ),
+        [
+          ...files.map((filename) => path.join(directory, filename)),
+          ...activeFiles.map((filename) => path.join(active, filename)),
+        ].map((filename) => readFile(filename, "utf8")),
       )
     ).join("\n");
 
-    expect(`${session}/${task}/${files.join("/")}/${persisted}`).not.toMatch(
-      /raw-(session|task|tool)\/canary|page-secret-canary/,
-    );
+    expect(
+      `${session}/${task}/${files.join("/")}/${activeFiles.join("/")}/${persisted}`,
+    ).not.toMatch(/raw-(session|task|tool)\/canary|page-secret-canary/);
     expect(files).toHaveLength(2);
+    expect(activeFiles).toHaveLength(2);
+    expect(activeJournalFiles).toHaveLength(1);
     expect(
       files.every((name) => /^[a-f0-9]{64}\.(json|post)$/.test(name)),
     ).toBe(true);
-    for (const filename of files) {
-      expect((await stat(path.join(directory, filename))).mode & 0o777).toBe(
-        0o600,
-      );
+    expect(activeJournalFiles[0]).toMatch(/^[a-f0-9]{64}\.json$/);
+    for (const filename of [
+      ...files.map((name) => path.join(directory, name)),
+      ...activeFiles.map((name) => path.join(active, name)),
+    ]) {
+      expect((await stat(filename)).mode & 0o777).toBe(0o600);
     }
-    for (const item of [root, sessionDirectory, taskDirectory, directory]) {
+    for (const item of [
+      root,
+      sessionDirectory,
+      taskDirectory,
+      directory,
+      active,
+    ]) {
       expect((await stat(item)).mode & 0o777).toBe(0o700);
     }
   });

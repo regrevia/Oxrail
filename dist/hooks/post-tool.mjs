@@ -13788,7 +13788,6 @@ async function persistState(directory, destination, state) {
   }
   const temporary = path.join(directory, `.${randomUUID()}.tmp`);
   let handle;
-  let committed = false;
   try {
     handle = await open(temporary, "wx", 384);
     await handle.writeFile(contents, "utf8");
@@ -13796,13 +13795,11 @@ async function persistState(directory, destination, state) {
     await handle.close();
     handle = void 0;
     await rename(temporary, destination);
-    committed = true;
     await chmod(destination, 384);
     await syncDirectory(directory);
   } catch (error43) {
     await handle?.close();
     await unlink(temporary).catch(() => void 0);
-    if (committed) return;
     if (error43 instanceof BrowserTaskStateStoreError) throw error43;
     throw new BrowserTaskStateStoreError("UNAVAILABLE");
   }
@@ -13977,7 +13974,13 @@ async function createLocalDigestProtector(root) {
 
 // packages/core/src/tool-call.ts
 var MAX_TOOL_CALL_MARKER_BYTES = 1024;
+var MAX_ACTIVE_TOOL_CALLS = 256;
 var MAX_ID_LENGTH = 4096;
+var ACTIVE_DIRECTORY = "active";
+var ACTIVE_INDEX = ".active-index-v1";
+var ACTIVE_INDEX_CONTENTS = '{"schemaVersion":1}\n';
+var ACTIVE_INDEX_TEMPORARY = /^\.active-index-v1\.[a-f0-9-]{36}\.tmp$/;
+var ACTIVE_MARKER_TEMPORARY = /^\.[a-f0-9]{64}\.[a-f0-9-]{36}\.tmp$/;
 var DIGEST2 = /^[a-f0-9]{64}$/;
 var PERSISTENT_ID = /^oxrail-id:[a-f0-9]{64}$/;
 var errorCode3 = (error43) => error43 && typeof error43 === "object" && "code" in error43 ? String(error43.code) : void 0;
@@ -13997,7 +14000,10 @@ var journalDirectory = (root, scope) => path3.join(
   digest("oxrail-tool-call-task-v2", scope.taskId),
   "tool-calls"
 );
+var activeDirectory = (directory) => path3.join(directory, ACTIVE_DIRECTORY);
 var markerPath = (directory, toolDigest) => path3.join(directory, `${toolDigest}.json`);
+var activeMarkerPath = (directory, toolDigest) => path3.join(activeDirectory(directory), `${toolDigest}.json`);
+var indexingMarkerPath = (directory, toolDigest) => path3.join(activeDirectory(directory), `${toolDigest}.indexing`);
 var receiptPath = (directory, toolDigest) => path3.join(directory, `${toolDigest}.post`);
 var decisionLeavesNativeActionPending = (decision) => decision.disposition === "PASS_THROUGH_ORIGINAL" || decision.disposition === "SEMANTIC_HINT_ONLY";
 function parseMarker(value, expectedToolDigest) {
@@ -14052,6 +14058,40 @@ async function readBounded(filename) {
     await handle?.close();
   }
 }
+async function activeIndexReady(directory) {
+  try {
+    return (await readBounded(path3.join(activeDirectory(directory), ACTIVE_INDEX))).toString("utf8") === ACTIVE_INDEX_CONTENTS;
+  } catch {
+    return false;
+  }
+}
+async function initializeActiveIndex(directory) {
+  if (await activeIndexReady(directory)) return;
+  const entries = await readdir(directory);
+  if (entries.some((entry) => entry !== ACTIVE_DIRECTORY)) return;
+  const active = activeDirectory(directory);
+  const filename = path3.join(active, ACTIVE_INDEX);
+  const temporary = path3.join(active, `${ACTIVE_INDEX}.${randomUUID3()}.tmp`);
+  let handle;
+  try {
+    handle = await open3(temporary, "wx", 384);
+    await handle.writeFile(ACTIVE_INDEX_CONTENTS, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    try {
+      await link3(temporary, filename);
+    } catch (error43) {
+      if (errorCode3(error43) !== "EEXIST" || !await activeIndexReady(directory)) {
+        throw error43;
+      }
+    }
+    await syncDirectory3(active);
+  } finally {
+    await handle?.close();
+    await unlink3(temporary).catch(() => void 0);
+  }
+}
 async function readMarker(filename, expectedToolDigest) {
   try {
     const value = JSON.parse(
@@ -14077,6 +14117,8 @@ async function ensureJournalDirectory(root, scope) {
   await privateDirectory2(path3.dirname(path3.dirname(directory)));
   await privateDirectory2(path3.dirname(directory));
   await privateDirectory2(directory);
+  await privateDirectory2(activeDirectory(directory));
+  await initializeActiveIndex(directory);
   return directory;
 }
 async function syncDirectory3(directory) {
@@ -14106,7 +14148,6 @@ async function createMarker(directory, destination, marker) {
     `.${marker.toolDigest}.${randomUUID3()}.tmp`
   );
   let handle;
-  let committed = false;
   try {
     handle = await open3(temporary, "wx", 384);
     await handle.writeFile(serializeMarker(marker), "utf8");
@@ -14115,20 +14156,70 @@ async function createMarker(directory, destination, marker) {
     handle = void 0;
     try {
       await link3(temporary, destination);
-      committed = true;
     } catch (error43) {
       if (errorCode3(error43) === "EEXIST") return "EXISTS";
       throw error43;
     }
     await syncDirectory3(directory);
     return "CREATED";
-  } catch (error43) {
-    if (committed) return "CREATED";
-    throw error43;
   } finally {
     await handle?.close();
     await unlink3(temporary).catch(() => void 0);
   }
+}
+var sameMarker = (left, right) => left.schemaVersion === right.schemaVersion && (left.schemaVersion === 1 || right.schemaVersion === 2 && left.persistentToolUseId === right.persistentToolUseId) && left.bindingDigest === right.bindingDigest && left.requestDigest === right.requestDigest && left.status === right.status && left.toolDigest === right.toolDigest && left.decision.disposition === right.decision.disposition && left.decision.reasonCode === right.decision.reasonCode && left.decision.recoverable === right.decision.recoverable;
+async function ensureActiveMarker(directory, marker) {
+  const active = activeDirectory(directory);
+  const destination = activeMarkerPath(directory, marker.toolDigest);
+  await createMarker(active, destination, marker);
+  const existing = await readMarker(destination, marker.toolDigest);
+  if (existing.kind !== "VALID" || !sameMarker(existing.marker, marker)) {
+    throw new Error("active tool-call marker mismatch");
+  }
+}
+async function beginActiveIndexMutation(directory, marker) {
+  const active = activeDirectory(directory);
+  const destination = indexingMarkerPath(directory, marker.toolDigest);
+  const claim = await createMarker(active, destination, marker);
+  const existing = await readMarker(destination, marker.toolDigest);
+  if (existing.kind !== "VALID" || existing.marker.schemaVersion !== 2 || existing.marker.status !== "PENDING" || !decisionLeavesNativeActionPending(existing.marker.decision)) {
+    throw new Error("active tool-call mutation mismatch");
+  }
+  return { created: claim === "CREATED", marker: existing.marker };
+}
+async function finishActiveIndexMutation(directory, marker) {
+  const destination = indexingMarkerPath(directory, marker.toolDigest);
+  const existing = await readMarker(destination, marker.toolDigest);
+  if (existing.kind === "MISSING") return;
+  if (existing.kind !== "VALID" || !sameMarker(existing.marker, marker)) {
+    throw new Error("active tool-call mutation mismatch");
+  }
+  try {
+    await unlink3(destination);
+  } catch (error43) {
+    if (errorCode3(error43) === "ENOENT") return;
+    throw error43;
+  }
+  await syncDirectory3(activeDirectory(directory));
+}
+async function reconcilePendingActiveIndex(directory, marker) {
+  const intent = await beginActiveIndexMutation(directory, marker);
+  if (!sameMarker(intent.marker, marker)) {
+    throw new Error("active tool-call mutation mismatch");
+  }
+  await ensureActiveMarker(directory, marker);
+  const current = await readMarker(
+    markerPath(directory, marker.toolDigest),
+    marker.toolDigest
+  );
+  const receipt = await readMarker(
+    receiptPath(directory, marker.toolDigest),
+    marker.toolDigest
+  );
+  if (current.kind !== "VALID" || !sameMarker(current.marker, marker) && !(receipt.kind === "VALID" && sameCompletion(current.marker, marker) && sameCompletion(receipt.marker, marker))) {
+    throw new Error("tool-call index did not reach a stable state");
+  }
+  await finishActiveIndexMutation(directory, marker);
 }
 async function replaceMarker(directory, destination, marker) {
   const temporary = path3.join(
@@ -14174,24 +14265,111 @@ async function recordToolCallPre(root, input) {
       toolDigest
     };
     const destination = markerPath(directory, toolDigest);
-    if (await createMarker(directory, destination, marker) === "CREATED") {
-      return {
-        decision: marker.decision,
-        journalStatus: marker.status,
-        kind: "RECORDED"
-      };
+    let claim = "EXISTS";
+    let current = await readMarker(destination, toolDigest);
+    if (current.kind === "INVALID") return { kind: "UNAVAILABLE" };
+    if (current.kind === "MISSING") {
+      let candidate = marker;
+      if (marker.status === "PENDING") {
+        const intent = await beginActiveIndexMutation(directory, marker);
+        candidate = intent.marker;
+        if (!sameBinding(candidate, input)) return { kind: "MISMATCH" };
+        if (!intent.created) {
+          current = await readMarker(destination, toolDigest);
+          if (current.kind === "MISSING") {
+            return {
+              decision: candidate.decision,
+              journalStatus: candidate.status,
+              kind: "REPLAY"
+            };
+          }
+          if (current.kind === "INVALID") return { kind: "UNAVAILABLE" };
+        }
+      }
+      if (current.kind === "MISSING") {
+        claim = await createMarker(directory, destination, candidate);
+        current = await readMarker(destination, toolDigest);
+        if (current.kind !== "VALID") return { kind: "UNAVAILABLE" };
+      }
     }
-    const existing = await readMarker(destination, toolDigest);
-    if (existing.kind !== "VALID") return { kind: "UNAVAILABLE" };
-    if (!sameBinding(existing.marker, input)) return { kind: "MISMATCH" };
+    const existing = current.marker;
+    const bindingMatches = sameBinding(existing, input);
+    if (existing.status === "PENDING") {
+      try {
+        await reconcilePendingActiveIndex(directory, existing);
+      } catch {
+        if (claim === "CREATED") return { kind: "UNAVAILABLE" };
+      }
+    }
+    if (!bindingMatches) return { kind: "MISMATCH" };
     return {
-      decision: existing.marker.decision,
-      journalStatus: existing.marker.status,
-      kind: "REPLAY"
+      decision: existing.decision,
+      journalStatus: existing.status,
+      kind: claim === "CREATED" ? "RECORDED" : "REPLAY"
     };
   } catch {
     return { kind: "UNAVAILABLE" };
   }
+}
+async function scanToolCallJournal(root, scope, maximumCalls = MAX_ACTIVE_TOOL_CALLS) {
+  if (!validScope(scope)) return { kind: "UNKNOWN" };
+  const directory = journalDirectory(root, scope);
+  const active = activeDirectory(directory);
+  let directoryMetadata;
+  try {
+    directoryMetadata = await lstat2(directory);
+  } catch (error43) {
+    return errorCode3(error43) === "ENOENT" ? { kind: "KNOWN", calls: [] } : { kind: "UNKNOWN" };
+  }
+  if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink() || (directoryMetadata.mode & 63) !== 0 || !await activeIndexReady(directory)) {
+    return { kind: "UNKNOWN" };
+  }
+  let entries;
+  try {
+    const metadata = await lstat2(active);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 63) !== 0) {
+      return { kind: "UNKNOWN" };
+    }
+    entries = await readdir(active, { withFileTypes: true });
+  } catch {
+    return { kind: "UNKNOWN" };
+  }
+  const calls = [];
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name === ACTIVE_INDEX) continue;
+    if (entry.isFile() && ACTIVE_INDEX_TEMPORARY.test(entry.name)) continue;
+    if (entry.isFile() && ACTIVE_MARKER_TEMPORARY.test(entry.name)) continue;
+    const match = /^([a-f0-9]{64})\.json$/.exec(entry.name);
+    if (!entry.isFile() || !match) return { kind: "UNKNOWN" };
+    if (calls.length === maximumCalls) return { kind: "UNKNOWN" };
+    const toolDigest = match[1];
+    const marker = await readMarker(path3.join(active, entry.name), toolDigest);
+    if (marker.kind !== "VALID" || marker.marker.status !== "PENDING" || !decisionLeavesNativeActionPending(marker.marker.decision)) {
+      return { kind: "UNKNOWN" };
+    }
+    const canonical = await readMarker(
+      markerPath(directory, toolDigest),
+      toolDigest
+    );
+    if (canonical.kind !== "VALID") return { kind: "UNKNOWN" };
+    const receipt = await readMarker(
+      receiptPath(directory, toolDigest),
+      toolDigest
+    );
+    if (receipt.kind === "INVALID") return { kind: "UNKNOWN" };
+    if (receipt.kind === "MISSING") {
+      if (!sameMarker(canonical.marker, marker.marker)) {
+        return { kind: "UNKNOWN" };
+      }
+      calls.push({ marker: marker.marker, status: "PENDING" });
+      continue;
+    }
+    if (!sameCompletion(receipt.marker, marker.marker) || !sameMarker(canonical.marker, marker.marker) && !sameCompletion(canonical.marker, marker.marker)) {
+      return { kind: "UNKNOWN" };
+    }
+    calls.push({ marker: marker.marker, status: "COMPLETE" });
+  }
+  return { kind: "KNOWN", calls };
 }
 async function completeToolCallPost(root, input) {
   try {
@@ -14199,7 +14377,19 @@ async function completeToolCallPost(root, input) {
     const directory = journalDirectory(root, input);
     const toolDigest = toolDigestFor(input);
     const destination = markerPath(directory, toolDigest);
-    const current = await readMarker(destination, toolDigest);
+    let current = await readMarker(destination, toolDigest);
+    if (current.kind === "MISSING" && await activeIndexReady(directory)) {
+      const intent = await readMarker(
+        indexingMarkerPath(directory, toolDigest),
+        toolDigest
+      );
+      if (intent.kind === "VALID" && intent.marker.schemaVersion === 2 && intent.marker.status === "PENDING") {
+        await createMarker(directory, destination, intent.marker);
+        current = await readMarker(destination, toolDigest);
+      } else if (intent.kind !== "MISSING") {
+        return "UNAVAILABLE";
+      }
+    }
     if (current.kind === "MISSING") return "OUT_OF_ORDER";
     if (current.kind !== "VALID") return "UNAVAILABLE";
     const pending = decisionLeavesNativeActionPending(current.marker.decision);
@@ -14207,7 +14397,19 @@ async function completeToolCallPost(root, input) {
     const receipt = receiptPath(directory, toolDigest);
     if (current.marker.status === "COMPLETE") {
       const recorded = await readMarker(receipt, toolDigest);
-      return recorded.kind === "VALID" && sameCompletion(recorded.marker, current.marker) ? "DUPLICATE" : "UNAVAILABLE";
+      if (recorded.kind !== "VALID" || !sameCompletion(recorded.marker, current.marker)) {
+        return "UNAVAILABLE";
+      }
+      if (await activeIndexReady(directory)) {
+        await finishActiveIndexMutation(directory, {
+          ...current.marker,
+          status: "PENDING"
+        });
+      }
+      return "DUPLICATE";
+    }
+    if (await activeIndexReady(directory)) {
+      await reconcilePendingActiveIndex(directory, current.marker);
     }
     const completed = {
       ...current.marker,
@@ -14222,6 +14424,42 @@ async function completeToolCallPost(root, input) {
     }
     await replaceMarker(directory, destination, completed);
     return claim === "CREATED" ? "COMPLETED" : "DUPLICATE";
+  } catch {
+    return "UNAVAILABLE";
+  }
+}
+async function retireCompletedToolCalls(root, scope, retainedPersistentToolUseIds) {
+  try {
+    if (!validScope(scope) || retainedPersistentToolUseIds.some((id) => !PERSISTENT_ID.test(id))) {
+      return "UNAVAILABLE";
+    }
+    const retained = new Set(retainedPersistentToolUseIds);
+    const scanned = await scanToolCallJournal(
+      root,
+      scope,
+      Number.MAX_SAFE_INTEGER
+    );
+    if (scanned.kind === "UNKNOWN") return "UNAVAILABLE";
+    const persistentIds = scanned.calls.flatMap(
+      ({ marker }) => marker.schemaVersion === 2 ? [marker.persistentToolUseId] : []
+    );
+    if (new Set(persistentIds).size !== persistentIds.length) {
+      return "UNAVAILABLE";
+    }
+    const completed = scanned.calls.filter(
+      ({ marker, status }) => status === "COMPLETE" && marker.schemaVersion === 2 && !retained.has(marker.persistentToolUseId)
+    );
+    if (!completed.length) return "NOTHING_TO_RETIRE";
+    const active = activeDirectory(journalDirectory(root, scope));
+    for (const { marker } of completed) {
+      try {
+        await unlink3(path3.join(active, `${marker.toolDigest}.json`));
+      } catch (error43) {
+        if (errorCode3(error43) !== "ENOENT") throw error43;
+      }
+    }
+    await syncDirectory3(active);
+    return "RETIRED";
   } catch {
     return "UNAVAILABLE";
   }
@@ -15285,18 +15523,32 @@ function alignStateToActionSignatureKey(state, keyId2) {
   }
 }
 async function completePostTool(runtimeRoot, scope, toolUseId) {
-  const journal = await completeToolCallPost(runtimeRoot, {
-    ...scope,
-    toolUseId
-  });
-  if (journal === "OUT_OF_ORDER") return "NOT_FOUND";
-  if (journal === "UNAVAILABLE") return "UNAVAILABLE";
-  await transitionBrowserTaskStateWithRetry(runtimeRoot, scope, (state) => {
-    if (!state) return { value: {} };
+  const retire = (retainedPersistentToolUseIds) => async () => {
+    const result = await retireCompletedToolCalls(
+      runtimeRoot,
+      scope,
+      retainedPersistentToolUseIds
+    );
+    if (result === "UNAVAILABLE") {
+      throw new Error("completed tool-call index retirement failed");
+    }
+  };
+  return transitionBrowserTaskStateWithRetry(runtimeRoot, scope, async (state) => {
+    const journal = await completeToolCallPost(runtimeRoot, {
+      ...scope,
+      toolUseId
+    });
+    if (journal === "OUT_OF_ORDER") return { value: "NOT_FOUND" };
+    if (journal === "UNAVAILABLE") return { value: "UNAVAILABLE" };
+    if (!state) return { afterCommit: retire([]), value: "COMPLETED" };
     const completed = completePendingTool(state, toolUseId);
-    return completed.stateVersion === state.stateVersion ? { value: {} } : { state: completed, value: {} };
+    const afterCommit = retire(completed.pendingNativeActionIds);
+    return completed.stateVersion === state.stateVersion ? { afterCommit, value: "COMPLETED" } : {
+      afterCommit,
+      state: completed,
+      value: "COMPLETED"
+    };
   });
-  return "COMPLETED";
 }
 async function handleHookEvent(value, environment) {
   if (!isHookInput(value)) return {};

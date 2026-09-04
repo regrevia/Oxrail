@@ -26,6 +26,7 @@ import {
   writeBrowserTaskState,
 } from "../packages/core/src/store.js";
 import {
+  MAX_ACTIVE_TOOL_CALLS,
   completeToolCallPost,
   inspectToolCallJournal,
   recordToolCallPre,
@@ -312,6 +313,33 @@ describe("handoff coordinator", () => {
     });
   });
 
+  it("fails safely before sweeping an over-ceiling active index", async () => {
+    const root = await makeRoot();
+    const lease = makeLease();
+    await prepareFixture(root, lease);
+    const calls = Array.from(
+      { length: MAX_ACTIVE_TOOL_CALLS + 1 },
+      (_, index) => toolInput(`over-ceiling-complete-${index}`),
+    );
+    for (let offset = 0; offset < calls.length; offset += 64) {
+      const batch = calls.slice(offset, offset + 64);
+      await Promise.all(batch.map((input) => recordToolCallPre(root, input)));
+      await Promise.all(
+        batch.map((input) => completeToolCallPost(root, input)),
+      );
+    }
+
+    await expect(
+      activatePreparedHandoff(root, lease, NOW, verifyTab),
+    ).resolves.toEqual({ kind: "FAILED_SAFE" });
+    await expect(inspectToolCallJournal(root, SCOPE)).resolves.toEqual({
+      kind: "UNKNOWN",
+    });
+    await expect(readHandoffGate(root, SCOPE)).resolves.toMatchObject({
+      status: "PREPARING",
+    });
+  }, 60_000);
+
   it("mints the tab receipt only after older native actions drain", async () => {
     const root = await makeRoot();
     const lease = makeLease();
@@ -342,6 +370,12 @@ describe("handoff coordinator", () => {
       }),
     ).resolves.toMatchObject({ kind: "ACTIVE" });
     expect(verifications).toBe(1);
+    await expect(inspectToolCallJournal(root, SCOPE)).resolves.toEqual({
+      completedToolUseIds: [],
+      kind: "KNOWN",
+      legacyPending: false,
+      pendingToolUseIds: [],
+    });
   });
 
   it("reconciles a receipt-first Post crash with the exact pending state id", async () => {

@@ -20,6 +20,7 @@ import {
   migrateLegacyActionSignatureBaseline,
   readHandoffGate,
   recordToolCallPre,
+  retireCompletedToolCalls,
   stageToolDecision,
   transitionBrowserTaskStateWithRetry,
 } from "../../core/src/index.js";
@@ -246,20 +247,37 @@ async function completePostTool(
   scope: ReturnType<typeof hookBrowserTaskScope>,
   toolUseId: string,
 ): Promise<"COMPLETED" | "NOT_FOUND" | "UNAVAILABLE"> {
-  const journal = await completeToolCallPost(runtimeRoot, {
-    ...scope,
-    toolUseId,
-  });
-  if (journal === "OUT_OF_ORDER") return "NOT_FOUND";
-  if (journal === "UNAVAILABLE") return "UNAVAILABLE";
-  await transitionBrowserTaskStateWithRetry(runtimeRoot, scope, (state) => {
-    if (!state) return { value: {} };
+  const retire =
+    (retainedPersistentToolUseIds: readonly string[]) => async () => {
+      const result = await retireCompletedToolCalls(
+        runtimeRoot,
+        scope,
+        retainedPersistentToolUseIds,
+      );
+      if (result === "UNAVAILABLE") {
+        throw new Error("completed tool-call index retirement failed");
+      }
+    };
+  return transitionBrowserTaskStateWithRetry<
+    "COMPLETED" | "NOT_FOUND" | "UNAVAILABLE"
+  >(runtimeRoot, scope, async (state) => {
+    const journal = await completeToolCallPost(runtimeRoot, {
+      ...scope,
+      toolUseId,
+    });
+    if (journal === "OUT_OF_ORDER") return { value: "NOT_FOUND" as const };
+    if (journal === "UNAVAILABLE") return { value: "UNAVAILABLE" as const };
+    if (!state) return { afterCommit: retire([]), value: "COMPLETED" as const };
     const completed = completePendingTool(state, toolUseId);
+    const afterCommit = retire(completed.pendingNativeActionIds);
     return completed.stateVersion === state.stateVersion
-      ? { value: {} }
-      : { state: completed, value: {} };
+      ? { afterCommit, value: "COMPLETED" as const }
+      : {
+          afterCommit,
+          state: completed,
+          value: "COMPLETED" as const,
+        };
   });
-  return "COMPLETED";
 }
 
 /** Handle one host event. Any error is deliberately fail-open in runHookCli. */

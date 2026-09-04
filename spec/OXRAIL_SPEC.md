@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.2
+# Oxrail — 唯一实现规范（SPEC）v1.0.3
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.2
+  spec_version: 1.0.3
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -178,6 +178,7 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HO-008**：Browser SMH verifier、extension 与普通 Oxrail runtime 在 Handoff 期间禁止读取字段值、键盘输入、剪贴板、截图、Cookie、Token 或密码管理器内容；唯一例外是 `REQ-CRED-012` 允许 credential enclave 在用户显式粘贴提交后对系统 pasteboard 做精确 compare-and-clear，该值不得进入 Browser SMH 或普通 runtime。
 - **REQ-HO-017**：USER lease 激活必须依赖新鲜 Host-minted same-tab/browser-instance/native-action-fence receipt；receipt 必须绑定本代 admission generation，且只能在 Host 确认该 barrier 之前已准入或排队的 native Browser calls 全部终结后签发；裸 `tabId`、Agent/page 声明或仅本地 journal 清空不是权限。
 - **REQ-HO-018**：Handoff 使用 lock 前 write-ahead、单调 generation、终态 tombstone 与 Browser Pre 持锁前后复读，阻断并发/ABA 穿透。
+- **REQ-HO-019**：Handoff activation 只扫描有界 active ToolCall index；pending 发布必须以 mutation intent 覆盖 canonical/index crash window，Post 与 task state 在同一锁内协调，state 提交后才可回收完成项；缺失、超限、旧格式或不一致索引一律 `UNKNOWN` 并停用 Handoff，不得猜测为空。
 
 ### 安全凭据通道
 
@@ -2882,7 +2883,11 @@ EvidenceState        # run_id / WP / test manifest
 必须满足：
 
 - 每个 `tool_use_id` 的 Pre/Post 事件至多影响状态一次；
-- 持久 ToolCall marker 使用 v2 格式保存去敏的 `persistentToolUseId`，使 receipt-first crash 后可把完成回执与 `BrowserTaskState.pendingNativeActionIds` 精确协调；legacy/损坏/缺失映射不得凭 aggregate pending 状态猜测完成；
+- 持久 ToolCall canonical marker 使用 v2 格式保存去敏的 `persistentToolUseId`，并保留 first-decision replay history；Handoff activation 只读取同一 task journal 下有版本 sentinel 的 `active/` 索引，不得随历史总量全表扫描；
+- pending marker 发布顺序固定为 private mutation intent → canonical first-decision claim → 独立 active marker → 目录 fsync → 清除 intent；任一中断期间索引必须返回 `UNKNOWN`，Post 可从完整 intent 恢复 canonical/active/completion；
+- Post journal 更新与 `BrowserTaskState` 清理必须在同一 per-task lock 内串行化；只有 state 已持久化且不再保留对应 `persistentToolUseId` 后才可回收完成的 active marker，并应在后续成功 Post/Handoff 协调中批量清理 crash 遗留项；
+- active index 同时存在的 call 上限为 256；超限、不一致、损坏、缺少可信 sentinel 或旧版未索引 journal 均视为 `UNKNOWN`，Handoff 保持 `INACTIVE/FAILED_SAFE`，但 Native Computer Use 继续遵循基础 fail-open；当前开发版不原地迁移无 sentinel 的旧 session，须以新 session 重建索引；
+- receipt-first crash 后必须把完成回执与 `BrowserTaskState.pendingNativeActionIds` 精确协调；legacy/损坏/缺失映射不得凭 aggregate pending 状态猜测完成；
 - 文件写入采用 temp + fsync + atomic rename；
 - session 状态带 `stateVersion`，更新使用 CAS；
 - Handoff lease 带单调 `leaseEpoch`；旧事件不能恢复新 lease；
@@ -3772,6 +3777,8 @@ Conversation UI and non-browser discussion = MAY CONTINUE
 
 租约激活采用 write-ahead admission gate：先原子持久化 `PREPARING/generation=n+1`，再取得 task-state lock、精确协调 v2 ToolCall journal 与 pending state，最后验证 Host-minted tab-binding/native-action-fence receipt 并切换为 `ACTIVE`。该 receipt 必须绑定本代 generation，并由 Host 在观察到 barrier 后等待所有更早已准入或排队的 native Browser calls 终结后签发；这也覆盖 Hook fail-open 未能落 journal 的调用。普通 Browser Pre 在 lock 外保存 gate 快照，进入 lock 后必须复读；状态不是 `OPEN` 或 generation 改变时均不得进入受跟踪的 native action journal。取消/释放只写同一 generation 的终态 tombstone，不删除代际证据。
 
+ToolCall 的 canonical v2 marker/receipt 为 O(1) duplicate replay history；Handoff 不扫描这些历史文件，只扫描有 sentinel、mutation intent 与 256-call ceiling 的 `active/` 索引。Pre 在 canonical 前写 intent，Post 在同一 task lock 内修复或完成该 intent；完成项只有在 durable state 已移除对应 pending identity 后才回收，且后续成功 Post 或 activation 会清理 state 不再引用的 crash 遗留项。任何 dirty intent、active/canonical/receipt 不一致、active ceiling 超限或 legacy 无 sentinel 状态都使本次 Handoff 协调为 `UNKNOWN/FAILED_SAFE`，不得把空目录或缺失索引解释成“全部 native action 已完成”。正常 steady-state activation 的工作量只与当前 active calls 有关；异常恢复与 session-level 历史保留另行计量，不得冒充正常 P95。
+
 task state 与 barrier 的 `ACTIVE/CANCELLED` 发布必须由同一 per-task lock 串行化；状态先提交、barrier 后发布的 crash window 保持 `PREPARING` 并拒绝 Agent，不得让不同 receipt 并发覆盖。重复的同 lease activation 可从已持久化的同一 ACTIVE barrier 幂等确认，不要求 Host 重签字节完全相同的新 receipt。过期 `PREPARING` 只有在持久状态仍证明 `RUNNING + NATIVE` 时才可无需原始 lease 写入 `CANCELLED` tombstone；若状态已是 Human/user-held，则保持封锁并报告 `USER_LEASE_RECOVERY_REQUIRED`，重启后恢复 UI 与重新验证，禁止猜测交还 Agent。
 
 tab-binding receipt 必须来自当前受信 Host adapter/verifier，至少绑定 Host Profile、browser instance、同一真实 `tabId`/session、origin、初始 document binding、本代 admission generation、native-action fence、签发时间和有效期。fence 必须证明 receipt 签发时本代 barrier 之前已准入或排队的 Host native Browser calls 均已终结，且验证必须发生在本地 journal 协调之后。Agent/page 提供的数字 `tabId`、URL、自称“当前页面”或自行生成的 fence 都只是非可信输入，不能据此移动页面或激活 USER lease。本地 gate 只是在正常工作的受信 Hook 内关闭 admission；它不能替代宿主对全部 Browser action/observation 路径的独立覆盖证明，也不能单独把 Handoff 标成 `ACTIVE`。
@@ -4089,6 +4096,7 @@ ChatGPT Work lifecycle parity with Codex: UNKNOWN
 - **REQ-HO-016**：Browser SMH 与普通 Oxrail 数据流中任何 secret canary occurrence = 0；Credential Channel 只适用 `SEC-21.2B` 的限定 occurrence，不得扩大到 Browser SMH。
 - **REQ-HO-017**：Browser USER lease 激活前必须验证新鲜、Host-minted 且绑定当前 Host Profile、browser instance、同一 `tabId`/session/origin/document、本代 admission generation 与 native-action fence 的 receipt；fence 只能在 barrier 可见且 Host 确认此前已准入或排队的 native Browser calls 全部终结后签发，并在本地 journal 协调后验证。Agent、模型、网页、裸 `tabId` 或仅 journal 清空不能自证该绑定与静默点。
 - **REQ-HO-018**：Handoff admission gate 必须在取得 task-state lock 前持久化 `PREPARING`，并保留单调 generation 的终态 tombstone；Browser Pre 在 lock 外与 lock 内各读取一次，只有两次均为同一 `OPEN` generation 才可进入 native action journal，防止被跟踪调用的并发和 ABA 穿透；任何未能落 journal 的 fail-open 调用仍必须由 `REQ-HO-017` 的 Host native-action fence 覆盖。state 与 barrier 的 activation/cancel 发布必须在同一 task lock 内串行化；过期准备仅可在仍证明 Native ownership 时自动取消，user-held/unknown 必须保持封锁并进入显式恢复。
+- **REQ-HO-019**：Handoff activation 的正常路径必须只扫描带可信 sentinel 的 bounded active ToolCall index，而不是 canonical replay history；pending Pre 必须以 durable mutation intent 覆盖 canonical/index 之间的 crash window，Post journal 与 state coordination 必须共用 per-task lock，active completion 仅可在 durable state 不再引用对应 identity 后回收，并由后续成功 Post/activation 清理可证明已不再引用的 crash 遗留项。active 同时存在超过 256 项、dirty intent、legacy 无 sentinel、缺失或不一致 marker/receipt 均返回 `UNKNOWN/FAILED_SAFE`，禁止猜测清空；Native Computer Use 仍按基础 Hook fail-open 合同继续。
 
 ---
 
@@ -9313,7 +9321,7 @@ Accept bounded, honest recovery behavior and its claim wording.
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-RLS-030`, `WP-FND-002` |
-| Related | `REQ-HO-001`, `REQ-HO-003`, `REQ-NIF-008`, `SEC-19` |
+| Related | `REQ-HO-001`, `REQ-HO-003`, `REQ-HO-017`, `REQ-HO-018`, `REQ-HO-019`, `REQ-NIF-008`, `SEC-19` |
 
 **目标**
 
@@ -9325,6 +9333,7 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 - lease epoch/nonce
 - durable admission generation/tombstone
 - exact ToolCall journal reconciliation
+- bounded active ToolCall index with crash intent/recovery
 - all-route deny hooks
 - crash/timeout cleanup
 
@@ -9335,6 +9344,7 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 - [ ] Illegal/late/replayed events fail closed.
 - [ ] A stale Pre cannot cross a completed prepare/terminal generation (ABA).
 - [ ] USER lease activation requires a fresh Host-minted same-tab receipt.
+- [ ] Steady-state activation scans only bounded active calls; dirty, legacy, corrupt, or over-ceiling indexes fail safely.
 - [ ] Conversation state remains alive.
 
 **测试 / 证据**
@@ -11757,6 +11767,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.3 — 2026-09-04
+
+- ToolCall canonical v2 history 与 bounded `active/` Handoff index 分离，正常 activation 不再随历史调用数线性扫描；
+- pending Pre 新增 durable mutation intent，覆盖 canonical 与 active index 之间的 crash window；Post 与 state cleanup 在同一 task lock 内协调并可恢复 intent；
+- active completion 仅在 durable state 不再引用后回收，后续 Post/activation 批量清理 crash 遗留；超过 256 个 active calls、dirty/legacy/corrupt index 均明确 `UNKNOWN/FAILED_SAFE`，不影响 Native 基础 fail-open。
 
 ### v1.0.2 — 2026-09-04
 
