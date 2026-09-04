@@ -5,6 +5,7 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+- Added a runtime-only non-secret Handoff verification sample and pure completion-candidate gate based on authenticated active probes, receiver monotonic time, continuous origin-only coverage, and a required later locked Core recheck; it cannot verify, resume, or release the user lease.
 - Split minimal Agent-facing Handoff input/result from strict runtime-only Host request, completion, and result contracts; only the exactly equivalent tool-input JSON Schema is published, all validation is non-authorizing, and Handoff remains inactive.
 - Added a process-local, fixture-only macOS opaque credential-reference lifecycle with Security.framework randomness and exact scope, TTL, generation, registry-hash, revocation, and one-shot replay checks; the public observation never returns the reference and remains inactive.
 - Added a build-fixed, read-only macOS credential-registry validator for one exact API-key fixture template/HTTPS consumer; it only reports non-authorizing structure evidence and always leaves Credential activation inactive.

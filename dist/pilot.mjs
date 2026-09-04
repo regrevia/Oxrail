@@ -12354,6 +12354,12 @@ var handoffCompletionKind = external_exports.enum([
   "CANCELLED",
   "UNSAFE_ORIGIN"
 ]);
+var handoffAutomaticPhase = external_exports.enum([
+  "CHALLENGE_GONE",
+  "AUTH_MARKER_PRESENT",
+  "EXPECTED_ROUTE",
+  "DIALOG_CLOSED"
+]);
 var handoffPhaseSignal = external_exports.enum([
   "CHALLENGE_GONE",
   "AUTH_MARKER_PRESENT",
@@ -12469,6 +12475,37 @@ var HandoffCompletionSignalSchema = external_exports.strictObject({
   }
 }).describe(
   "Strict runtime-only non-secret Handoff completion signal. It is not published as portable JSON Schema because its refinements require @oxrail/protocol; validation is non-authorizing and the current lease binding must still be verified."
+);
+var HandoffVerificationSampleSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  handoffId: handoffText,
+  sessionId: handoffText,
+  taskId: handoffText,
+  leaseEpoch: handoffSafePositiveInt,
+  nonce: handoffNonce,
+  probeSequence: handoffSafePositiveInt,
+  verifierContextBindingHash: external_exports.string().regex(/^[a-f0-9]{64}$/, "expected a lowercase SHA-256 hex digest"),
+  tabId: handoffSafeNonNegativeInt,
+  initialDocumentBinding: handoffText,
+  observedDocumentBinding: handoffText,
+  origin: handoffOrigin,
+  stateEpoch: handoffSafePositiveInt,
+  completionState: external_exports.enum(["CONFIRMED", "NOT_CONFIRMED", "UNKNOWN"]),
+  automaticPhase: handoffAutomaticPhase.optional(),
+  tabState: external_exports.enum(["BOUND", "CLOSED", "MISMATCH", "UNKNOWN"]),
+  navigationState: external_exports.enum(["IDLE", "CHANGING", "UNKNOWN"]),
+  redirectState: external_exports.enum(["CONTINUOUSLY_ALLOWED", "UNSAFE_SEEN", "UNKNOWN"]),
+  sensitivePhase: external_exports.enum(["CLEARED", "ACTIVE", "UNKNOWN"])
+}).superRefine((sample, context) => {
+  if (sample.completionState !== "CONFIRMED" && sample.automaticPhase !== void 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["automaticPhase"],
+      message: "only a confirmed completion may report an automatic phase"
+    });
+  }
+}).describe(
+  "Strict runtime-only non-secret Handoff verification sample. It is non-authorizing and is not published as portable JSON Schema; authenticated transport provenance and current Host bindings must still be verified, and the context hash is not authentication."
 );
 var HandoffResultBodySchema = external_exports.strictObject({
   outcome: handoffOutcome,

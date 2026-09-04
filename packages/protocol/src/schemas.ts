@@ -249,6 +249,12 @@ const handoffCompletionKind = z.enum([
   "CANCELLED",
   "UNSAFE_ORIGIN",
 ]);
+const handoffAutomaticPhase = z.enum([
+  "CHALLENGE_GONE",
+  "AUTH_MARKER_PRESENT",
+  "EXPECTED_ROUTE",
+  "DIALOG_CLOSED",
+]);
 const handoffPhaseSignal = z.enum([
   "CHALLENGE_GONE",
   "AUTH_MARKER_PRESENT",
@@ -406,6 +412,49 @@ export const HandoffCompletionSignalSchema = z
   );
 export type HandoffCompletionSignal = z.infer<
   typeof HandoffCompletionSignalSchema
+>;
+
+export const HandoffVerificationSampleSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    handoffId: handoffText,
+    sessionId: handoffText,
+    taskId: handoffText,
+    leaseEpoch: handoffSafePositiveInt,
+    nonce: handoffNonce,
+    probeSequence: handoffSafePositiveInt,
+    verifierContextBindingHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/, "expected a lowercase SHA-256 hex digest"),
+    tabId: handoffSafeNonNegativeInt,
+    initialDocumentBinding: handoffText,
+    observedDocumentBinding: handoffText,
+    origin: handoffOrigin,
+    stateEpoch: handoffSafePositiveInt,
+    completionState: z.enum(["CONFIRMED", "NOT_CONFIRMED", "UNKNOWN"]),
+    automaticPhase: handoffAutomaticPhase.optional(),
+    tabState: z.enum(["BOUND", "CLOSED", "MISMATCH", "UNKNOWN"]),
+    navigationState: z.enum(["IDLE", "CHANGING", "UNKNOWN"]),
+    redirectState: z.enum(["CONTINUOUSLY_ALLOWED", "UNSAFE_SEEN", "UNKNOWN"]),
+    sensitivePhase: z.enum(["CLEARED", "ACTIVE", "UNKNOWN"]),
+  })
+  .superRefine((sample, context) => {
+    if (
+      sample.completionState !== "CONFIRMED" &&
+      sample.automaticPhase !== undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["automaticPhase"],
+        message: "only a confirmed completion may report an automatic phase",
+      });
+    }
+  })
+  .describe(
+    "Strict runtime-only non-secret Handoff verification sample. It is non-authorizing and is not published as portable JSON Schema; authenticated transport provenance and current Host bindings must still be verified, and the context hash is not authentication.",
+  );
+export type HandoffVerificationSample = z.infer<
+  typeof HandoffVerificationSampleSchema
 >;
 
 const HandoffResultBodySchema = z.strictObject({

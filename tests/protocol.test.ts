@@ -18,6 +18,7 @@ import {
   HandoffResultSchema,
   HandoffToolInputSchema,
   HandoffToolResultSchema,
+  HandoffVerificationSampleSchema,
   HostProfileSchema,
   NativePrimitiveSchema,
   ReasonCodeSchema,
@@ -72,6 +73,28 @@ const handoffCompletionSignal = () => ({
   kind: "AUTH_MARKER_PRESENT" as const,
   confidence: "DETERMINISTIC" as const,
   observedAt: 2_000,
+});
+
+const handoffVerificationSample = () => ({
+  schemaVersion: 1 as const,
+  handoffId: "handoff-1",
+  sessionId: "session-1",
+  taskId: "task-1",
+  leaseEpoch: 2,
+  nonce: handoffNonce,
+  probeSequence: 1,
+  verifierContextBindingHash: sha,
+  tabId: 17,
+  initialDocumentBinding: "document-1",
+  observedDocumentBinding: "document-2",
+  origin: "https://accounts.example.test",
+  stateEpoch: 3,
+  completionState: "CONFIRMED" as const,
+  automaticPhase: "AUTH_MARKER_PRESENT" as const,
+  tabState: "BOUND" as const,
+  navigationState: "IDLE" as const,
+  redirectState: "CONTINUOUSLY_ALLOWED" as const,
+  sensitivePhase: "CLEARED" as const,
 });
 
 const handoffResult = () => ({
@@ -862,6 +885,33 @@ describe("versioned protocol", () => {
     }
   });
 
+  it("accepts only non-secret, internally consistent Handoff verification samples", () => {
+    const sample = handoffVerificationSample();
+    expect(HandoffVerificationSampleSchema.parse(sample)).toEqual(sample);
+
+    for (const invalid of [
+      { ...sample, verifierContextBindingHash: "A".repeat(64) },
+      { ...sample, stateEpoch: 0 },
+      {
+        ...sample,
+        completionState: "NOT_CONFIRMED",
+        automaticPhase: "AUTH_MARKER_PRESENT",
+      },
+      {
+        ...sample,
+        completionState: "UNKNOWN",
+        automaticPhase: "EXPECTED_ROUTE",
+      },
+      { ...sample, secret: "content-canary" },
+      { ...sample, fullUrl: "https://accounts.example.test/private?q=x" },
+      { ...sample, DOM: "content-canary" },
+    ]) {
+      expect(HandoffVerificationSampleSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+  });
+
   it("allows only consistent, secret-free Handoff results", () => {
     const result = handoffResult();
     const {
@@ -1098,6 +1148,7 @@ describe("versioned protocol", () => {
       "handoff-request.schema.json",
       "handoff-result.schema.json",
       "handoff-tool-result.schema.json",
+      "handoff-verification-sample.schema.json",
     ]) {
       expect(names).not.toContain(runtimeOnly);
     }

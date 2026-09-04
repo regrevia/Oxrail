@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.13
+# Oxrail — 唯一实现规范（SPEC）v1.0.14
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.13
+  spec_version: 1.0.14
   status: AUTHORITATIVE
   effective_date: 2026-09-04
   evidence_cutoff: 2026-09-04
@@ -3998,6 +3998,42 @@ interface CompletionSignal {
 
 当前 document 与初始 binding 分列，允许合法导航，但不能把导航后的 binding 冒充初始 scope。接收端必须从当前真实 tab 独立重读 origin 与 document binding，并与 signal 交叉核对；不能信任 signal 自报字段。`observedAt` 不得替代接收端 monotonic freshness/settle 判断。任何额外字段，尤其 value/text/clipboard/screenshot/cookie/token/完整 URL，必须被拒绝。
 
+隔离 verifier 的主动采样采用以下 runtime-only strict contract；它不是 Agent/page wire，也不发布无法表达全部 refinement 的 portable JSON Schema：
+
+```ts
+interface HandoffVerificationSample {
+  schemaVersion: 1;
+  handoffId: string;
+  sessionId: string;
+  taskId: string;
+  leaseEpoch: number;
+  nonce: string;
+  probeSequence: number;
+  verifierContextBindingHash: string;
+  tabId: number;
+  initialDocumentBinding: string;
+  observedDocumentBinding: string;
+  origin: string;
+  stateEpoch: number;
+  completionState: "CONFIRMED" | "NOT_CONFIRMED" | "UNKNOWN";
+  automaticPhase?:
+    | "CHALLENGE_GONE"
+    | "AUTH_MARKER_PRESENT"
+    | "EXPECTED_ROUTE"
+    | "DIALOG_CLOSED";
+  tabState: "BOUND" | "CLOSED" | "MISMATCH" | "UNKNOWN";
+  navigationState: "IDLE" | "CHANGING" | "UNKNOWN";
+  redirectState: "CONTINUOUSLY_ALLOWED" | "UNSAFE_SEEN" | "UNKNOWN";
+  sensitivePhase: "CLEARED" | "ACTIVE" | "UNKNOWN";
+}
+```
+
+`verifierContextBindingHash` 是接收端保留 context 的一致性标签，必须域分离地绑定 current Host Profile、browser instance、tab-binding receipt、admission generation、verifier build、固定 completion-rule registry、authenticated channel instance 与 monotonic epoch；Hash 字段本身不是 authentication 或 authority。coordinator 必须先通过 authenticated isolated-verifier channel 主动发送不可回退的 `probeSequence`，再验证响应原样回显；每个 sequence 只能对应一个当前 outstanding challenge，accept 时原子消费，只有同一 context 中最新两次已消费、严格递增且之间没有 outstanding/gap 的 challenge 才能组成 pair。被动事件、缓存响应、重复/乱序 sequence、旧 channel instance、verifier restart 或 event gap 均不得组成 quiet proof。
+
+`stateEpoch` 由 authenticated continuous verifier 在 USER lease 激活且 origin feed 已连续覆盖后从 `1` 开始；top navigation start/commit/history transition、tab 或 document identity 变化、sensitive/completion phase 变化都必须在下一 sample 前递增。事件丢失、监控权限变化、channel/verifier restart 或无法确定是否遗漏事件时必须使整个 verifier context 失效并返回 `UNKNOWN`，不能仅保留旧 epoch；达到 `Number.MAX_SAFE_INTEGER` 时同样失效，禁止 wrap/reset 后复用旧 context。只有 verifier 已持续观察整个两次主动 probe 间隔，两个端点相同的 epoch 才能证明期间未发生这些变化。
+
+verifier 只读取 origin-only top-navigation feed、tab/document identity 与 build-fixed 非敏感结构/phase 枚举。`redirectState` 从 lease activation 起连续且 sticky 累积：任一未授权 origin 永久成为 `UNSAFE_SEEN`，丢失事件、无法证明连续覆盖或重启后为 `UNKNOWN`；只观察最终 origin 不能得到 `CONTINUOUSLY_ALLOWED`。`sensitivePhase=CLEARED` 与 `completionState=CONFIRMED` 只能由绑定当前 origin/type 的固定规则给出；权限缺失、selector/frame 覆盖不全、读取异常或“未看见”均为 `UNKNOWN`。verifier 不得读取或散列完整 URL/path/query、DOM text、selector、字段值、按键、clipboard、Cookie、token、网络 payload、screenshot 或页面自由文本；若宿主不能提供 origin-only 连续 feed，就必须报告 `redirectState=UNKNOWN`。
+
 ## 19.10 Settle 与 Verify
 
 完成信号之后不得立即恢复 Agent。必须：
@@ -4018,6 +4054,21 @@ minimum_settle_ms = 500
 maximum_auto_verify_ms = 5000
 heuristic_requires_two_consistent_samples = true
 ```
+
+quiet/settle 必须由两次 coordinator 主动 challenge 的 accepted sample 组成；`acceptedAtMonotonicMs` 只能由接收端在 authenticated channel 验证之后附加，不得来自 sender。两份 sample 必须拥有相同的 verifier context、state epoch、全部 Handoff binding、origin、observed document、completion state 与 phase，且 `probeSequence` 和接收端时间严格递增、间隔至少 `minimum_settle_ms`；两份都必须为 `BOUND + IDLE + CONTINUOUSLY_ALLOWED + CLEARED + CONFIRMED`。两次 acceptance、candidate evaluation 与后续锁内 recheck 都必须处于 receiver-monotonic Handoff deadline 内。automatic signal 还必须与两份 sample 的 `automaticPhase` 精确一致并属于当前 policy，且从 signal 的 receiver-monotonic acceptance 到 candidate evaluation 不得超过 `maximum_auto_verify_ms`；heuristic 不得混用不同 epoch/context/phase 的样本。wire `observedAt`、wall clock、sender timestamp 或 sender 自报 stable time 均不得建立 freshness/quiet proof。
+
+authenticated `MANUAL_DONE` 只启动相同的双采样验证，不能把 `UNKNOWN/ACTIVE/UNSAFE_SEEN` 改成安全值，也不能单独证明完成。`CANCELLED` 只产生待锁内提交的取消请求；`UNSAFE_ORIGIN`、trusted tab closed/mismatch 或 sticky unsafe redirect 只产生安全失败候选。
+
+completion candidate evaluator 必须是无副作用纯函数，最多返回：
+
+```text
+KEEP_USER_LEASE
+CANCEL_REQUESTED
+FAILED_SAFE
+READY_FOR_LOCKED_VERIFY
+```
+
+`READY_FOR_LOCKED_VERIFY` 不是 `VERIFIED` 或 resume authority。它必须携带仅供 Core 使用的 exact `handoffId/sessionId/taskId/leaseEpoch/nonce/tabId/initialDocumentBinding/observedDocumentBinding/origin/expectedStateVersion`、verifier context/state epoch、两次 probe sequence、第二次 receiver acceptance time、phase/basis、Handoff monotonic deadline 与 automatic candidate deadline；除这些 control-plane binding 外不含页面内容或用户 secret。candidate 及其 nonce 禁止进入模型、日志或持久化，且不得跨 event loop 排队或复用。第二份 sample 后，Core 必须立即取得 per-task lock，确认这些 sequence 尚未被 candidate consume ledger 使用，再重新读取当前 task/lease/gate/barrier/active ToolCall index，把全部 identity/document/origin/stateVersion 与 candidate 逐字段精确核对（nonce 使用常量时间比较），确认无 competing lease，重新读取同一真实 tab 的 origin/document binding，并仅从 candidate 的 `expectedStateVersion` 执行 CAS 原子进入 `HANDOFF_VERIFYING`，同时一次性消费 candidate binding；任一 deadline 到期、重复、mutation、mismatch 或 crash recovery 均保持 Human ownership 或安全失败。浏览器 sample 无权上报或证明 `leaseConflict=NONE`。candidate evaluator 禁止生成 `HandoffResult`、调用 `transitionHandoffLease`/`beginResume`/`finishResume`、恢复 tab、释放 USER lease、归还 Agent ownership 或标记任何 VERIFIED 状态。
 
 不确定时保持用户租约并显示一键 Done/Cancel，不自动交回。
 
@@ -11841,6 +11892,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.14 — 2026-09-04
+
+- 新增 runtime-only、strict 且 non-authorizing 的 `HandoffVerificationSample`：只允许 origin-only 连续导航状态、tab/document identity 与固定非敏感 phase 枚举，不允许完整 URL、DOM/text/value/screenshot/token 或其 Hash；
+- quiet proof 固定为同一 authenticated verifier context/state epoch 下的两次 coordinator 主动 challenge，并只使用接收端 monotonic acceptance time；final origin、sender 时间、被动/缓存 sample 与 self-reported Hash 均不能证明 settle 或连续 redirect；
+- completion evaluator 输出限制为保持用户租约、待锁内取消、安全失败或 `READY_FOR_LOCKED_VERIFY`；Core 仍须持 per-task lock 重读 lease/state/gate/barrier/active index 与当前 tab 后 CAS，sample 不得自证无 lease conflict，本 foundation 不生成 VERIFIED/result/resume 或恢复 Agent。
 
 ### v1.0.13 — 2026-09-04
 
