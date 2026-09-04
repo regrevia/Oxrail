@@ -148,6 +148,9 @@ export const ToolSchemaRegistrySchema = z
 
 export type ToolSchemaRegistry = z.infer<typeof ToolSchemaRegistrySchema>;
 
+export const toolSchemaRegistryHash = (registry: ToolSchemaRegistry): string =>
+  deterministicDigest(REGISTRY_DIGEST_DOMAIN, registry);
+
 export interface RawBrowserToolCall {
   toolInput: unknown;
   toolName: string;
@@ -238,7 +241,7 @@ export function decodeBrowserAction(
   }
   const binding = parsedBinding.data;
   if (
-    deterministicDigest(REGISTRY_DIGEST_DOMAIN, registry) !==
+    toolSchemaRegistryHash(registry) !==
     binding.expectedRegistryHash.toLowerCase()
   ) {
     return unsupported("tool registry content does not match its pinned hash");
@@ -347,7 +350,9 @@ export function decodeBrowserAction(
         risk: [],
       }
     : undefined;
-  const identity: Record<string, z.infer<typeof identityValue>> = {};
+  const identity: Array<
+    readonly [readonly string[], z.infer<typeof identityValue>]
+  > = [];
   for (const segments of contract.identityPaths) {
     const value = identityValue.safeParse(valueAt(call.toolInput, segments));
     if (!value.success) {
@@ -355,7 +360,7 @@ export function decodeBrowserAction(
         "tool input has an invalid declared identity field",
       );
     }
-    identity[segments.join(".")] = value.data;
+    identity.push([segments, value.data]);
   }
 
   let inputDigest: string;

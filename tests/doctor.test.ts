@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HostProfileSchema,
   NativePrimitiveSchema,
+  toolRegistryManifestBinding,
 } from "../packages/protocol/src/index.js";
 import {
   formatDoctorReport,
@@ -52,7 +53,7 @@ const fixtureInventory = {
 
 const fixtureProfile = (definitionHash: string) =>
   HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 4,
     profileId: "hp_doctor_fixture",
     setup: {
       lifecycle: "CONFIGURED",
@@ -81,6 +82,7 @@ const fixtureProfile = (definitionHash: string) =>
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["fixture.native.browser"],
       matcherEvidenceHash: matcherEvidenceHashForInventory(fixtureInventory),
+      browserTools: [],
     },
     action: {
       control: "MICRO_ACTION",
@@ -173,6 +175,33 @@ const fixtureProfile = (definitionHash: string) =>
       oneClickFallback: "unsupported",
       chatMessageRequired: "unknown",
     },
+    credentialChannel: {
+      activation: "INACTIVE",
+      inactiveReasons: ["fixture has no credential helper"],
+      capability: {
+        platform: "macos",
+        surface: "NONE",
+        storage: "NONE",
+        acceptedKinds: [],
+        consumerMode: "NONE",
+        consumerReadiness: "UNSUPPORTED",
+        opaqueReferenceOnly: false,
+        genericSecretExport: "DENIED",
+      },
+      helperIdentity: "unknown",
+      launcherIdentity: "unknown",
+      secureInput: "unknown",
+      agentExecutionIsolation: "unknown",
+      pasteboardHygiene: "unknown",
+      registryManifestVerification: "unknown",
+      secretLeakBench: "unknown",
+      realConsumerProbe: "unknown",
+      keychainRoundTrip: "unknown",
+      opaqueRefOnly: "unknown",
+      scopeBinding: "unknown",
+      expiryAndRevocation: "unknown",
+      genericExportDenied: "unknown",
+    },
     evidence: {
       probeSuiteVersion: "fixture-1",
       fixtureRevision: "fixture-1",
@@ -185,6 +214,7 @@ const fixtureProfile = (definitionHash: string) =>
       mode: "ADVISORY_ONLY",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: ["fixture-only action guard"],
       forbiddenClaims: ["secret protection", "handoff"],
     },
@@ -258,6 +288,33 @@ describe("oxrail doctor", () => {
     expect(report.optimization).toBe("BYPASSED");
     expect(report.safetyProtectionActive).toBe(false);
     expect(report.handoffProtectionActive).toBe(false);
+    expect(report.credentialProtectionActive).toBe(false);
+    expect(report.credentialInactiveReasons).toEqual([
+      "native macOS attestation verifier unavailable",
+    ]);
+    expect(report.credentialChecks.map((check) => check.id)).toEqual([
+      "platform",
+      "helper-identity",
+      "launcher-identity-and-rollback-floor",
+      "hook-trust-root-binding",
+      "sealed-registry-manifest",
+      "template-registry",
+      "consumer-registry-and-real-probe",
+      "keychain-access",
+      "agent-execution-isolation",
+      "pasteboard-hygiene",
+      "opaque-ref-scope-ttl-revocation",
+      "generic-export-denied",
+    ]);
+    expect(report.credentialChecks[0]).toMatchObject({
+      verdict: "passed",
+      detail: "current Host identity reports macOS",
+    });
+    expect(
+      report.credentialChecks
+        .slice(1)
+        .every(({ verdict }) => verdict === "unknown"),
+    ).toBe(true);
     const formatted = formatDoctorReport(report);
     expect(formatted).toContain("Review and trust");
     expect(formatted).toContain("Plugin package manifest present: PASS");
@@ -272,12 +329,22 @@ describe("oxrail doctor", () => {
     expect(formatted).toContain("Synthetic probe: UNKNOWN");
     expect(formatted).toContain("First browser hook seen: NO");
     expect(formatted).toContain("Verification source: none");
+    expect(formatted).toContain(
+      "Credential protection: INACTIVE — native macOS attestation verifier unavailable",
+    );
+    expect(formatted).toContain(
+      "Credential check — helper identity/signature: UNKNOWN — native macOS attestation verifier unavailable",
+    );
+    expect(formatted).not.toContain("fixture has no credential helper");
     expect(report.notices).toContain(
       "Package/definition checks are local file-presence checks, not host registry queries.",
     );
     expect(report.notices).toContain(
       "Current-thread Skill availability is proven only by invoking doctor through the Oxrail Skill.",
     );
+    const persisted = (await loadHostProfile(environment.pluginData)).profile!;
+    expect(persisted.credentialChannel.activation).toBe("INACTIVE");
+    expect(persisted.derived.credentialProtection).toBe("INACTIVE");
   });
 
   it("reports CONFIGURED while passively awaiting the first native browser call", async () => {
@@ -727,6 +794,26 @@ describe("oxrail doctor", () => {
         firstBrowserHookSeen: true,
         verificationSource: "passive-first-browser-call",
         optimization: "ACTIVE",
+      },
+      route: {
+        ...profile.route,
+        toolSchemaRegistryHash: "c".repeat(64),
+        toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+        browserTools: [
+          {
+            canonicalToolName: "fixture.native.browser",
+            inputSchemaHash: "d".repeat(64),
+            registryManifestBinding: toolRegistryManifestBinding({
+              profileId: profile.profileId,
+              definitionHash: profile.hooks.definitionHash,
+              matcherEvidenceHash: profile.route.matcherEvidenceHash,
+              toolSchemaRegistryHash: "c".repeat(64),
+              toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+              canonicalToolName: "fixture.native.browser",
+              inputSchemaHash: "d".repeat(64),
+            }),
+          },
+        ],
       },
       handoff: {
         ...profile.handoff,

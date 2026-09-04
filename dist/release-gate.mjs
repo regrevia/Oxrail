@@ -8,7 +8,7 @@ var __export = (target, all) => {
 import { relative as relative2 } from "node:path";
 
 // packages/evidence/src/gate.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import {
@@ -20,6 +20,58 @@ import {
   resolve,
   sep
 } from "node:path";
+
+// packages/protocol/src/digest.ts
+import { createHash } from "node:crypto";
+var SENSITIVE_KEY = /(?:password|passwd|passcode|pwd|otp|token|cookie|authorization|credential|secret|api[_-]?key|private[_-]?key|recovery[_-]?code|clipboard|value|text|keys?|input)$/i;
+function hash(domain2, value) {
+  return createHash("sha256").update(domain2).update("\0").update(value).digest("hex");
+}
+function canonicalize(value, redact, key = "", seen = /* @__PURE__ */ new WeakSet()) {
+  if (redact && key && SENSITIVE_KEY.test(key)) {
+    return "[REDACTED]";
+  }
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value))
+      throw new TypeError("Only finite JSON numbers can be fingerprinted");
+    return Object.is(value, -0) ? 0 : value;
+  }
+  if (typeof value === "undefined") return void 0;
+  if (typeof value !== "object")
+    throw new TypeError("Only JSON-compatible values can be fingerprinted");
+  if (seen.has(value))
+    throw new TypeError("Cyclic values cannot be fingerprinted");
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => canonicalize(item, redact) ?? null);
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("Only plain JSON objects can be fingerprinted");
+    }
+    const result = {};
+    for (const nestedKey of Object.keys(
+      value
+    ).sort()) {
+      const nested = canonicalize(
+        value[nestedKey],
+        redact,
+        nestedKey,
+        seen
+      );
+      if (nested !== void 0) result[nestedKey] = nested;
+    }
+    return result;
+  } finally {
+    seen.delete(value);
+  }
+}
+function deterministicDigest(domain2, value) {
+  return hash(domain2, JSON.stringify(canonicalize(value, false)));
+}
 
 // node_modules/.pnpm/zod@4.1.5/node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -145,7 +197,7 @@ __export(external_exports, {
   gt: () => _gt,
   gte: () => _gte,
   guid: () => guid2,
-  hash: () => hash,
+  hash: () => hash2,
   hex: () => hex2,
   hostname: () => hostname2,
   httpUrl: () => httpUrl,
@@ -11290,7 +11342,7 @@ function hostname2(_params) {
 function hex2(_params) {
   return _stringFormat(ZodCustomStringFormat, "hex", regexes_exports.hex, _params);
 }
-function hash(alg, params) {
+function hash2(alg, params) {
   const enc = params?.enc ?? "hex";
   const format = `${alg}_${enc}`;
   const regex = regexes_exports[format];
@@ -12049,9 +12101,18 @@ var ReasonCodeSchema = external_exports.enum(REASON_CODES);
 
 // packages/protocol/src/schemas.ts
 var nonEmpty = external_exports.string().min(1);
-var hash2 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+var hash3 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+var exactToolName = external_exports.string().min(1).max(256).regex(
+  /^[A-Za-z0-9_.:/-]+$/,
+  "expected an exact tool name, not a matcher expression"
+);
 var finiteNonNegative = external_exports.number().finite().nonnegative();
 var nonNegativeInt = external_exports.number().int().nonnegative();
+var noCredentialKinds = external_exports.array(external_exports.literal("API_KEY")).length(0);
+var apiKeyOnly = external_exports.array(external_exports.literal("API_KEY")).length(1);
+function toolRegistryManifestBinding(input) {
+  return deterministicDigest("oxrail-tool-registry-manifest-binding-v1", input);
+}
 var ActionControlSchema = external_exports.enum([
   "MICRO_ACTION",
   "TRANSACTION",
@@ -12147,6 +12208,117 @@ var HandoffCapabilitySchema = external_exports.strictObject({
   sameTabBinding: external_exports.boolean(),
   originalPlacementRestorable: external_exports.boolean()
 });
+var CredentialChannelCapabilitySchema = external_exports.strictObject({
+  platform: external_exports.enum(["macos", "unsupported"]),
+  surface: external_exports.enum(["MACOS_NATIVE_SECURE_PROMPT", "NONE"]),
+  storage: external_exports.enum(["MACOS_KEYCHAIN", "NONE"]),
+  acceptedKinds: external_exports.union([apiKeyOnly, noCredentialKinds]),
+  consumerMode: external_exports.enum(["REGISTERED_IN_ENCLAVE_ADAPTER_ONLY", "NONE"]),
+  consumerReadiness: external_exports.enum([
+    "AUDITED_REAL_CONSUMER",
+    "FIXTURE_ONLY",
+    "UNSUPPORTED"
+  ]),
+  opaqueReferenceOnly: external_exports.boolean(),
+  genericSecretExport: external_exports.literal("DENIED")
+});
+var UnsupportedCredentialChannelSchema = external_exports.strictObject({
+  activation: external_exports.literal("INACTIVE"),
+  inactiveReasons: external_exports.array(nonEmpty).min(1),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: external_exports.literal("unsupported"),
+    surface: external_exports.literal("NONE"),
+    storage: external_exports.literal("NONE"),
+    acceptedKinds: noCredentialKinds,
+    consumerMode: external_exports.literal("NONE"),
+    consumerReadiness: external_exports.literal("UNSUPPORTED"),
+    opaqueReferenceOnly: external_exports.literal(false)
+  })
+});
+var appleTeamId = external_exports.string().regex(/^[A-Z0-9]{10}$/);
+var InactiveMacosCredentialChannelSchema = external_exports.strictObject({
+  activation: external_exports.literal("INACTIVE"),
+  inactiveReasons: external_exports.array(nonEmpty).min(1),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: external_exports.literal("macos")
+  }),
+  helperIdentity: ProbeVerdictSchema,
+  helperBundleId: nonEmpty.optional(),
+  helperBuild: nonEmpty.optional(),
+  helperSignatureHash: hash3.optional(),
+  helperTeamId: appleTeamId.optional(),
+  helperDesignatedRequirement: external_exports.string().min(1).max(4096).optional(),
+  launcherIdentity: ProbeVerdictSchema,
+  launcherBundleId: nonEmpty.optional(),
+  launcherBuild: nonEmpty.optional(),
+  launcherSignatureHash: hash3.optional(),
+  launcherTeamId: appleTeamId.optional(),
+  launcherDesignatedRequirement: external_exports.string().min(1).max(4096).optional(),
+  secureInput: ProbeVerdictSchema,
+  agentExecutionIsolation: ProbeVerdictSchema,
+  pasteboardHygiene: ProbeVerdictSchema,
+  templateRegistryHash: hash3.optional(),
+  consumerRegistryHash: hash3.optional(),
+  registryManifestHash: hash3.optional(),
+  registryManifestVerification: ProbeVerdictSchema,
+  registryVersion: external_exports.number().int().positive().optional(),
+  registryRollbackFloor: external_exports.number().int().positive().optional(),
+  credentialEvidenceManifestHash: hash3.optional(),
+  secretLeakBench: ProbeVerdictSchema,
+  realConsumerProbe: ProbeVerdictSchema,
+  keychainRoundTrip: ProbeVerdictSchema,
+  opaqueRefOnly: ProbeVerdictSchema,
+  scopeBinding: ProbeVerdictSchema,
+  expiryAndRevocation: ProbeVerdictSchema,
+  genericExportDenied: ProbeVerdictSchema
+});
+var ActiveMacosCredentialChannelSchema = external_exports.strictObject({
+  activation: external_exports.literal("ACTIVE"),
+  inactiveReasons: external_exports.array(nonEmpty).length(0),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: external_exports.literal("macos"),
+    surface: external_exports.literal("MACOS_NATIVE_SECURE_PROMPT"),
+    storage: external_exports.literal("MACOS_KEYCHAIN"),
+    acceptedKinds: apiKeyOnly,
+    consumerMode: external_exports.literal("REGISTERED_IN_ENCLAVE_ADAPTER_ONLY"),
+    consumerReadiness: external_exports.literal("AUDITED_REAL_CONSUMER"),
+    opaqueReferenceOnly: external_exports.literal(true)
+  }),
+  helperIdentity: external_exports.literal("passed"),
+  helperBundleId: nonEmpty,
+  helperBuild: nonEmpty,
+  helperSignatureHash: hash3,
+  helperTeamId: appleTeamId,
+  helperDesignatedRequirement: external_exports.string().min(1).max(4096),
+  launcherIdentity: external_exports.literal("passed"),
+  launcherBundleId: nonEmpty,
+  launcherBuild: nonEmpty,
+  launcherSignatureHash: hash3,
+  launcherTeamId: appleTeamId,
+  launcherDesignatedRequirement: external_exports.string().min(1).max(4096),
+  secureInput: external_exports.literal("passed"),
+  agentExecutionIsolation: external_exports.literal("passed"),
+  pasteboardHygiene: external_exports.literal("passed"),
+  templateRegistryHash: hash3,
+  consumerRegistryHash: hash3,
+  registryManifestHash: hash3,
+  registryManifestVerification: external_exports.literal("passed"),
+  registryVersion: external_exports.number().int().positive(),
+  registryRollbackFloor: external_exports.number().int().positive(),
+  credentialEvidenceManifestHash: hash3,
+  secretLeakBench: external_exports.literal("passed"),
+  realConsumerProbe: external_exports.literal("passed"),
+  keychainRoundTrip: external_exports.literal("passed"),
+  opaqueRefOnly: external_exports.literal("passed"),
+  scopeBinding: external_exports.literal("passed"),
+  expiryAndRevocation: external_exports.literal("passed"),
+  genericExportDenied: external_exports.literal("passed")
+});
+var CredentialChannelProfileSchema = external_exports.union([
+  UnsupportedCredentialChannelSchema,
+  InactiveMacosCredentialChannelSchema,
+  ActiveMacosCredentialChannelSchema
+]);
 var mediaVerdicts = external_exports.strictObject({
   text: ProbeVerdictSchema,
   structured: ProbeVerdictSchema,
@@ -12174,7 +12346,7 @@ var HostSetupSchema = external_exports.strictObject({
   optimization: external_exports.enum(["ACTIVE", "BYPASSED"])
 });
 var HostProfileBaseSchema = external_exports.strictObject({
-  schemaVersion: external_exports.literal(3),
+  schemaVersion: external_exports.literal(4),
   profileId: nonEmpty,
   setup: HostSetupSchema,
   identity: external_exports.strictObject({
@@ -12197,8 +12369,17 @@ var HostProfileBaseSchema = external_exports.strictObject({
   }),
   route: external_exports.strictObject({
     toolRoute: ToolRouteSchema,
-    canonicalToolMatchers: external_exports.array(nonEmpty),
-    matcherEvidenceHash: hash2
+    canonicalToolMatchers: external_exports.array(exactToolName),
+    matcherEvidenceHash: hash3,
+    toolSchemaRegistryHash: hash3.optional(),
+    toolSchemaRegistryEvidenceId: nonEmpty.optional(),
+    browserTools: external_exports.array(
+      external_exports.strictObject({
+        canonicalToolName: exactToolName,
+        inputSchemaHash: hash3,
+        registryManifestBinding: hash3
+      })
+    )
   }),
   action: external_exports.strictObject({
     control: ActionControlSchema,
@@ -12256,7 +12437,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
     codeModePromiseSemantics: ProbeVerdictSchema,
     controlCriticalContract: external_exports.strictObject({
       status: external_exports.enum(["passed", "failed", "unknown"]),
-      matrixHash: hash2.optional(),
+      matrixHash: hash3.optional(),
       requiredFields: external_exports.array(nonEmpty),
       conditionalFields: external_exports.array(nonEmpty),
       unknownFields: external_exports.array(nonEmpty),
@@ -12289,7 +12470,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
       "disabled",
       "unknown"
     ]),
-    definitionHash: hash2,
+    definitionHash: hash3,
     concurrentConflictProbe: ProbeVerdictSchema
   }),
   nativeCapabilities: external_exports.strictObject({
@@ -12317,10 +12498,11 @@ var HostProfileBaseSchema = external_exports.strictObject({
     oneClickFallback: ProbeVerdictSchema,
     chatMessageRequired: ProbeVerdictSchema
   }),
+  credentialChannel: CredentialChannelProfileSchema,
   evidence: external_exports.strictObject({
     probeSuiteVersion: nonEmpty,
     fixtureRevision: nonEmpty,
-    traceManifestHash: hash2,
+    traceManifestHash: hash3,
     testedAt: external_exports.string().datetime(),
     validUntilHostChange: external_exports.boolean(),
     unresolved: external_exports.array(nonEmpty)
@@ -12329,12 +12511,46 @@ var HostProfileBaseSchema = external_exports.strictObject({
     mode: HostModeSchema,
     safety: external_exports.enum(["ACTIVE", "INACTIVE"]),
     handoff: external_exports.enum(["ACTIVE", "INACTIVE"]),
+    credentialProtection: external_exports.enum(["ACTIVE", "INACTIVE"]),
     allowedClaims: external_exports.array(nonEmpty),
     forbiddenClaims: external_exports.array(nonEmpty)
   })
 });
 var HostProfileSchema = HostProfileBaseSchema.superRefine(
   (profile, context) => {
+    const routePinParts = [
+      Boolean(profile.route.toolSchemaRegistryHash),
+      Boolean(profile.route.toolSchemaRegistryEvidenceId),
+      profile.route.browserTools.length > 0
+    ];
+    const routePinsComplete = routePinParts.every(Boolean);
+    if (routePinParts.some(Boolean) && !routePinsComplete) {
+      context.addIssue({
+        code: "custom",
+        path: ["route"],
+        message: "External tool schema pins must be complete or absent"
+      });
+    }
+    if (profile.route.toolSchemaRegistryHash && profile.route.toolSchemaRegistryEvidenceId) {
+      for (const [index, tool] of profile.route.browserTools.entries()) {
+        const expected = toolRegistryManifestBinding({
+          profileId: profile.profileId,
+          definitionHash: profile.hooks.definitionHash,
+          matcherEvidenceHash: profile.route.matcherEvidenceHash,
+          toolSchemaRegistryHash: profile.route.toolSchemaRegistryHash,
+          toolSchemaRegistryEvidenceId: profile.route.toolSchemaRegistryEvidenceId,
+          canonicalToolName: tool.canonicalToolName,
+          inputSchemaHash: tool.inputSchemaHash
+        });
+        if (tool.registryManifestBinding.toLowerCase() !== expected) {
+          context.addIssue({
+            code: "custom",
+            path: ["route", "browserTools", index, "registryManifestBinding"],
+            message: "Browser tool pin does not match its manifest binding"
+          });
+        }
+      }
+    }
     const setupConfigured = [
       profile.setup.pluginInstalled,
       profile.setup.skillAvailable,
@@ -12375,18 +12591,29 @@ var HostProfileSchema = HostProfileBaseSchema.superRefine(
       });
     }
     if (profile.setup.lifecycle !== "VERIFIED") {
-      if (profile.setup.optimization !== "BYPASSED" || profile.derived.safety !== "INACTIVE" || profile.derived.handoff !== "INACTIVE" || profile.handoff.activation !== "INACTIVE") {
+      if (profile.setup.optimization !== "BYPASSED" || profile.derived.safety !== "INACTIVE" || profile.derived.handoff !== "INACTIVE" || profile.handoff.activation !== "INACTIVE" || profile.credentialChannel.activation !== "INACTIVE" || profile.derived.credentialProtection !== "INACTIVE") {
         context.addIssue({
           code: "custom",
           message: "Unverified Oxrail capabilities must be BYPASSED/INACTIVE"
         });
       }
     }
-    if (profile.setup.optimization === "ACTIVE" && (profile.setup.lifecycle !== "VERIFIED" || profile.derived.mode === "ADVISORY_ONLY" || profile.derived.mode === "UNSUPPORTED")) {
+    if (profile.setup.optimization === "ACTIVE" && (profile.setup.lifecycle !== "VERIFIED" || profile.derived.mode === "ADVISORY_ONLY" || profile.derived.mode === "UNSUPPORTED" || !routePinsComplete || profile.route.browserTools.length !== profile.route.canonicalToolMatchers.length || profile.route.browserTools.some(
+      (tool) => !profile.route.canonicalToolMatchers.includes(
+        tool.canonicalToolName
+      )
+    ))) {
       context.addIssue({
         code: "custom",
         path: ["setup", "optimization"],
-        message: "Active optimization requires a verified enforcement mode"
+        message: "Active optimization requires a verified enforcement mode and complete external tool schema pins"
+      });
+    }
+    if (new Set(profile.route.browserTools.map((tool) => tool.canonicalToolName)).size !== profile.route.browserTools.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["route", "browserTools"],
+        message: "Pinned browser tools must be unique"
       });
     }
     if (profile.derived.safety === "ACTIVE" && profile.setup.optimization !== "ACTIVE") {
@@ -12414,7 +12641,33 @@ var HostProfileSchema = HostProfileBaseSchema.superRefine(
         message: "Handoff inactive reasons must match activation"
       });
     }
+    const credential = profile.credentialChannel;
+    if (profile.identity.os !== "macos" && credential.capability.platform !== "unsupported") {
+      context.addIssue({
+        code: "custom",
+        path: ["credentialChannel", "capability", "platform"],
+        message: "Credential Channel is unsupported outside macOS"
+      });
+    }
+    if (credential.activation !== profile.derived.credentialProtection) {
+      context.addIssue({
+        code: "custom",
+        path: ["derived", "credentialProtection"],
+        message: "Credential protection must match channel activation"
+      });
+    }
+    if (credential.activation === "ACTIVE") {
+      if (profile.identity.os !== "macos" || profile.identity.browserPath !== "chrome-extension" || profile.setup.lifecycle !== "VERIFIED" || !profile.evidence.validUntilHostChange || profile.handoff.activation !== "ACTIVE" || profile.derived.handoff !== "ACTIVE" || !profile.handoff.capability.sameTabBinding || profile.handoff.capability.lease !== "EXCLUSIVE_USER_LEASE" || profile.handoff.sameTabBinding !== "passed" || profile.handoff.exclusiveBrowserLease !== "passed" || profile.handoff.noAgentObservationDuringLease !== "passed" || profile.handoff.nonSecretCompletionDetector !== "passed" || profile.handoff.originAndStateVerification !== "passed" || credential.helperBundleId === credential.launcherBundleId || credential.helperDesignatedRequirement === credential.launcherDesignatedRequirement || credential.registryVersion < credential.registryRollbackFloor) {
+        context.addIssue({
+          code: "custom",
+          path: ["credentialChannel"],
+          message: "Active Credential Channel requires current macOS G15 evidence and an audited real consumer"
+        });
+      }
+    }
   }
+).describe(
+  "The runtime HostProfileSchema validates structure and cross-field invariants; its generated JSON Schema validates the exchange shape only. Neither authorizes credential activation. An independent macOS activation verifier is required."
 );
 var RectSchema = external_exports.strictObject({
   x: external_exports.number().finite(),
@@ -12443,7 +12696,7 @@ var ActionEnvelopeSchema = external_exports.strictObject({
   granularity: ActionControlSchema,
   actionType: nonEmpty,
   target: TargetDescriptorSchema.optional(),
-  inputDigest: hash2.optional(),
+  inputDigest: hash3.optional(),
   origin: nonEmpty.optional(),
   revision: nonNegativeInt.optional(),
   impact: external_exports.enum(["read", "reversible", "high-impact"])
@@ -12453,8 +12706,8 @@ var ActionDigestSchema = external_exports.strictObject({
   route: ToolRouteSchema,
   granularity: ActionControlSchema,
   actionType: nonEmpty,
-  targetSignature: hash2.optional(),
-  inputSignature: hash2.optional(),
+  targetSignature: hash3.optional(),
+  inputSignature: hash3.optional(),
   sourceRevision: nonNegativeInt.optional(),
   decision: external_exports.enum(["ALLOW", "DENY", "REWRITE", "REQUERY", "HANDOFF"]),
   reasonCode: ReasonCodeSchema,
@@ -12463,12 +12716,12 @@ var ActionDigestSchema = external_exports.strictObject({
 var ObservationDigestSchema = external_exports.strictObject({
   source: ObservationSourceSchema,
   tier: external_exports.enum(["O0", "O1", "O2", "O3", "O4", "O5"]),
-  stateHash: hash2,
+  stateHash: hash3,
   urlKey: nonEmpty.optional(),
   documentBinding: nonEmpty.optional(),
   revision: nonNegativeInt,
-  relevantRegionHash: hash2.optional(),
-  actionableHash: hash2.optional(),
+  relevantRegionHash: hash3.optional(),
+  actionableHash: hash3.optional(),
   blockerType: nonEmpty.optional(),
   payloadTokenEstimate: nonNegativeInt.optional(),
   omittedFields: external_exports.array(nonEmpty).optional(),
@@ -12480,11 +12733,11 @@ var StateFingerprintSchema = external_exports.strictObject({
   originKey: nonEmpty,
   routeKey: nonEmpty.optional(),
   taskPhase: nonEmpty.optional(),
-  relevantRegionHash: hash2.optional(),
-  actionableHash: hash2.optional(),
-  dialogHash: hash2.optional(),
-  goalSignalHash: hash2.optional(),
-  blockerHash: hash2.optional(),
+  relevantRegionHash: hash3.optional(),
+  actionableHash: hash3.optional(),
+  dialogHash: hash3.optional(),
+  goalSignalHash: hash3.optional(),
+  blockerHash: hash3.optional(),
   revision: nonNegativeInt
 });
 var BrowserTaskStateSchema = external_exports.strictObject({
@@ -12591,7 +12844,7 @@ var ControlCriticalContractSchema = external_exports.strictObject({
   rules: external_exports.array(ControlCriticalFieldRuleSchema),
   originalResultTiming: external_exports.enum(["PRE_MODEL_PROVEN", "UNKNOWN"]),
   verdict: external_exports.enum(["PASS", "FAIL", "INCOMPLETE"]),
-  matrixHash: hash2
+  matrixHash: hash3
 });
 var SetupVerificationSchema = external_exports.strictObject({
   schemaVersion: external_exports.literal(1),
@@ -12615,6 +12868,7 @@ var SetupVerificationSchema = external_exports.strictObject({
   optimization: external_exports.enum(["ACTIVE", "BYPASSED"]),
   safetyProtectionActive: external_exports.boolean(),
   handoffProtectionActive: external_exports.boolean(),
+  credentialProtectionActive: external_exports.boolean(),
   resultingMode: HostModeSchema
 }).superRefine((setup, context) => {
   const configured = setup.pluginInstalled && setup.skillAvailable && setup.hooksRegistered && setup.hooksTrusted && setup.preToolUseAvailable === "passed" && setup.postToolUseAvailable === "passed" && setup.chromeComputerUseDetectable === "passed" && setup.matcherProfileValid;
@@ -12649,7 +12903,7 @@ var SetupVerificationSchema = external_exports.strictObject({
     });
   }
   if (!setup.hooksTrusted || setup.optimization === "BYPASSED") {
-    if (setup.safetyProtectionActive || setup.handoffProtectionActive) {
+    if (setup.safetyProtectionActive || setup.handoffProtectionActive || setup.credentialProtectionActive) {
       context.addIssue({
         code: "custom",
         message: "Bypassed or untrusted hooks cannot claim active protection"
@@ -12663,7 +12917,7 @@ var SetupVerificationSchema = external_exports.strictObject({
     });
   }
   if (setup.stage !== "VERIFIED") {
-    if (setup.optimization !== "BYPASSED" || setup.safetyProtectionActive || setup.handoffProtectionActive) {
+    if (setup.optimization !== "BYPASSED" || setup.safetyProtectionActive || setup.handoffProtectionActive || setup.credentialProtectionActive) {
       context.addIssue({
         code: "custom",
         message: "Unverified setup must remain BYPASSED/INACTIVE"
@@ -12709,12 +12963,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
   commit: nonEmpty,
   spec_version: external_exports.literal("0.5.0"),
   environment: external_exports.record(nonEmpty, nonEmpty),
-  schema_hashes: external_exports.record(evidenceArtifactPath, hash2),
+  schema_hashes: external_exports.record(evidenceArtifactPath, hash3),
   host_profiles: external_exports.array(evidenceArtifactPath),
   commands: external_exports.array(nonEmpty),
   test_results: external_exports.array(evidenceArtifactPath),
   reviewers: external_exports.array(nonEmpty),
-  sha256_manifest: hash2.nullable(),
+  sha256_manifest: hash3.nullable(),
   accepted_at: external_exports.string().datetime().nullable(),
   blockers: external_exports.array(nonEmpty),
   dependency_manifests: external_exports.array(
@@ -12820,12 +13074,12 @@ var EvidenceTraceSchema = external_exports.strictObject({
   pair_id: nonEmpty,
   run_index: external_exports.number().int().positive(),
   seed: nonEmpty,
-  control_hash: hash2,
-  model_settings_hash: hash2,
-  context_isolation_id: hash2.describe(
+  control_hash: hash3,
+  model_settings_hash: hash3,
+  context_isolation_id: hash3.describe(
     "Salted SHA-256 digest of the isolated runner's parent Hook session_id"
   ),
-  runner_id: hash2,
+  runner_id: hash3,
   spec_version: external_exports.literal("0.5.0"),
   work_package_ids: external_exports.array(nonEmpty),
   host_profile_id: nonEmpty,
@@ -12875,7 +13129,7 @@ var EvidenceTraceSchema = external_exports.strictObject({
     hook_overhead_ms: finiteNonNegative,
     secret_exposure: external_exports.literal(false)
   }),
-  artifact_hashes: external_exports.record(nonEmpty, hash2)
+  artifact_hashes: external_exports.record(nonEmpty, hash3)
 }).superRefine((trace, context) => {
   const totals = [
     trace.metrics.total_model_input_tokens,
@@ -12898,6 +13152,14 @@ function deriveHostMode(profile) {
     return "UNSUPPORTED";
   }
   if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
+    return "ADVISORY_ONLY";
+  }
+  const pinnedToolNames = new Set(
+    profile.route.browserTools.map((tool) => tool.canonicalToolName)
+  );
+  if (!profile.route.toolSchemaRegistryHash || !profile.route.toolSchemaRegistryEvidenceId || pinnedToolNames.size !== profile.route.canonicalToolMatchers.length || profile.route.canonicalToolMatchers.some(
+    (toolName) => !pinnedToolNames.has(toolName)
+  )) {
     return "ADVISORY_ONLY";
   }
   if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
@@ -12925,7 +13187,7 @@ var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
 var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
 
 // packages/evidence/src/gate.ts
-var digest = (contents) => createHash("sha256").update(contents).digest("hex");
+var digest = (contents) => createHash2("sha256").update(contents).digest("hex");
 var releaseDependencies2 = [
   "WP-HOST-008",
   "WP-GRD-006",
@@ -13032,11 +13294,11 @@ function parseSha256Sums(contents) {
   for (const line of lines) {
     const match = /^([a-f0-9]{64})  ([^\0\r\n]+)$/.exec(line);
     if (!match) throw new Error(`invalid SHA256SUMS entry: ${line}`);
-    const [, hash3, reference] = match;
+    const [, hash4, reference] = match;
     if (sums.has(reference)) {
       throw new Error(`duplicate SHA256SUMS entry: ${reference}`);
     }
-    sums.set(reference, hash3);
+    sums.set(reference, hash4);
   }
   return sums;
 }

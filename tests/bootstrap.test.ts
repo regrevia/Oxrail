@@ -62,9 +62,19 @@ describe("host profile bootstrap", () => {
         mode: "ADVISORY_ONLY",
         safety: "INACTIVE",
         handoff: "INACTIVE",
+        credentialProtection: "INACTIVE",
       },
-      route: { canonicalToolMatchers: ["fixture.native.browser"] },
+      route: {
+        canonicalToolMatchers: ["fixture.native.browser"],
+        browserTools: [],
+      },
+      credentialChannel: {
+        activation: "INACTIVE",
+        capability: { platform: "macos" },
+      },
     });
+    expect(profile.route.toolSchemaRegistryHash).toBeUndefined();
+    expect(profile.route.toolSchemaRegistryEvidenceId).toBeUndefined();
     expect(validateHostProfile(profile).valid).toBe(true);
     const profilePath = path.join(
       pluginData,
@@ -152,10 +162,8 @@ describe("host profile bootstrap", () => {
     );
     temporaryDirectories.push(pluginData);
     const inventoryPath = path.join(pluginData, "inventory.json");
-    await writeFile(
-      inventoryPath,
-      `${JSON.stringify({ ...inventory, os: "linux" })}\n`,
-    );
+    const linuxInventory = { ...inventory, os: "linux" } as const;
+    await writeFile(inventoryPath, `${JSON.stringify(linuxInventory)}\n`);
     const profile = await bootstrapHostProfile({
       inventoryPath,
       pluginData,
@@ -163,6 +171,23 @@ describe("host profile bootstrap", () => {
     });
 
     expect(profile.setup.chromeComputerUseDetectable).toBe("unknown");
+    const report = await runDoctor({
+      currentIdentity: {
+        surface: linuxInventory.surface,
+        hostBuild: linuxInventory.hostBuild,
+        codexVersion: linuxInventory.codexVersion,
+        computerUsePluginVersion: linuxInventory.computerUsePluginVersion,
+        browserPath: linuxInventory.browserPath,
+        os: linuxInventory.os,
+      },
+      hostInventory: linuxInventory,
+      pluginData,
+      pluginRoot: process.cwd(),
+    });
+    expect(report.credentialProtectionActive).toBe(false);
+    expect(report.credentialInactiveReasons).toEqual([
+      "Secure Credential Channel is unsupported outside macOS",
+    ]);
   });
 
   it("invalidates a profile when the current route inventory drifts", async () => {

@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "The runtime HostProfileSchema validates structure and cross-field invariants; its generated JSON Schema validates the exchange shape only. Neither authorizes credential activation. An independent macOS activation verifier is required.",
   "properties": {
     "action": {
       "additionalProperties": false,
@@ -53,12 +54,403 @@
       ],
       "type": "object"
     },
+    "credentialChannel": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "activation": { "const": "INACTIVE", "type": "string" },
+            "capability": {
+              "additionalProperties": false,
+              "properties": {
+                "acceptedKinds": {
+                  "items": { "const": "API_KEY", "type": "string" },
+                  "maxItems": 0,
+                  "minItems": 0,
+                  "type": "array"
+                },
+                "consumerMode": { "const": "NONE", "type": "string" },
+                "consumerReadiness": {
+                  "const": "UNSUPPORTED",
+                  "type": "string"
+                },
+                "genericSecretExport": { "const": "DENIED", "type": "string" },
+                "opaqueReferenceOnly": { "const": false, "type": "boolean" },
+                "platform": { "const": "unsupported", "type": "string" },
+                "storage": { "const": "NONE", "type": "string" },
+                "surface": { "const": "NONE", "type": "string" }
+              },
+              "required": [
+                "platform",
+                "surface",
+                "storage",
+                "acceptedKinds",
+                "consumerMode",
+                "consumerReadiness",
+                "opaqueReferenceOnly",
+                "genericSecretExport"
+              ],
+              "type": "object"
+            },
+            "inactiveReasons": {
+              "items": { "minLength": 1, "type": "string" },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": ["activation", "inactiveReasons", "capability"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "activation": { "const": "INACTIVE", "type": "string" },
+            "agentExecutionIsolation": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "capability": {
+              "additionalProperties": false,
+              "properties": {
+                "acceptedKinds": {
+                  "anyOf": [
+                    {
+                      "items": { "const": "API_KEY", "type": "string" },
+                      "maxItems": 1,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "items": { "const": "API_KEY", "type": "string" },
+                      "maxItems": 0,
+                      "minItems": 0,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "consumerMode": {
+                  "enum": ["REGISTERED_IN_ENCLAVE_ADAPTER_ONLY", "NONE"],
+                  "type": "string"
+                },
+                "consumerReadiness": {
+                  "enum": [
+                    "AUDITED_REAL_CONSUMER",
+                    "FIXTURE_ONLY",
+                    "UNSUPPORTED"
+                  ],
+                  "type": "string"
+                },
+                "genericSecretExport": { "const": "DENIED", "type": "string" },
+                "opaqueReferenceOnly": { "type": "boolean" },
+                "platform": { "const": "macos", "type": "string" },
+                "storage": {
+                  "enum": ["MACOS_KEYCHAIN", "NONE"],
+                  "type": "string"
+                },
+                "surface": {
+                  "enum": ["MACOS_NATIVE_SECURE_PROMPT", "NONE"],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "platform",
+                "surface",
+                "storage",
+                "acceptedKinds",
+                "consumerMode",
+                "consumerReadiness",
+                "opaqueReferenceOnly",
+                "genericSecretExport"
+              ],
+              "type": "object"
+            },
+            "consumerRegistryHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "credentialEvidenceManifestHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "expiryAndRevocation": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "genericExportDenied": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "helperBuild": { "minLength": 1, "type": "string" },
+            "helperBundleId": { "minLength": 1, "type": "string" },
+            "helperDesignatedRequirement": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            "helperIdentity": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "helperSignatureHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "helperTeamId": { "pattern": "^[A-Z0-9]{10}$", "type": "string" },
+            "inactiveReasons": {
+              "items": { "minLength": 1, "type": "string" },
+              "minItems": 1,
+              "type": "array"
+            },
+            "keychainRoundTrip": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "launcherBuild": { "minLength": 1, "type": "string" },
+            "launcherBundleId": { "minLength": 1, "type": "string" },
+            "launcherDesignatedRequirement": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            "launcherIdentity": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "launcherSignatureHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "launcherTeamId": { "pattern": "^[A-Z0-9]{10}$", "type": "string" },
+            "opaqueRefOnly": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "pasteboardHygiene": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "realConsumerProbe": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "registryManifestHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "registryManifestVerification": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "registryRollbackFloor": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "registryVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "scopeBinding": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "secretLeakBench": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "secureInput": {
+              "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
+              "type": "string"
+            },
+            "templateRegistryHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "activation",
+            "inactiveReasons",
+            "capability",
+            "helperIdentity",
+            "launcherIdentity",
+            "secureInput",
+            "agentExecutionIsolation",
+            "pasteboardHygiene",
+            "registryManifestVerification",
+            "secretLeakBench",
+            "realConsumerProbe",
+            "keychainRoundTrip",
+            "opaqueRefOnly",
+            "scopeBinding",
+            "expiryAndRevocation",
+            "genericExportDenied"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "activation": { "const": "ACTIVE", "type": "string" },
+            "agentExecutionIsolation": { "const": "passed", "type": "string" },
+            "capability": {
+              "additionalProperties": false,
+              "properties": {
+                "acceptedKinds": {
+                  "items": { "const": "API_KEY", "type": "string" },
+                  "maxItems": 1,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "consumerMode": {
+                  "const": "REGISTERED_IN_ENCLAVE_ADAPTER_ONLY",
+                  "type": "string"
+                },
+                "consumerReadiness": {
+                  "const": "AUDITED_REAL_CONSUMER",
+                  "type": "string"
+                },
+                "genericSecretExport": { "const": "DENIED", "type": "string" },
+                "opaqueReferenceOnly": { "const": true, "type": "boolean" },
+                "platform": { "const": "macos", "type": "string" },
+                "storage": { "const": "MACOS_KEYCHAIN", "type": "string" },
+                "surface": {
+                  "const": "MACOS_NATIVE_SECURE_PROMPT",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "platform",
+                "surface",
+                "storage",
+                "acceptedKinds",
+                "consumerMode",
+                "consumerReadiness",
+                "opaqueReferenceOnly",
+                "genericSecretExport"
+              ],
+              "type": "object"
+            },
+            "consumerRegistryHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "credentialEvidenceManifestHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "expiryAndRevocation": { "const": "passed", "type": "string" },
+            "genericExportDenied": { "const": "passed", "type": "string" },
+            "helperBuild": { "minLength": 1, "type": "string" },
+            "helperBundleId": { "minLength": 1, "type": "string" },
+            "helperDesignatedRequirement": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            "helperIdentity": { "const": "passed", "type": "string" },
+            "helperSignatureHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "helperTeamId": { "pattern": "^[A-Z0-9]{10}$", "type": "string" },
+            "inactiveReasons": {
+              "items": { "minLength": 1, "type": "string" },
+              "maxItems": 0,
+              "minItems": 0,
+              "type": "array"
+            },
+            "keychainRoundTrip": { "const": "passed", "type": "string" },
+            "launcherBuild": { "minLength": 1, "type": "string" },
+            "launcherBundleId": { "minLength": 1, "type": "string" },
+            "launcherDesignatedRequirement": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            "launcherIdentity": { "const": "passed", "type": "string" },
+            "launcherSignatureHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "launcherTeamId": { "pattern": "^[A-Z0-9]{10}$", "type": "string" },
+            "opaqueRefOnly": { "const": "passed", "type": "string" },
+            "pasteboardHygiene": { "const": "passed", "type": "string" },
+            "realConsumerProbe": { "const": "passed", "type": "string" },
+            "registryManifestHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "registryManifestVerification": {
+              "const": "passed",
+              "type": "string"
+            },
+            "registryRollbackFloor": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "registryVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "scopeBinding": { "const": "passed", "type": "string" },
+            "secretLeakBench": { "const": "passed", "type": "string" },
+            "secureInput": { "const": "passed", "type": "string" },
+            "templateRegistryHash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "activation",
+            "inactiveReasons",
+            "capability",
+            "helperIdentity",
+            "helperBundleId",
+            "helperBuild",
+            "helperSignatureHash",
+            "helperTeamId",
+            "helperDesignatedRequirement",
+            "launcherIdentity",
+            "launcherBundleId",
+            "launcherBuild",
+            "launcherSignatureHash",
+            "launcherTeamId",
+            "launcherDesignatedRequirement",
+            "secureInput",
+            "agentExecutionIsolation",
+            "pasteboardHygiene",
+            "templateRegistryHash",
+            "consumerRegistryHash",
+            "registryManifestHash",
+            "registryManifestVerification",
+            "registryVersion",
+            "registryRollbackFloor",
+            "credentialEvidenceManifestHash",
+            "secretLeakBench",
+            "realConsumerProbe",
+            "keychainRoundTrip",
+            "opaqueRefOnly",
+            "scopeBinding",
+            "expiryAndRevocation",
+            "genericExportDenied"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "derived": {
       "additionalProperties": false,
       "properties": {
         "allowedClaims": {
           "items": { "minLength": 1, "type": "string" },
           "type": "array"
+        },
+        "credentialProtection": {
+          "enum": ["ACTIVE", "INACTIVE"],
+          "type": "string"
         },
         "forbiddenClaims": {
           "items": { "minLength": 1, "type": "string" },
@@ -81,6 +473,7 @@
         "mode",
         "safety",
         "handoff",
+        "credentialProtection",
         "allowedClaims",
         "forbiddenClaims"
       ],
@@ -603,8 +996,41 @@
     "route": {
       "additionalProperties": false,
       "properties": {
+        "browserTools": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "canonicalToolName": {
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_.:/-]+$",
+                "type": "string"
+              },
+              "inputSchemaHash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "registryManifestBinding": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "canonicalToolName",
+              "inputSchemaHash",
+              "registryManifestBinding"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "canonicalToolMatchers": {
-          "items": { "minLength": 1, "type": "string" },
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:/-]+$",
+            "type": "string"
+          },
           "type": "array"
         },
         "matcherEvidenceHash": {
@@ -622,12 +1048,22 @@
             "opaque"
           ],
           "type": "string"
+        },
+        "toolSchemaRegistryEvidenceId": { "minLength": 1, "type": "string" },
+        "toolSchemaRegistryHash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
         }
       },
-      "required": ["toolRoute", "canonicalToolMatchers", "matcherEvidenceHash"],
+      "required": [
+        "toolRoute",
+        "canonicalToolMatchers",
+        "matcherEvidenceHash",
+        "browserTools"
+      ],
       "type": "object"
     },
-    "schemaVersion": { "const": 3, "type": "number" },
+    "schemaVersion": { "const": 4, "type": "number" },
     "setup": {
       "additionalProperties": false,
       "properties": {
@@ -708,6 +1144,7 @@
     "hooks",
     "nativeCapabilities",
     "handoff",
+    "credentialChannel",
     "evidence",
     "derived"
   ],

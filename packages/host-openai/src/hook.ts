@@ -65,7 +65,8 @@ export async function hookDefinitionHash(pluginRoot: string): Promise<string> {
 
 const bypassMessage =
   "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. " +
-  "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE.";
+  "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. " +
+  "Oxrail credential protection: INACTIVE.";
 const bypassOutput = (): HookOutput => ({ systemMessage: bypassMessage });
 
 /** Handle one host event. Any error is deliberately fail-open in runHookCli. */

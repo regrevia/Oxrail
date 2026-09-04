@@ -19,6 +19,8 @@ export const HOSTS_DIRECTORY = "hosts";
 export const HOST_PROFILE_FILENAME = "profile.json";
 export const HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
 export const ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
+export const CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR =
+  "credential activation denied: independent macOS attestation verifier unavailable";
 
 export interface ProfileConstraints {
   browserPath?: HostProfile["identity"]["browserPath"];
@@ -75,6 +77,18 @@ export function validateHostProfile(
   value: unknown,
   constraints: ProfileConstraints = {},
 ): ProfileValidation {
+  if (
+    value &&
+    typeof value === "object" &&
+    (value as { schemaVersion?: unknown }).schemaVersion === 3
+  ) {
+    return {
+      errors: [
+        "host profile schema v3 is stale; run Oxrail setup to create a v4 profile",
+      ],
+      valid: false,
+    };
+  }
   const parsed = HostProfileSchema.safeParse(value);
   if (!parsed.success) {
     return {
@@ -89,6 +103,8 @@ export function validateHostProfile(
 
   const profile = parsed.data;
   const errors: string[] = [];
+  if (profile.credentialChannel.activation === "ACTIVE")
+    errors.push(CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR);
   if (!profile.evidence.validUntilHostChange)
     errors.push("host profile is stale");
   if (
@@ -248,7 +264,11 @@ export async function writeHostProfile(
   pluginData: string,
   input: unknown,
 ): Promise<HostProfile> {
-  const profile = HostProfileSchema.parse(input);
+  const validation = validateHostProfile(input);
+  if (!validation.valid || !validation.profile) {
+    throw new Error(`invalid host profile: ${validation.errors.join("; ")}`);
+  }
+  const profile = validation.profile;
   if (!safeProfileId(profile.profileId))
     throw new Error("unsafe host profile identifier");
   const directory = profileDirectory(pluginData, profile.profileId);

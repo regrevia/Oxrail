@@ -1,13 +1,36 @@
 import { z } from "zod";
 
+import { deterministicDigest } from "./digest.js";
 import { ReasonCodeSchema } from "./reason-codes.js";
 
 const nonEmpty = z.string().min(1);
 const hash = z
   .string()
   .regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+const exactToolName = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(
+    /^[A-Za-z0-9_.:/-]+$/,
+    "expected an exact tool name, not a matcher expression",
+  );
 const finiteNonNegative = z.number().finite().nonnegative();
 const nonNegativeInt = z.number().int().nonnegative();
+const noCredentialKinds = z.array(z.literal("API_KEY")).length(0);
+const apiKeyOnly = z.array(z.literal("API_KEY")).length(1);
+
+export function toolRegistryManifestBinding(input: {
+  canonicalToolName: string;
+  definitionHash: string;
+  inputSchemaHash: string;
+  matcherEvidenceHash: string;
+  profileId: string;
+  toolSchemaRegistryEvidenceId: string;
+  toolSchemaRegistryHash: string;
+}): string {
+  return deterministicDigest("oxrail-tool-registry-manifest-binding-v1", input);
+}
 
 export const ActionControlSchema = z.enum([
   "MICRO_ACTION",
@@ -126,6 +149,129 @@ export const HandoffCapabilitySchema = z.strictObject({
 });
 export type HandoffCapability = z.infer<typeof HandoffCapabilitySchema>;
 
+export const CredentialChannelCapabilitySchema = z.strictObject({
+  platform: z.enum(["macos", "unsupported"]),
+  surface: z.enum(["MACOS_NATIVE_SECURE_PROMPT", "NONE"]),
+  storage: z.enum(["MACOS_KEYCHAIN", "NONE"]),
+  acceptedKinds: z.union([apiKeyOnly, noCredentialKinds]),
+  consumerMode: z.enum(["REGISTERED_IN_ENCLAVE_ADAPTER_ONLY", "NONE"]),
+  consumerReadiness: z.enum([
+    "AUDITED_REAL_CONSUMER",
+    "FIXTURE_ONLY",
+    "UNSUPPORTED",
+  ]),
+  opaqueReferenceOnly: z.boolean(),
+  genericSecretExport: z.literal("DENIED"),
+});
+export type CredentialChannelCapability = z.infer<
+  typeof CredentialChannelCapabilitySchema
+>;
+
+const UnsupportedCredentialChannelSchema = z.strictObject({
+  activation: z.literal("INACTIVE"),
+  inactiveReasons: z.array(nonEmpty).min(1),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: z.literal("unsupported"),
+    surface: z.literal("NONE"),
+    storage: z.literal("NONE"),
+    acceptedKinds: noCredentialKinds,
+    consumerMode: z.literal("NONE"),
+    consumerReadiness: z.literal("UNSUPPORTED"),
+    opaqueReferenceOnly: z.literal(false),
+  }),
+});
+
+const appleTeamId = z.string().regex(/^[A-Z0-9]{10}$/);
+
+const InactiveMacosCredentialChannelSchema = z.strictObject({
+  activation: z.literal("INACTIVE"),
+  inactiveReasons: z.array(nonEmpty).min(1),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: z.literal("macos"),
+  }),
+  helperIdentity: ProbeVerdictSchema,
+  helperBundleId: nonEmpty.optional(),
+  helperBuild: nonEmpty.optional(),
+  helperSignatureHash: hash.optional(),
+  helperTeamId: appleTeamId.optional(),
+  helperDesignatedRequirement: z.string().min(1).max(4096).optional(),
+  launcherIdentity: ProbeVerdictSchema,
+  launcherBundleId: nonEmpty.optional(),
+  launcherBuild: nonEmpty.optional(),
+  launcherSignatureHash: hash.optional(),
+  launcherTeamId: appleTeamId.optional(),
+  launcherDesignatedRequirement: z.string().min(1).max(4096).optional(),
+  secureInput: ProbeVerdictSchema,
+  agentExecutionIsolation: ProbeVerdictSchema,
+  pasteboardHygiene: ProbeVerdictSchema,
+  templateRegistryHash: hash.optional(),
+  consumerRegistryHash: hash.optional(),
+  registryManifestHash: hash.optional(),
+  registryManifestVerification: ProbeVerdictSchema,
+  registryVersion: z.number().int().positive().optional(),
+  registryRollbackFloor: z.number().int().positive().optional(),
+  credentialEvidenceManifestHash: hash.optional(),
+  secretLeakBench: ProbeVerdictSchema,
+  realConsumerProbe: ProbeVerdictSchema,
+  keychainRoundTrip: ProbeVerdictSchema,
+  opaqueRefOnly: ProbeVerdictSchema,
+  scopeBinding: ProbeVerdictSchema,
+  expiryAndRevocation: ProbeVerdictSchema,
+  genericExportDenied: ProbeVerdictSchema,
+});
+
+const ActiveMacosCredentialChannelSchema = z.strictObject({
+  activation: z.literal("ACTIVE"),
+  inactiveReasons: z.array(nonEmpty).length(0),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: z.literal("macos"),
+    surface: z.literal("MACOS_NATIVE_SECURE_PROMPT"),
+    storage: z.literal("MACOS_KEYCHAIN"),
+    acceptedKinds: apiKeyOnly,
+    consumerMode: z.literal("REGISTERED_IN_ENCLAVE_ADAPTER_ONLY"),
+    consumerReadiness: z.literal("AUDITED_REAL_CONSUMER"),
+    opaqueReferenceOnly: z.literal(true),
+  }),
+  helperIdentity: z.literal("passed"),
+  helperBundleId: nonEmpty,
+  helperBuild: nonEmpty,
+  helperSignatureHash: hash,
+  helperTeamId: appleTeamId,
+  helperDesignatedRequirement: z.string().min(1).max(4096),
+  launcherIdentity: z.literal("passed"),
+  launcherBundleId: nonEmpty,
+  launcherBuild: nonEmpty,
+  launcherSignatureHash: hash,
+  launcherTeamId: appleTeamId,
+  launcherDesignatedRequirement: z.string().min(1).max(4096),
+  secureInput: z.literal("passed"),
+  agentExecutionIsolation: z.literal("passed"),
+  pasteboardHygiene: z.literal("passed"),
+  templateRegistryHash: hash,
+  consumerRegistryHash: hash,
+  registryManifestHash: hash,
+  registryManifestVerification: z.literal("passed"),
+  registryVersion: z.number().int().positive(),
+  registryRollbackFloor: z.number().int().positive(),
+  credentialEvidenceManifestHash: hash,
+  secretLeakBench: z.literal("passed"),
+  realConsumerProbe: z.literal("passed"),
+  keychainRoundTrip: z.literal("passed"),
+  opaqueRefOnly: z.literal("passed"),
+  scopeBinding: z.literal("passed"),
+  expiryAndRevocation: z.literal("passed"),
+  genericExportDenied: z.literal("passed"),
+});
+
+export const CredentialChannelProfileSchema = z.union([
+  UnsupportedCredentialChannelSchema,
+  InactiveMacosCredentialChannelSchema,
+  ActiveMacosCredentialChannelSchema,
+]);
+export type CredentialChannelProfile = z.infer<
+  typeof CredentialChannelProfileSchema
+>;
+
 const mediaVerdicts = z.strictObject({
   text: ProbeVerdictSchema,
   structured: ProbeVerdictSchema,
@@ -156,7 +302,7 @@ export const HostSetupSchema = z.strictObject({
 export type HostSetup = z.infer<typeof HostSetupSchema>;
 
 const HostProfileBaseSchema = z.strictObject({
-  schemaVersion: z.literal(3),
+  schemaVersion: z.literal(4),
   profileId: nonEmpty,
   setup: HostSetupSchema,
   identity: z.strictObject({
@@ -179,8 +325,17 @@ const HostProfileBaseSchema = z.strictObject({
   }),
   route: z.strictObject({
     toolRoute: ToolRouteSchema,
-    canonicalToolMatchers: z.array(nonEmpty),
+    canonicalToolMatchers: z.array(exactToolName),
     matcherEvidenceHash: hash,
+    toolSchemaRegistryHash: hash.optional(),
+    toolSchemaRegistryEvidenceId: nonEmpty.optional(),
+    browserTools: z.array(
+      z.strictObject({
+        canonicalToolName: exactToolName,
+        inputSchemaHash: hash,
+        registryManifestBinding: hash,
+      }),
+    ),
   }),
   action: z.strictObject({
     control: ActionControlSchema,
@@ -299,6 +454,7 @@ const HostProfileBaseSchema = z.strictObject({
     oneClickFallback: ProbeVerdictSchema,
     chatMessageRequired: ProbeVerdictSchema,
   }),
+  credentialChannel: CredentialChannelProfileSchema,
   evidence: z.strictObject({
     probeSuiteVersion: nonEmpty,
     fixtureRevision: nonEmpty,
@@ -311,12 +467,50 @@ const HostProfileBaseSchema = z.strictObject({
     mode: HostModeSchema,
     safety: z.enum(["ACTIVE", "INACTIVE"]),
     handoff: z.enum(["ACTIVE", "INACTIVE"]),
+    credentialProtection: z.enum(["ACTIVE", "INACTIVE"]),
     allowedClaims: z.array(nonEmpty),
     forbiddenClaims: z.array(nonEmpty),
   }),
 });
 export const HostProfileSchema = HostProfileBaseSchema.superRefine(
   (profile, context) => {
+    const routePinParts = [
+      Boolean(profile.route.toolSchemaRegistryHash),
+      Boolean(profile.route.toolSchemaRegistryEvidenceId),
+      profile.route.browserTools.length > 0,
+    ];
+    const routePinsComplete = routePinParts.every(Boolean);
+    if (routePinParts.some(Boolean) && !routePinsComplete) {
+      context.addIssue({
+        code: "custom",
+        path: ["route"],
+        message: "External tool schema pins must be complete or absent",
+      });
+    }
+    if (
+      profile.route.toolSchemaRegistryHash &&
+      profile.route.toolSchemaRegistryEvidenceId
+    ) {
+      for (const [index, tool] of profile.route.browserTools.entries()) {
+        const expected = toolRegistryManifestBinding({
+          profileId: profile.profileId,
+          definitionHash: profile.hooks.definitionHash,
+          matcherEvidenceHash: profile.route.matcherEvidenceHash,
+          toolSchemaRegistryHash: profile.route.toolSchemaRegistryHash,
+          toolSchemaRegistryEvidenceId:
+            profile.route.toolSchemaRegistryEvidenceId,
+          canonicalToolName: tool.canonicalToolName,
+          inputSchemaHash: tool.inputSchemaHash,
+        });
+        if (tool.registryManifestBinding.toLowerCase() !== expected) {
+          context.addIssue({
+            code: "custom",
+            path: ["route", "browserTools", index, "registryManifestBinding"],
+            message: "Browser tool pin does not match its manifest binding",
+          });
+        }
+      }
+    }
     const setupConfigured = [
       profile.setup.pluginInstalled,
       profile.setup.skillAvailable,
@@ -371,7 +565,9 @@ export const HostProfileSchema = HostProfileBaseSchema.superRefine(
         profile.setup.optimization !== "BYPASSED" ||
         profile.derived.safety !== "INACTIVE" ||
         profile.derived.handoff !== "INACTIVE" ||
-        profile.handoff.activation !== "INACTIVE"
+        profile.handoff.activation !== "INACTIVE" ||
+        profile.credentialChannel.activation !== "INACTIVE" ||
+        profile.derived.credentialProtection !== "INACTIVE"
       ) {
         context.addIssue({
           code: "custom",
@@ -383,12 +579,32 @@ export const HostProfileSchema = HostProfileBaseSchema.superRefine(
       profile.setup.optimization === "ACTIVE" &&
       (profile.setup.lifecycle !== "VERIFIED" ||
         profile.derived.mode === "ADVISORY_ONLY" ||
-        profile.derived.mode === "UNSUPPORTED")
+        profile.derived.mode === "UNSUPPORTED" ||
+        !routePinsComplete ||
+        profile.route.browserTools.length !==
+          profile.route.canonicalToolMatchers.length ||
+        profile.route.browserTools.some(
+          (tool) =>
+            !profile.route.canonicalToolMatchers.includes(
+              tool.canonicalToolName,
+            ),
+        ))
     ) {
       context.addIssue({
         code: "custom",
         path: ["setup", "optimization"],
-        message: "Active optimization requires a verified enforcement mode",
+        message:
+          "Active optimization requires a verified enforcement mode and complete external tool schema pins",
+      });
+    }
+    if (
+      new Set(profile.route.browserTools.map((tool) => tool.canonicalToolName))
+        .size !== profile.route.browserTools.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["route", "browserTools"],
+        message: "Pinned browser tools must be unique",
       });
     }
     if (
@@ -436,7 +652,56 @@ export const HostProfileSchema = HostProfileBaseSchema.superRefine(
         message: "Handoff inactive reasons must match activation",
       });
     }
+
+    const credential = profile.credentialChannel;
+    if (
+      profile.identity.os !== "macos" &&
+      credential.capability.platform !== "unsupported"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["credentialChannel", "capability", "platform"],
+        message: "Credential Channel is unsupported outside macOS",
+      });
+    }
+    if (credential.activation !== profile.derived.credentialProtection) {
+      context.addIssue({
+        code: "custom",
+        path: ["derived", "credentialProtection"],
+        message: "Credential protection must match channel activation",
+      });
+    }
+    if (credential.activation === "ACTIVE") {
+      if (
+        profile.identity.os !== "macos" ||
+        profile.identity.browserPath !== "chrome-extension" ||
+        profile.setup.lifecycle !== "VERIFIED" ||
+        !profile.evidence.validUntilHostChange ||
+        profile.handoff.activation !== "ACTIVE" ||
+        profile.derived.handoff !== "ACTIVE" ||
+        !profile.handoff.capability.sameTabBinding ||
+        profile.handoff.capability.lease !== "EXCLUSIVE_USER_LEASE" ||
+        profile.handoff.sameTabBinding !== "passed" ||
+        profile.handoff.exclusiveBrowserLease !== "passed" ||
+        profile.handoff.noAgentObservationDuringLease !== "passed" ||
+        profile.handoff.nonSecretCompletionDetector !== "passed" ||
+        profile.handoff.originAndStateVerification !== "passed" ||
+        credential.helperBundleId === credential.launcherBundleId ||
+        credential.helperDesignatedRequirement ===
+          credential.launcherDesignatedRequirement ||
+        credential.registryVersion < credential.registryRollbackFloor
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["credentialChannel"],
+          message:
+            "Active Credential Channel requires current macOS G15 evidence and an audited real consumer",
+        });
+      }
+    }
   },
+).describe(
+  "The runtime HostProfileSchema validates structure and cross-field invariants; its generated JSON Schema validates the exchange shape only. Neither authorizes credential activation. An independent macOS activation verifier is required.",
 );
 export type HostProfile = z.infer<typeof HostProfileSchema>;
 
@@ -668,6 +933,7 @@ export const SetupVerificationSchema = z
     optimization: z.enum(["ACTIVE", "BYPASSED"]),
     safetyProtectionActive: z.boolean(),
     handoffProtectionActive: z.boolean(),
+    credentialProtectionActive: z.boolean(),
     resultingMode: HostModeSchema,
   })
   .superRefine((setup, context) => {
@@ -718,7 +984,11 @@ export const SetupVerificationSchema = z
       });
     }
     if (!setup.hooksTrusted || setup.optimization === "BYPASSED") {
-      if (setup.safetyProtectionActive || setup.handoffProtectionActive) {
+      if (
+        setup.safetyProtectionActive ||
+        setup.handoffProtectionActive ||
+        setup.credentialProtectionActive
+      ) {
         context.addIssue({
           code: "custom",
           message: "Bypassed or untrusted hooks cannot claim active protection",
@@ -735,7 +1005,8 @@ export const SetupVerificationSchema = z
       if (
         setup.optimization !== "BYPASSED" ||
         setup.safetyProtectionActive ||
-        setup.handoffProtectionActive
+        setup.handoffProtectionActive ||
+        setup.credentialProtectionActive
       ) {
         context.addIssue({
           code: "custom",

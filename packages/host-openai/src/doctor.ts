@@ -62,7 +62,30 @@ export interface DoctorOptions {
   syntheticProbe?: HarmlessSyntheticProbe;
 }
 
+export type CredentialCheckId =
+  | "platform"
+  | "helper-identity"
+  | "launcher-identity-and-rollback-floor"
+  | "hook-trust-root-binding"
+  | "sealed-registry-manifest"
+  | "template-registry"
+  | "consumer-registry-and-real-probe"
+  | "keychain-access"
+  | "agent-execution-isolation"
+  | "pasteboard-hygiene"
+  | "opaque-ref-scope-ttl-revocation"
+  | "generic-export-denied";
+
+export interface CredentialCheck {
+  detail: string;
+  id: CredentialCheckId;
+  label: string;
+  verdict: ProbeVerdict;
+}
+
 export type DoctorReport = SetupVerification & {
+  credentialChecks: CredentialCheck[];
+  credentialInactiveReasons: string[];
   currentIdentityConfirmed: boolean;
   handoffInactiveReasons: string[];
   hookDefinitionHash: string;
@@ -418,6 +441,67 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const optimization = "BYPASSED";
   const safetyProtectionActive = false;
   const handoffProtectionActive = false;
+  const credentialProtectionActive = false;
+  const credentialOs = options.currentIdentity?.os ?? profile?.identity.os;
+  const credentialUnsupported = Boolean(
+    credentialOs && credentialOs !== "unknown" && credentialOs !== "macos",
+  );
+  const credentialInactiveReasons = [
+    credentialOs === "macos"
+      ? "native macOS attestation verifier unavailable"
+      : credentialUnsupported
+        ? "Secure Credential Channel is unsupported outside macOS"
+        : "current platform identity is unavailable",
+  ];
+  const credentialUnverifiedVerdict: ProbeVerdict = credentialUnsupported
+    ? "unsupported"
+    : "unknown";
+  const credentialUnverifiedDetail = credentialInactiveReasons[0]!;
+  const credentialChecks: CredentialCheck[] = [
+    {
+      id: "platform",
+      label: "macOS platform",
+      verdict:
+        credentialOs === "macos"
+          ? "passed"
+          : credentialUnsupported
+            ? "unsupported"
+            : "unknown",
+      detail:
+        credentialOs === "macos"
+          ? "current Host identity reports macOS"
+          : credentialUnverifiedDetail,
+    },
+    ...(
+      [
+        ["helper-identity", "helper identity/signature"],
+        [
+          "launcher-identity-and-rollback-floor",
+          "launcher identity and rollback-floor ownership",
+        ],
+        ["hook-trust-root-binding", "Hook credential trust-root binding"],
+        ["sealed-registry-manifest", "sealed registry manifest"],
+        ["template-registry", "fixed credential template registry"],
+        [
+          "consumer-registry-and-real-probe",
+          "registered consumer registry and real probe",
+        ],
+        ["keychain-access", "Keychain entitlement/access"],
+        ["agent-execution-isolation", "Agent execution isolation"],
+        ["pasteboard-hygiene", "pasteboard hygiene"],
+        [
+          "opaque-ref-scope-ttl-revocation",
+          "opaque ref scope, TTL, generation and revocation",
+        ],
+        ["generic-export-denied", "generic secret export denied"],
+      ] as const
+    ).map(([id, label]) => ({
+      id,
+      label,
+      verdict: credentialUnverifiedVerdict,
+      detail: credentialUnverifiedDetail,
+    })),
+  ];
   const safetyInactiveReasons = safetyProtectionActive
     ? []
     : [
@@ -467,6 +551,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     optimization,
     safetyProtectionActive,
     handoffProtectionActive,
+    credentialProtectionActive,
     resultingMode,
   });
 
@@ -561,11 +646,17 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
           ? []
           : handoffInactiveReasons,
       },
+      credentialChannel: {
+        ...profile.credentialChannel,
+        activation: "INACTIVE",
+        inactiveReasons: credentialInactiveReasons,
+      },
       derived: {
         ...profile.derived,
         mode: verification.resultingMode,
         safety: verification.safetyProtectionActive ? "ACTIVE" : "INACTIVE",
         handoff: verification.handoffProtectionActive ? "ACTIVE" : "INACTIVE",
+        credentialProtection: "INACTIVE",
       },
     };
     try {
@@ -581,6 +672,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         optimization: "BYPASSED",
         safetyProtectionActive: false,
         handoffProtectionActive: false,
+        credentialProtectionActive: false,
         resultingMode: "UNSUPPORTED",
       });
       reportedSafetyReasons = ["setup state could not be persisted"];
@@ -593,6 +685,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
 
   return {
     ...reportedVerification,
+    credentialChecks,
+    credentialInactiveReasons,
     currentIdentityConfirmed: currentIdentity,
     handoffInactiveReasons: reportedHandoffReasons,
     hookDefinitionHash: definitionHash,
@@ -646,6 +740,15 @@ export function formatDoctorReport(report: DoctorReport): string {
       report.handoffProtectionActive
         ? "ACTIVE"
         : `INACTIVE — ${report.handoffInactiveReasons.join("; ")}`
+    }`,
+    ...report.credentialChecks.map(
+      (check) =>
+        `Credential check — ${check.label}: ${check.verdict.toUpperCase()} — ${check.detail}`,
+    ),
+    `Credential protection: ${
+      report.credentialProtectionActive
+        ? "ACTIVE"
+        : `INACTIVE — ${report.credentialInactiveReasons.join("; ")}`
     }`,
   ].join("\n");
 }

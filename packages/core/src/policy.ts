@@ -242,6 +242,19 @@ export function deriveHostMode(
   ) {
     return "ADVISORY_ONLY";
   }
+  const pinnedToolNames = new Set(
+    profile.route.browserTools.map((tool) => tool.canonicalToolName),
+  );
+  if (
+    !profile.route.toolSchemaRegistryHash ||
+    !profile.route.toolSchemaRegistryEvidenceId ||
+    pinnedToolNames.size !== profile.route.canonicalToolMatchers.length ||
+    profile.route.canonicalToolMatchers.some(
+      (toolName) => !pinnedToolNames.has(toolName),
+    )
+  ) {
+    return "ADVISORY_ONLY";
+  }
   if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
     return "ADVISORY_ONLY";
   }

@@ -42,7 +42,7 @@ afterEach(async () => {
 
 async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
   return HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 4,
     profileId: "hp_fixture",
     setup: {
       lifecycle: "CONFIGURED",
@@ -71,6 +71,7 @@ async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["fixture.native.browser"],
       matcherEvidenceHash: "a".repeat(64),
+      browserTools: [],
     },
     action: {
       control: "MICRO_ACTION",
@@ -163,6 +164,20 @@ async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
       oneClickFallback: "unsupported",
       chatMessageRequired: "unknown",
     },
+    credentialChannel: {
+      activation: "INACTIVE",
+      inactiveReasons: ["unsupported on this host"],
+      capability: {
+        platform: "unsupported",
+        surface: "NONE",
+        storage: "NONE",
+        acceptedKinds: [],
+        consumerMode: "NONE",
+        consumerReadiness: "UNSUPPORTED",
+        opaqueReferenceOnly: false,
+        genericSecretExport: "DENIED",
+      },
+    },
     evidence: {
       probeSuiteVersion: "fixture-1",
       fixtureRevision: "fixture-1",
@@ -175,6 +190,7 @@ async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
       mode: "ADVISORY_ONLY",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: ["fixture-only action guard"],
       forbiddenClaims: ["secret protection", "handoff"],
     },
@@ -435,7 +451,8 @@ describe("public Codex hooks", () => {
     expect(JSON.parse(result.stdout)).toEqual({
       systemMessage:
         "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. " +
-        "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE.",
+        "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. " +
+        "Oxrail credential protection: INACTIVE.",
     });
     expect(result.stdout).not.toContain(canary);
   });

@@ -10,7 +10,10 @@ import {
   selectAcceptedReleaseManifest,
   validateEvidenceManifestFile,
 } from "../packages/evidence/src/index.js";
-import { EvidenceManifestSchema } from "../packages/protocol/src/index.js";
+import {
+  EvidenceManifestSchema,
+  toolRegistryManifestBinding,
+} from "../packages/protocol/src/index.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -93,7 +96,7 @@ describe("evidence release gate", () => {
     const commit = runGit("rev-parse", "HEAD");
 
     const profile = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       profileId: "hp_gate",
       setup: {
         lifecycle: "VERIFIED",
@@ -121,6 +124,23 @@ describe("evidence release gate", () => {
         toolRoute: "direct-mcp",
         canonicalToolMatchers: ["browser.fixture"],
         matcherEvidenceHash: "a".repeat(64),
+        toolSchemaRegistryHash: "e".repeat(64),
+        toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+        browserTools: [
+          {
+            canonicalToolName: "browser.fixture",
+            inputSchemaHash: "f".repeat(64),
+            registryManifestBinding: toolRegistryManifestBinding({
+              profileId: "hp_gate",
+              definitionHash: sha(hookDefinition),
+              matcherEvidenceHash: "a".repeat(64),
+              toolSchemaRegistryHash: "e".repeat(64),
+              toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+              canonicalToolName: "browser.fixture",
+              inputSchemaHash: "f".repeat(64),
+            }),
+          },
+        ],
       },
       action: {
         control: "MICRO_ACTION",
@@ -232,6 +252,20 @@ describe("evidence release gate", () => {
         oneClickFallback: "unknown",
         chatMessageRequired: "unknown",
       },
+      credentialChannel: {
+        activation: "INACTIVE",
+        inactiveReasons: ["unsupported on this host"],
+        capability: {
+          platform: "unsupported",
+          surface: "NONE",
+          storage: "NONE",
+          acceptedKinds: [],
+          consumerMode: "NONE",
+          consumerReadiness: "UNSUPPORTED",
+          opaqueReferenceOnly: false,
+          genericSecretExport: "DENIED",
+        },
+      },
       evidence: {
         probeSuiteVersion: "fixture",
         fixtureRevision: "fixture",
@@ -244,6 +278,7 @@ describe("evidence release gate", () => {
         mode: "MICRO_ACTION_GUARD",
         safety: "ACTIVE",
         handoff: "INACTIVE",
+        credentialProtection: "INACTIVE",
         allowedClaims: ["guard"],
         forbiddenClaims: ["handoff"],
       },

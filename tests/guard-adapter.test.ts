@@ -5,6 +5,7 @@ import {
   NativePrimitiveSchema,
   deterministicDigest,
   redactedDeterministicDigest,
+  toolRegistryManifestBinding,
   type BrowserTaskState,
   type HostProfile,
   type PolicyDecision,
@@ -25,7 +26,7 @@ const hash = (value: string) => value.repeat(64);
 
 function profile(): HostProfile {
   return HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 4,
     profileId: "hp_guard_fixture",
     setup: {
       lifecycle: "VERIFIED",
@@ -54,6 +55,23 @@ function profile(): HostProfile {
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["fixture.native.browser"],
       matcherEvidenceHash: hash("a"),
+      toolSchemaRegistryHash: hash("e"),
+      toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+      browserTools: [
+        {
+          canonicalToolName: "fixture.native.browser",
+          inputSchemaHash: hash("d"),
+          registryManifestBinding: toolRegistryManifestBinding({
+            profileId: "hp_guard_fixture",
+            definitionHash: hash("b"),
+            matcherEvidenceHash: hash("a"),
+            toolSchemaRegistryHash: hash("e"),
+            toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+            canonicalToolName: "fixture.native.browser",
+            inputSchemaHash: hash("d"),
+          }),
+        },
+      ],
     },
     action: {
       control: "MICRO_ACTION",
@@ -146,6 +164,33 @@ function profile(): HostProfile {
       oneClickFallback: "unknown",
       chatMessageRequired: "unknown",
     },
+    credentialChannel: {
+      activation: "INACTIVE",
+      inactiveReasons: ["fixture has no credential helper"],
+      capability: {
+        platform: "macos",
+        surface: "NONE",
+        storage: "NONE",
+        acceptedKinds: [],
+        consumerMode: "NONE",
+        consumerReadiness: "UNSUPPORTED",
+        opaqueReferenceOnly: false,
+        genericSecretExport: "DENIED",
+      },
+      helperIdentity: "unknown",
+      launcherIdentity: "unknown",
+      secureInput: "unknown",
+      agentExecutionIsolation: "unknown",
+      pasteboardHygiene: "unknown",
+      registryManifestVerification: "unknown",
+      secretLeakBench: "unknown",
+      realConsumerProbe: "unknown",
+      keychainRoundTrip: "unknown",
+      opaqueRefOnly: "unknown",
+      scopeBinding: "unknown",
+      expiryAndRevocation: "unknown",
+      genericExportDenied: "unknown",
+    },
     evidence: {
       probeSuiteVersion: "fixture",
       fixtureRevision: "fixture",
@@ -158,6 +203,7 @@ function profile(): HostProfile {
       mode: "MICRO_ACTION_GUARD",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: ["fixture guard"],
       forbiddenClaims: ["handoff"],
     },
@@ -516,10 +562,46 @@ describe("host Guard adapter", () => {
       risk: [],
     });
     expect(decoded.action.inputDigest).toBe(
-      redactedDeterministicDigest("oxrail-host-tool-input-identity-v1", {
-        axis: "primary",
-      }),
+      redactedDeterministicDigest("oxrail-host-tool-input-identity-v1", [
+        [["axis"], "primary"],
+      ]),
     );
+  });
+
+  it("keeps dotted identity path segments unambiguous", () => {
+    const dottedRegistry = {
+      ...registry,
+      tools: [
+        {
+          ...registry.tools[0],
+          identityPaths: [
+            ["a.b", "c"],
+            ["a", "b.c"],
+          ],
+        },
+      ],
+    } as const;
+    const decode = (first: string) =>
+      decodeBrowserAction(
+        profile(),
+        dottedRegistry,
+        {
+          toolName: "fixture.native.browser",
+          toolUseId: "call-dotted-path",
+          toolInput: {
+            action: "click",
+            "a.b": { c: first },
+            a: { "b.c": "constant" },
+          },
+        },
+        registryBinding(dottedRegistry),
+      );
+    const first = decode("first");
+    const second = decode("second");
+    if (first.kind !== "ACTION" || second.kind !== "ACTION")
+      throw new Error("dotted path fixtures did not decode");
+
+    expect(first.action.inputDigest).not.toBe(second.action.inputDigest);
   });
 
   it("always domain-hashes target fingerprints, including 64-hex input", () => {

@@ -12092,8 +12092,17 @@ var ReasonCodeSchema = external_exports.enum(REASON_CODES);
 // packages/protocol/src/schemas.ts
 var nonEmpty = external_exports.string().min(1);
 var hash3 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+var exactToolName = external_exports.string().min(1).max(256).regex(
+  /^[A-Za-z0-9_.:/-]+$/,
+  "expected an exact tool name, not a matcher expression"
+);
 var finiteNonNegative = external_exports.number().finite().nonnegative();
 var nonNegativeInt = external_exports.number().int().nonnegative();
+var noCredentialKinds = external_exports.array(external_exports.literal("API_KEY")).length(0);
+var apiKeyOnly = external_exports.array(external_exports.literal("API_KEY")).length(1);
+function toolRegistryManifestBinding(input) {
+  return deterministicDigest("oxrail-tool-registry-manifest-binding-v1", input);
+}
 var ActionControlSchema = external_exports.enum([
   "MICRO_ACTION",
   "TRANSACTION",
@@ -12189,6 +12198,117 @@ var HandoffCapabilitySchema = external_exports.strictObject({
   sameTabBinding: external_exports.boolean(),
   originalPlacementRestorable: external_exports.boolean()
 });
+var CredentialChannelCapabilitySchema = external_exports.strictObject({
+  platform: external_exports.enum(["macos", "unsupported"]),
+  surface: external_exports.enum(["MACOS_NATIVE_SECURE_PROMPT", "NONE"]),
+  storage: external_exports.enum(["MACOS_KEYCHAIN", "NONE"]),
+  acceptedKinds: external_exports.union([apiKeyOnly, noCredentialKinds]),
+  consumerMode: external_exports.enum(["REGISTERED_IN_ENCLAVE_ADAPTER_ONLY", "NONE"]),
+  consumerReadiness: external_exports.enum([
+    "AUDITED_REAL_CONSUMER",
+    "FIXTURE_ONLY",
+    "UNSUPPORTED"
+  ]),
+  opaqueReferenceOnly: external_exports.boolean(),
+  genericSecretExport: external_exports.literal("DENIED")
+});
+var UnsupportedCredentialChannelSchema = external_exports.strictObject({
+  activation: external_exports.literal("INACTIVE"),
+  inactiveReasons: external_exports.array(nonEmpty).min(1),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: external_exports.literal("unsupported"),
+    surface: external_exports.literal("NONE"),
+    storage: external_exports.literal("NONE"),
+    acceptedKinds: noCredentialKinds,
+    consumerMode: external_exports.literal("NONE"),
+    consumerReadiness: external_exports.literal("UNSUPPORTED"),
+    opaqueReferenceOnly: external_exports.literal(false)
+  })
+});
+var appleTeamId = external_exports.string().regex(/^[A-Z0-9]{10}$/);
+var InactiveMacosCredentialChannelSchema = external_exports.strictObject({
+  activation: external_exports.literal("INACTIVE"),
+  inactiveReasons: external_exports.array(nonEmpty).min(1),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: external_exports.literal("macos")
+  }),
+  helperIdentity: ProbeVerdictSchema,
+  helperBundleId: nonEmpty.optional(),
+  helperBuild: nonEmpty.optional(),
+  helperSignatureHash: hash3.optional(),
+  helperTeamId: appleTeamId.optional(),
+  helperDesignatedRequirement: external_exports.string().min(1).max(4096).optional(),
+  launcherIdentity: ProbeVerdictSchema,
+  launcherBundleId: nonEmpty.optional(),
+  launcherBuild: nonEmpty.optional(),
+  launcherSignatureHash: hash3.optional(),
+  launcherTeamId: appleTeamId.optional(),
+  launcherDesignatedRequirement: external_exports.string().min(1).max(4096).optional(),
+  secureInput: ProbeVerdictSchema,
+  agentExecutionIsolation: ProbeVerdictSchema,
+  pasteboardHygiene: ProbeVerdictSchema,
+  templateRegistryHash: hash3.optional(),
+  consumerRegistryHash: hash3.optional(),
+  registryManifestHash: hash3.optional(),
+  registryManifestVerification: ProbeVerdictSchema,
+  registryVersion: external_exports.number().int().positive().optional(),
+  registryRollbackFloor: external_exports.number().int().positive().optional(),
+  credentialEvidenceManifestHash: hash3.optional(),
+  secretLeakBench: ProbeVerdictSchema,
+  realConsumerProbe: ProbeVerdictSchema,
+  keychainRoundTrip: ProbeVerdictSchema,
+  opaqueRefOnly: ProbeVerdictSchema,
+  scopeBinding: ProbeVerdictSchema,
+  expiryAndRevocation: ProbeVerdictSchema,
+  genericExportDenied: ProbeVerdictSchema
+});
+var ActiveMacosCredentialChannelSchema = external_exports.strictObject({
+  activation: external_exports.literal("ACTIVE"),
+  inactiveReasons: external_exports.array(nonEmpty).length(0),
+  capability: CredentialChannelCapabilitySchema.extend({
+    platform: external_exports.literal("macos"),
+    surface: external_exports.literal("MACOS_NATIVE_SECURE_PROMPT"),
+    storage: external_exports.literal("MACOS_KEYCHAIN"),
+    acceptedKinds: apiKeyOnly,
+    consumerMode: external_exports.literal("REGISTERED_IN_ENCLAVE_ADAPTER_ONLY"),
+    consumerReadiness: external_exports.literal("AUDITED_REAL_CONSUMER"),
+    opaqueReferenceOnly: external_exports.literal(true)
+  }),
+  helperIdentity: external_exports.literal("passed"),
+  helperBundleId: nonEmpty,
+  helperBuild: nonEmpty,
+  helperSignatureHash: hash3,
+  helperTeamId: appleTeamId,
+  helperDesignatedRequirement: external_exports.string().min(1).max(4096),
+  launcherIdentity: external_exports.literal("passed"),
+  launcherBundleId: nonEmpty,
+  launcherBuild: nonEmpty,
+  launcherSignatureHash: hash3,
+  launcherTeamId: appleTeamId,
+  launcherDesignatedRequirement: external_exports.string().min(1).max(4096),
+  secureInput: external_exports.literal("passed"),
+  agentExecutionIsolation: external_exports.literal("passed"),
+  pasteboardHygiene: external_exports.literal("passed"),
+  templateRegistryHash: hash3,
+  consumerRegistryHash: hash3,
+  registryManifestHash: hash3,
+  registryManifestVerification: external_exports.literal("passed"),
+  registryVersion: external_exports.number().int().positive(),
+  registryRollbackFloor: external_exports.number().int().positive(),
+  credentialEvidenceManifestHash: hash3,
+  secretLeakBench: external_exports.literal("passed"),
+  realConsumerProbe: external_exports.literal("passed"),
+  keychainRoundTrip: external_exports.literal("passed"),
+  opaqueRefOnly: external_exports.literal("passed"),
+  scopeBinding: external_exports.literal("passed"),
+  expiryAndRevocation: external_exports.literal("passed"),
+  genericExportDenied: external_exports.literal("passed")
+});
+var CredentialChannelProfileSchema = external_exports.union([
+  UnsupportedCredentialChannelSchema,
+  InactiveMacosCredentialChannelSchema,
+  ActiveMacosCredentialChannelSchema
+]);
 var mediaVerdicts = external_exports.strictObject({
   text: ProbeVerdictSchema,
   structured: ProbeVerdictSchema,
@@ -12216,7 +12336,7 @@ var HostSetupSchema = external_exports.strictObject({
   optimization: external_exports.enum(["ACTIVE", "BYPASSED"])
 });
 var HostProfileBaseSchema = external_exports.strictObject({
-  schemaVersion: external_exports.literal(3),
+  schemaVersion: external_exports.literal(4),
   profileId: nonEmpty,
   setup: HostSetupSchema,
   identity: external_exports.strictObject({
@@ -12239,8 +12359,17 @@ var HostProfileBaseSchema = external_exports.strictObject({
   }),
   route: external_exports.strictObject({
     toolRoute: ToolRouteSchema,
-    canonicalToolMatchers: external_exports.array(nonEmpty),
-    matcherEvidenceHash: hash3
+    canonicalToolMatchers: external_exports.array(exactToolName),
+    matcherEvidenceHash: hash3,
+    toolSchemaRegistryHash: hash3.optional(),
+    toolSchemaRegistryEvidenceId: nonEmpty.optional(),
+    browserTools: external_exports.array(
+      external_exports.strictObject({
+        canonicalToolName: exactToolName,
+        inputSchemaHash: hash3,
+        registryManifestBinding: hash3
+      })
+    )
   }),
   action: external_exports.strictObject({
     control: ActionControlSchema,
@@ -12359,6 +12488,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
     oneClickFallback: ProbeVerdictSchema,
     chatMessageRequired: ProbeVerdictSchema
   }),
+  credentialChannel: CredentialChannelProfileSchema,
   evidence: external_exports.strictObject({
     probeSuiteVersion: nonEmpty,
     fixtureRevision: nonEmpty,
@@ -12371,12 +12501,46 @@ var HostProfileBaseSchema = external_exports.strictObject({
     mode: HostModeSchema,
     safety: external_exports.enum(["ACTIVE", "INACTIVE"]),
     handoff: external_exports.enum(["ACTIVE", "INACTIVE"]),
+    credentialProtection: external_exports.enum(["ACTIVE", "INACTIVE"]),
     allowedClaims: external_exports.array(nonEmpty),
     forbiddenClaims: external_exports.array(nonEmpty)
   })
 });
 var HostProfileSchema = HostProfileBaseSchema.superRefine(
   (profile, context) => {
+    const routePinParts = [
+      Boolean(profile.route.toolSchemaRegistryHash),
+      Boolean(profile.route.toolSchemaRegistryEvidenceId),
+      profile.route.browserTools.length > 0
+    ];
+    const routePinsComplete = routePinParts.every(Boolean);
+    if (routePinParts.some(Boolean) && !routePinsComplete) {
+      context.addIssue({
+        code: "custom",
+        path: ["route"],
+        message: "External tool schema pins must be complete or absent"
+      });
+    }
+    if (profile.route.toolSchemaRegistryHash && profile.route.toolSchemaRegistryEvidenceId) {
+      for (const [index, tool] of profile.route.browserTools.entries()) {
+        const expected = toolRegistryManifestBinding({
+          profileId: profile.profileId,
+          definitionHash: profile.hooks.definitionHash,
+          matcherEvidenceHash: profile.route.matcherEvidenceHash,
+          toolSchemaRegistryHash: profile.route.toolSchemaRegistryHash,
+          toolSchemaRegistryEvidenceId: profile.route.toolSchemaRegistryEvidenceId,
+          canonicalToolName: tool.canonicalToolName,
+          inputSchemaHash: tool.inputSchemaHash
+        });
+        if (tool.registryManifestBinding.toLowerCase() !== expected) {
+          context.addIssue({
+            code: "custom",
+            path: ["route", "browserTools", index, "registryManifestBinding"],
+            message: "Browser tool pin does not match its manifest binding"
+          });
+        }
+      }
+    }
     const setupConfigured = [
       profile.setup.pluginInstalled,
       profile.setup.skillAvailable,
@@ -12417,18 +12581,29 @@ var HostProfileSchema = HostProfileBaseSchema.superRefine(
       });
     }
     if (profile.setup.lifecycle !== "VERIFIED") {
-      if (profile.setup.optimization !== "BYPASSED" || profile.derived.safety !== "INACTIVE" || profile.derived.handoff !== "INACTIVE" || profile.handoff.activation !== "INACTIVE") {
+      if (profile.setup.optimization !== "BYPASSED" || profile.derived.safety !== "INACTIVE" || profile.derived.handoff !== "INACTIVE" || profile.handoff.activation !== "INACTIVE" || profile.credentialChannel.activation !== "INACTIVE" || profile.derived.credentialProtection !== "INACTIVE") {
         context.addIssue({
           code: "custom",
           message: "Unverified Oxrail capabilities must be BYPASSED/INACTIVE"
         });
       }
     }
-    if (profile.setup.optimization === "ACTIVE" && (profile.setup.lifecycle !== "VERIFIED" || profile.derived.mode === "ADVISORY_ONLY" || profile.derived.mode === "UNSUPPORTED")) {
+    if (profile.setup.optimization === "ACTIVE" && (profile.setup.lifecycle !== "VERIFIED" || profile.derived.mode === "ADVISORY_ONLY" || profile.derived.mode === "UNSUPPORTED" || !routePinsComplete || profile.route.browserTools.length !== profile.route.canonicalToolMatchers.length || profile.route.browserTools.some(
+      (tool) => !profile.route.canonicalToolMatchers.includes(
+        tool.canonicalToolName
+      )
+    ))) {
       context.addIssue({
         code: "custom",
         path: ["setup", "optimization"],
-        message: "Active optimization requires a verified enforcement mode"
+        message: "Active optimization requires a verified enforcement mode and complete external tool schema pins"
+      });
+    }
+    if (new Set(profile.route.browserTools.map((tool) => tool.canonicalToolName)).size !== profile.route.browserTools.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["route", "browserTools"],
+        message: "Pinned browser tools must be unique"
       });
     }
     if (profile.derived.safety === "ACTIVE" && profile.setup.optimization !== "ACTIVE") {
@@ -12456,7 +12631,33 @@ var HostProfileSchema = HostProfileBaseSchema.superRefine(
         message: "Handoff inactive reasons must match activation"
       });
     }
+    const credential = profile.credentialChannel;
+    if (profile.identity.os !== "macos" && credential.capability.platform !== "unsupported") {
+      context.addIssue({
+        code: "custom",
+        path: ["credentialChannel", "capability", "platform"],
+        message: "Credential Channel is unsupported outside macOS"
+      });
+    }
+    if (credential.activation !== profile.derived.credentialProtection) {
+      context.addIssue({
+        code: "custom",
+        path: ["derived", "credentialProtection"],
+        message: "Credential protection must match channel activation"
+      });
+    }
+    if (credential.activation === "ACTIVE") {
+      if (profile.identity.os !== "macos" || profile.identity.browserPath !== "chrome-extension" || profile.setup.lifecycle !== "VERIFIED" || !profile.evidence.validUntilHostChange || profile.handoff.activation !== "ACTIVE" || profile.derived.handoff !== "ACTIVE" || !profile.handoff.capability.sameTabBinding || profile.handoff.capability.lease !== "EXCLUSIVE_USER_LEASE" || profile.handoff.sameTabBinding !== "passed" || profile.handoff.exclusiveBrowserLease !== "passed" || profile.handoff.noAgentObservationDuringLease !== "passed" || profile.handoff.nonSecretCompletionDetector !== "passed" || profile.handoff.originAndStateVerification !== "passed" || credential.helperBundleId === credential.launcherBundleId || credential.helperDesignatedRequirement === credential.launcherDesignatedRequirement || credential.registryVersion < credential.registryRollbackFloor) {
+        context.addIssue({
+          code: "custom",
+          path: ["credentialChannel"],
+          message: "Active Credential Channel requires current macOS G15 evidence and an audited real consumer"
+        });
+      }
+    }
   }
+).describe(
+  "The runtime HostProfileSchema validates structure and cross-field invariants; its generated JSON Schema validates the exchange shape only. Neither authorizes credential activation. An independent macOS activation verifier is required."
 );
 var RectSchema = external_exports.strictObject({
   x: external_exports.number().finite(),
@@ -12657,6 +12858,7 @@ var SetupVerificationSchema = external_exports.strictObject({
   optimization: external_exports.enum(["ACTIVE", "BYPASSED"]),
   safetyProtectionActive: external_exports.boolean(),
   handoffProtectionActive: external_exports.boolean(),
+  credentialProtectionActive: external_exports.boolean(),
   resultingMode: HostModeSchema
 }).superRefine((setup, context) => {
   const configured = setup.pluginInstalled && setup.skillAvailable && setup.hooksRegistered && setup.hooksTrusted && setup.preToolUseAvailable === "passed" && setup.postToolUseAvailable === "passed" && setup.chromeComputerUseDetectable === "passed" && setup.matcherProfileValid;
@@ -12691,7 +12893,7 @@ var SetupVerificationSchema = external_exports.strictObject({
     });
   }
   if (!setup.hooksTrusted || setup.optimization === "BYPASSED") {
-    if (setup.safetyProtectionActive || setup.handoffProtectionActive) {
+    if (setup.safetyProtectionActive || setup.handoffProtectionActive || setup.credentialProtectionActive) {
       context.addIssue({
         code: "custom",
         message: "Bypassed or untrusted hooks cannot claim active protection"
@@ -12705,7 +12907,7 @@ var SetupVerificationSchema = external_exports.strictObject({
     });
   }
   if (setup.stage !== "VERIFIED") {
-    if (setup.optimization !== "BYPASSED" || setup.safetyProtectionActive || setup.handoffProtectionActive) {
+    if (setup.optimization !== "BYPASSED" || setup.safetyProtectionActive || setup.handoffProtectionActive || setup.credentialProtectionActive) {
       context.addIssue({
         code: "custom",
         message: "Unverified setup must remain BYPASSED/INACTIVE"
@@ -12959,6 +13161,14 @@ function deriveHostMode(profile) {
   if (profile.setup.lifecycle !== "VERIFIED" || profile.setup.optimization !== "ACTIVE") {
     return "ADVISORY_ONLY";
   }
+  const pinnedToolNames = new Set(
+    profile.route.browserTools.map((tool) => tool.canonicalToolName)
+  );
+  if (!profile.route.toolSchemaRegistryHash || !profile.route.toolSchemaRegistryEvidenceId || pinnedToolNames.size !== profile.route.canonicalToolMatchers.length || profile.route.canonicalToolMatchers.some(
+    (toolName) => !pinnedToolNames.has(toolName)
+  )) {
+    return "ADVISORY_ONLY";
+  }
   if (profile.nativeInteraction.fidelity !== "PROVEN_PASS_THROUGH") {
     return "ADVISORY_ONLY";
   }
@@ -12988,6 +13198,7 @@ var HOSTS_DIRECTORY = "hosts";
 var HOST_PROFILE_FILENAME = "profile.json";
 var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
 var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
+var CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR = "credential activation denied: independent macOS attestation verifier unavailable";
 var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 var sha256 = (value) => createHash2("sha256").update(value).digest("hex");
 var profileDirectory = (pluginData2, profileId) => path.join(pluginData2, HOSTS_DIRECTORY, profileId);
@@ -13015,6 +13226,14 @@ async function writePrivate(filename, value) {
   }
 }
 function validateHostProfile(value, constraints = {}) {
+  if (value && typeof value === "object" && value.schemaVersion === 3) {
+    return {
+      errors: [
+        "host profile schema v3 is stale; run Oxrail setup to create a v4 profile"
+      ],
+      valid: false
+    };
+  }
   const parsed = HostProfileSchema.safeParse(value);
   if (!parsed.success) {
     return {
@@ -13026,6 +13245,8 @@ function validateHostProfile(value, constraints = {}) {
   }
   const profile = parsed.data;
   const errors = [];
+  if (profile.credentialChannel.activation === "ACTIVE")
+    errors.push(CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR);
   if (!profile.evidence.validUntilHostChange)
     errors.push("host profile is stale");
   if (new Set(profile.route.canonicalToolMatchers).size !== profile.route.canonicalToolMatchers.length) {
@@ -13128,7 +13349,11 @@ async function loadHostProfile(pluginData2, constraints = {}, explicitProfilePat
   }
 }
 async function writeHostProfile(pluginData2, input) {
-  const profile = HostProfileSchema.parse(input);
+  const validation = validateHostProfile(input);
+  if (!validation.valid || !validation.profile) {
+    throw new Error(`invalid host profile: ${validation.errors.join("; ")}`);
+  }
+  const profile = validation.profile;
   if (!safeProfileId(profile.profileId))
     throw new Error("unsafe host profile identifier");
   const directory = profileDirectory(pluginData2, profile.profileId);
@@ -13319,7 +13544,7 @@ async function hookDefinitionHash(pluginRoot2) {
 }
 
 // packages/host-openai/src/bootstrap.ts
-var exactToolName = external_exports.string().min(1).max(256).regex(
+var exactToolName2 = external_exports.string().min(1).max(256).regex(
   /^[A-Za-z0-9_.:/-]+$/,
   "expected an exact tool name, not a matcher expression"
 );
@@ -13351,7 +13576,7 @@ var HostInventorySchema = external_exports.strictObject({
     "specialized",
     "opaque"
   ]),
-  browserToolNames: external_exports.array(exactToolName).min(1).max(32)
+  browserToolNames: external_exports.array(exactToolName2).min(1).max(32)
 }).superRefine((inventory, context) => {
   if (new Set(inventory.browserToolNames).size !== inventory.browserToolNames.length) {
     context.addIssue({
@@ -13625,6 +13850,51 @@ async function runDoctor(options) {
   const optimization = "BYPASSED";
   const safetyProtectionActive = false;
   const handoffProtectionActive = false;
+  const credentialProtectionActive = false;
+  const credentialOs = options.currentIdentity?.os ?? profile?.identity.os;
+  const credentialUnsupported = Boolean(
+    credentialOs && credentialOs !== "unknown" && credentialOs !== "macos"
+  );
+  const credentialInactiveReasons = [
+    credentialOs === "macos" ? "native macOS attestation verifier unavailable" : credentialUnsupported ? "Secure Credential Channel is unsupported outside macOS" : "current platform identity is unavailable"
+  ];
+  const credentialUnverifiedVerdict = credentialUnsupported ? "unsupported" : "unknown";
+  const credentialUnverifiedDetail = credentialInactiveReasons[0];
+  const credentialChecks = [
+    {
+      id: "platform",
+      label: "macOS platform",
+      verdict: credentialOs === "macos" ? "passed" : credentialUnsupported ? "unsupported" : "unknown",
+      detail: credentialOs === "macos" ? "current Host identity reports macOS" : credentialUnverifiedDetail
+    },
+    ...[
+      ["helper-identity", "helper identity/signature"],
+      [
+        "launcher-identity-and-rollback-floor",
+        "launcher identity and rollback-floor ownership"
+      ],
+      ["hook-trust-root-binding", "Hook credential trust-root binding"],
+      ["sealed-registry-manifest", "sealed registry manifest"],
+      ["template-registry", "fixed credential template registry"],
+      [
+        "consumer-registry-and-real-probe",
+        "registered consumer registry and real probe"
+      ],
+      ["keychain-access", "Keychain entitlement/access"],
+      ["agent-execution-isolation", "Agent execution isolation"],
+      ["pasteboard-hygiene", "pasteboard hygiene"],
+      [
+        "opaque-ref-scope-ttl-revocation",
+        "opaque ref scope, TTL, generation and revocation"
+      ],
+      ["generic-export-denied", "generic secret export denied"]
+    ].map(([id, label]) => ({
+      id,
+      label,
+      verdict: credentialUnverifiedVerdict,
+      detail: credentialUnverifiedDetail
+    }))
+  ];
   const safetyInactiveReasons = safetyProtectionActive ? [] : [
     !verified ? "browser hook path is not verified" : "runtime safety enforcement adapter is not active in this build"
   ];
@@ -13649,6 +13919,7 @@ async function runDoctor(options) {
     optimization,
     safetyProtectionActive,
     handoffProtectionActive,
+    credentialProtectionActive,
     resultingMode
   });
   const notices = [];
@@ -13720,11 +13991,17 @@ async function runDoctor(options) {
         activation: verification.handoffProtectionActive ? "ACTIVE" : "INACTIVE",
         inactiveReasons: verification.handoffProtectionActive ? [] : handoffInactiveReasons
       },
+      credentialChannel: {
+        ...profile.credentialChannel,
+        activation: "INACTIVE",
+        inactiveReasons: credentialInactiveReasons
+      },
       derived: {
         ...profile.derived,
         mode: verification.resultingMode,
         safety: verification.safetyProtectionActive ? "ACTIVE" : "INACTIVE",
-        handoff: verification.handoffProtectionActive ? "ACTIVE" : "INACTIVE"
+        handoff: verification.handoffProtectionActive ? "ACTIVE" : "INACTIVE",
+        credentialProtection: "INACTIVE"
       }
     };
     try {
@@ -13740,6 +14017,7 @@ async function runDoctor(options) {
         optimization: "BYPASSED",
         safetyProtectionActive: false,
         handoffProtectionActive: false,
+        credentialProtectionActive: false,
         resultingMode: "UNSUPPORTED"
       });
       reportedSafetyReasons = ["setup state could not be persisted"];
@@ -13751,6 +14029,8 @@ async function runDoctor(options) {
   }
   return {
     ...reportedVerification,
+    credentialChecks,
+    credentialInactiveReasons,
     currentIdentityConfirmed: currentIdentity2,
     handoffInactiveReasons: reportedHandoffReasons,
     hookDefinitionHash: definitionHash,
@@ -13792,7 +14072,11 @@ function formatDoctorReport(report2) {
     `Oxrail mode: ${report2.resultingMode}`,
     `Optimization: ${report2.optimization}`,
     `Safety protection: ${report2.safetyProtectionActive ? "ACTIVE" : `INACTIVE \u2014 ${report2.safetyInactiveReasons.join("; ")}`}`,
-    `Handoff protection: ${report2.handoffProtectionActive ? "ACTIVE" : `INACTIVE \u2014 ${report2.handoffInactiveReasons.join("; ")}`}`
+    `Handoff protection: ${report2.handoffProtectionActive ? "ACTIVE" : `INACTIVE \u2014 ${report2.handoffInactiveReasons.join("; ")}`}`,
+    ...report2.credentialChecks.map(
+      (check2) => `Credential check \u2014 ${check2.label}: ${check2.verdict.toUpperCase()} \u2014 ${check2.detail}`
+    ),
+    `Credential protection: ${report2.credentialProtectionActive ? "ACTIVE" : `INACTIVE \u2014 ${report2.credentialInactiveReasons.join("; ")}`}`
   ].join("\n");
 }
 

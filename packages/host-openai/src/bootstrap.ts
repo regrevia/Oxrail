@@ -127,7 +127,7 @@ export async function bootstrapHostProfile(
   }).slice(0, 24)}`;
 
   const profile = HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 4,
     profileId,
     setup: {
       lifecycle: "INSTALLED",
@@ -162,6 +162,7 @@ export async function bootstrapHostProfile(
       toolRoute: inventory.toolRoute,
       canonicalToolMatchers: canonicalBrowserToolNames(inventory),
       matcherEvidenceHash,
+      browserTools: [],
     },
     action: {
       control: "NONE",
@@ -252,6 +253,53 @@ export async function bootstrapHostProfile(
       oneClickFallback: "unknown",
       chatMessageRequired: "unknown",
     },
+    credentialChannel:
+      inventory.os === "macos"
+        ? {
+            activation: "INACTIVE",
+            inactiveReasons: [
+              "macOS credential helper and G15 evidence are not verified",
+            ],
+            capability: {
+              platform: "macos",
+              surface: "NONE",
+              storage: "NONE",
+              acceptedKinds: [],
+              consumerMode: "NONE",
+              consumerReadiness: "UNSUPPORTED",
+              opaqueReferenceOnly: false,
+              genericSecretExport: "DENIED",
+            },
+            helperIdentity: "unknown",
+            launcherIdentity: "unknown",
+            secureInput: "unknown",
+            agentExecutionIsolation: "unknown",
+            pasteboardHygiene: "unknown",
+            registryManifestVerification: "unknown",
+            secretLeakBench: "unknown",
+            realConsumerProbe: "unknown",
+            keychainRoundTrip: "unknown",
+            opaqueRefOnly: "unknown",
+            scopeBinding: "unknown",
+            expiryAndRevocation: "unknown",
+            genericExportDenied: "unknown",
+          }
+        : {
+            activation: "INACTIVE",
+            inactiveReasons: [
+              "Secure Credential Channel is unsupported outside macOS",
+            ],
+            capability: {
+              platform: "unsupported",
+              surface: "NONE",
+              storage: "NONE",
+              acceptedKinds: [],
+              consumerMode: "NONE",
+              consumerReadiness: "UNSUPPORTED",
+              opaqueReferenceOnly: false,
+              genericSecretExport: "DENIED",
+            },
+          },
     evidence: {
       probeSuiteVersion: "bootstrap-v1",
       fixtureRevision: "host-inventory",
@@ -263,12 +311,14 @@ export async function bootstrapHostProfile(
         "browser route passive verification",
         "native interaction fidelity",
         "safety and handoff",
+        "macOS credential protection",
       ],
     },
     derived: {
       mode: "ADVISORY_ONLY",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: [
         "exact browser tool candidate loaded for passive verification",
       ],
@@ -276,6 +326,7 @@ export async function bootstrapHostProfile(
         "active optimization",
         "active safety protection",
         "active handoff protection",
+        "active credential protection",
       ],
     },
   });

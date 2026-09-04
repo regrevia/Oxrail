@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,12 +6,18 @@ import { describe, expect, it } from "vitest";
 
 import { generateProtocolSchemas } from "../packages/protocol/src/generate.js";
 import {
+  CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR,
+  validateHostProfile,
+  writeHostProfile,
+} from "../packages/host-openai/src/profile.js";
+import {
   BrowserTaskStateSchema,
   HostProfileSchema,
   NativePrimitiveSchema,
   ReasonCodeSchema,
   SetupVerificationSchema,
   redactedDeterministicDigest,
+  toolRegistryManifestBinding,
 } from "../packages/protocol/src/index.js";
 
 const unknown = "unknown" as const;
@@ -26,7 +32,7 @@ function hostProfile() {
     attachment: unknown,
   };
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     profileId: "hp_test",
     setup: {
       lifecycle: "INSTALLED",
@@ -53,6 +59,7 @@ function hostProfile() {
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["computer.use"],
       matcherEvidenceHash: sha,
+      browserTools: [],
     },
     action: {
       control: "MICRO_ACTION",
@@ -139,6 +146,20 @@ function hostProfile() {
       oneClickFallback: unknown,
       chatMessageRequired: unknown,
     },
+    credentialChannel: {
+      activation: "INACTIVE",
+      inactiveReasons: ["unsupported on this host"],
+      capability: {
+        platform: "unsupported",
+        surface: "NONE",
+        storage: "NONE",
+        acceptedKinds: [],
+        consumerMode: "NONE",
+        consumerReadiness: "UNSUPPORTED",
+        opaqueReferenceOnly: false,
+        genericSecretExport: "DENIED",
+      },
+    },
     evidence: {
       probeSuiteVersion: "0.1",
       fixtureRevision: "fixture",
@@ -151,6 +172,7 @@ function hostProfile() {
       mode: "UNSUPPORTED",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: [],
       forbiddenClaims: ["enforcement"],
     },
@@ -190,15 +212,303 @@ describe("versioned protocol", () => {
     ).not.toThrow();
   });
 
-  it("round-trips the v3 HostProfile and rejects unknown enum values", () => {
+  it("round-trips the v4 HostProfile and rejects the previous version", () => {
     const parsed = HostProfileSchema.parse(hostProfile());
     expect(HostProfileSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(
       parsed,
     );
     expect(ReasonCodeSchema.safeParse("OXRAIL_MADE_UP").success).toBe(false);
     expect(
-      HostProfileSchema.safeParse({ ...hostProfile(), schemaVersion: 4 })
+      HostProfileSchema.safeParse({ ...hostProfile(), schemaVersion: 3 })
         .success,
+    ).toBe(false);
+    expect(
+      validateHostProfile({ ...hostProfile(), schemaVersion: 3 }).errors,
+    ).toEqual([
+      "host profile schema v3 is stale; run Oxrail setup to create a v4 profile",
+    ]);
+  });
+
+  it("requires externally pinned browser contracts before optimization", () => {
+    const active = {
+      ...hostProfile(),
+      setup: {
+        ...hostProfile().setup,
+        lifecycle: "VERIFIED",
+        hooksTrusted: "passed",
+        preToolUseAvailable: "passed",
+        postToolUseAvailable: "passed",
+        chromeComputerUseDetectable: "passed",
+        matcherProfileValid: "passed",
+        syntheticProbe: "passed",
+        verificationSource: "synthetic-probe",
+        optimization: "ACTIVE",
+      },
+      hooks: { ...hostProfile().hooks, trustState: "active" },
+      derived: { ...hostProfile().derived, mode: "MICRO_ACTION_GUARD" },
+    } as const;
+
+    expect(HostProfileSchema.safeParse(active).success).toBe(false);
+    const pinned = {
+      ...active,
+      route: {
+        ...active.route,
+        toolSchemaRegistryHash: "b".repeat(64),
+        toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-001",
+        browserTools: [
+          {
+            canonicalToolName: "computer.use",
+            inputSchemaHash: "c".repeat(64),
+            registryManifestBinding: toolRegistryManifestBinding({
+              profileId: "hp_test",
+              definitionHash: sha,
+              matcherEvidenceHash: sha,
+              toolSchemaRegistryHash: "b".repeat(64),
+              toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-001",
+              canonicalToolName: "computer.use",
+              inputSchemaHash: "c".repeat(64),
+            }),
+          },
+        ],
+      },
+    } as const;
+    expect(HostProfileSchema.safeParse(pinned).success).toBe(true);
+    expect(
+      HostProfileSchema.safeParse({
+        ...pinned,
+        route: {
+          ...pinned.route,
+          browserTools: [
+            {
+              ...pinned.route.browserTools[0],
+              registryManifestBinding: "d".repeat(64),
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps structurally valid credential activation behind the native verifier", async () => {
+    const active = {
+      ...hostProfile(),
+      setup: {
+        ...hostProfile().setup,
+        lifecycle: "VERIFIED",
+        hooksTrusted: "passed",
+        preToolUseAvailable: "passed",
+        postToolUseAvailable: "passed",
+        chromeComputerUseDetectable: "passed",
+        matcherProfileValid: "passed",
+        syntheticProbe: "passed",
+        verificationSource: "synthetic-probe",
+        optimization: "ACTIVE",
+      },
+      identity: { ...hostProfile().identity, os: "macos" },
+      route: {
+        ...hostProfile().route,
+        toolSchemaRegistryHash: "1".repeat(64),
+        toolSchemaRegistryEvidenceId: "EVID-HOST-CREDENTIAL-FIXTURE",
+        browserTools: [
+          {
+            canonicalToolName: "computer.use",
+            inputSchemaHash: "2".repeat(64),
+            registryManifestBinding: toolRegistryManifestBinding({
+              profileId: "hp_test",
+              definitionHash: sha,
+              matcherEvidenceHash: sha,
+              toolSchemaRegistryHash: "1".repeat(64),
+              toolSchemaRegistryEvidenceId: "EVID-HOST-CREDENTIAL-FIXTURE",
+              canonicalToolName: "computer.use",
+              inputSchemaHash: "2".repeat(64),
+            }),
+          },
+        ],
+      },
+      hooks: { ...hostProfile().hooks, trustState: "active" },
+      handoff: {
+        ...hostProfile().handoff,
+        activation: "ACTIVE",
+        inactiveReasons: [],
+        capability: {
+          surface: "FOCUSED_REAL_TAB",
+          lease: "EXCLUSIVE_USER_LEASE",
+          resume: "AUTO_VERIFIED",
+          conversationContextPreserved: true,
+          sameTabBinding: true,
+          originalPlacementRestorable: true,
+        },
+        conversationContinuity: "passed",
+        sameTabBinding: "passed",
+        focusExistingTab: "passed",
+        exclusiveBrowserLease: "passed",
+        noAgentObservationDuringLease: "passed",
+        nonSecretCompletionDetector: "passed",
+        originAndStateVerification: "passed",
+        automaticToolOrEventResume: "passed",
+      },
+      credentialChannel: {
+        activation: "ACTIVE",
+        inactiveReasons: [],
+        capability: {
+          platform: "macos",
+          surface: "MACOS_NATIVE_SECURE_PROMPT",
+          storage: "MACOS_KEYCHAIN",
+          acceptedKinds: ["API_KEY"],
+          consumerMode: "REGISTERED_IN_ENCLAVE_ADAPTER_ONLY",
+          consumerReadiness: "AUDITED_REAL_CONSUMER",
+          opaqueReferenceOnly: true,
+          genericSecretExport: "DENIED",
+        },
+        helperIdentity: "passed",
+        helperBundleId: "dev.oxrail.credentials",
+        helperBuild: "fixture-build",
+        helperSignatureHash: "b".repeat(64),
+        helperTeamId: "ABCDE12345",
+        helperDesignatedRequirement:
+          'identifier "dev.oxrail.credentials" and anchor apple generic',
+        launcherIdentity: "passed",
+        launcherBundleId: "dev.oxrail.launcher",
+        launcherBuild: "fixture-launcher-build",
+        launcherSignatureHash: "0".repeat(64),
+        launcherTeamId: "ABCDE12345",
+        launcherDesignatedRequirement:
+          'identifier "dev.oxrail.launcher" and anchor apple generic',
+        secureInput: "passed",
+        agentExecutionIsolation: "passed",
+        pasteboardHygiene: "passed",
+        templateRegistryHash: "c".repeat(64),
+        consumerRegistryHash: "d".repeat(64),
+        registryManifestHash: "e".repeat(64),
+        registryManifestVerification: "passed",
+        registryVersion: 2,
+        registryRollbackFloor: 1,
+        credentialEvidenceManifestHash: "f".repeat(64),
+        secretLeakBench: "passed",
+        realConsumerProbe: "passed",
+        keychainRoundTrip: "passed",
+        opaqueRefOnly: "passed",
+        scopeBinding: "passed",
+        expiryAndRevocation: "passed",
+        genericExportDenied: "passed",
+      },
+      derived: {
+        ...hostProfile().derived,
+        mode: "MICRO_ACTION_GUARD",
+        handoff: "ACTIVE",
+        credentialProtection: "ACTIVE",
+      },
+    } as const;
+
+    expect(HostProfileSchema.safeParse(active).success).toBe(true);
+    expect(validateHostProfile(active)).toMatchObject({
+      valid: false,
+      errors: expect.arrayContaining([CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR]),
+    });
+    const pluginData = await mkdtemp(join(tmpdir(), "oxrail-profile-write-"));
+    try {
+      await expect(writeHostProfile(pluginData, active)).rejects.toThrow(
+        CREDENTIAL_ACTIVATION_UNAVAILABLE_ERROR,
+      );
+      await expect(
+        writeHostProfile(pluginData, hostProfile()),
+      ).resolves.toEqual(hostProfile());
+    } finally {
+      await rm(pluginData, { force: true, recursive: true });
+    }
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        identity: { ...active.identity, browserPath: "built-in-browser" },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        handoff: {
+          ...active.handoff,
+          nonSecretCompletionDetector: "unknown",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        handoff: {
+          ...active.handoff,
+          originAndStateVerification: "unknown",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        handoff: hostProfile().handoff,
+        derived: { ...active.derived, handoff: "INACTIVE" },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        identity: { ...active.identity, os: "windows" },
+      }).success,
+    ).toBe(false);
+    const { helperTeamId: _helperTeamId, ...withoutPinnedSigner } =
+      active.credentialChannel;
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        credentialChannel: withoutPinnedSigner,
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        credentialChannel: {
+          ...active.credentialChannel,
+          launcherBundleId: active.credentialChannel.helperBundleId,
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        credentialChannel: {
+          ...active.credentialChannel,
+          capability: {
+            ...active.credentialChannel.capability,
+            consumerReadiness: "FIXTURE_ONLY",
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        credentialChannel: {
+          ...active.credentialChannel,
+          secretLeakBench: "failed",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        credentialChannel: {
+          ...active.credentialChannel,
+          agentExecutionIsolation: "failed",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      HostProfileSchema.safeParse({
+        ...active,
+        credentialChannel: {
+          ...active.credentialChannel,
+          registryVersion: 1,
+          registryRollbackFloor: 2,
+        },
+      }).success,
     ).toBe(false);
   });
 
@@ -221,9 +531,17 @@ describe("versioned protocol", () => {
       optimization: "BYPASSED",
       safetyProtectionActive: false,
       handoffProtectionActive: false,
+      credentialProtectionActive: false,
       resultingMode: "UNSUPPORTED",
     });
     expect(result.success).toBe(true);
+    if (!result.success) throw result.error;
+    expect(
+      SetupVerificationSchema.safeParse({
+        ...result.data,
+        credentialProtectionActive: true,
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects unknown BrowserTaskState fields", () => {
@@ -259,6 +577,19 @@ describe("versioned protocol", () => {
     await generateProtocolSchemas(second);
     const names = (await readdir(first)).sort();
     expect(names).toContain("host-profile.schema.json");
+    const hostProfileJson = await readFile(
+      join(first, "host-profile.schema.json"),
+      "utf8",
+    );
+    expect(hostProfileJson).toContain('"maxItems": 1');
+    expect(hostProfileJson).toContain('"maxItems": 0');
+    expect(hostProfileJson).not.toContain('"prefixItems"');
+    expect(hostProfileJson).toContain(
+      "generated JSON Schema validates the exchange shape only",
+    );
+    expect(hostProfileJson).toContain(
+      "Neither authorizes credential activation",
+    );
     expect(names).toContain("browser-task-state.schema.json");
     for (const name of names) {
       expect(await readFile(join(first, name), "utf8")).toBe(
