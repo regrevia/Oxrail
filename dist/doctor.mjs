@@ -8,8 +8,60 @@ var __export = (target, all) => {
 import { fileURLToPath } from "node:url";
 
 // packages/host-openai/src/bootstrap.ts
-import { createHash as createHash3 } from "node:crypto";
-import { readFile as readFile4 } from "node:fs/promises";
+import { createHash as createHash5 } from "node:crypto";
+import { readFile as readFile3 } from "node:fs/promises";
+
+// packages/protocol/src/digest.ts
+import { createHash } from "node:crypto";
+var SENSITIVE_KEY = /(?:password|passwd|passcode|pwd|otp|token|cookie|authorization|credential|secret|api[_-]?key|private[_-]?key|recovery[_-]?code|clipboard|value|text|keys?|input)$/i;
+function hash(domain2, value) {
+  return createHash("sha256").update(domain2).update("\0").update(value).digest("hex");
+}
+function canonicalize(value, redact, key = "", seen = /* @__PURE__ */ new WeakSet()) {
+  if (redact && key && SENSITIVE_KEY.test(key)) {
+    return "[REDACTED]";
+  }
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value))
+      throw new TypeError("Only finite JSON numbers can be fingerprinted");
+    return Object.is(value, -0) ? 0 : value;
+  }
+  if (typeof value === "undefined") return void 0;
+  if (typeof value !== "object")
+    throw new TypeError("Only JSON-compatible values can be fingerprinted");
+  if (seen.has(value))
+    throw new TypeError("Cyclic values cannot be fingerprinted");
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => canonicalize(item, redact) ?? null);
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("Only plain JSON objects can be fingerprinted");
+    }
+    const result = {};
+    for (const nestedKey of Object.keys(
+      value
+    ).sort()) {
+      const nested = canonicalize(
+        value[nestedKey],
+        redact,
+        nestedKey,
+        seen
+      );
+      if (nested !== void 0) result[nestedKey] = nested;
+    }
+    return result;
+  } finally {
+    seen.delete(value);
+  }
+}
+function deterministicDigest(domain2, value) {
+  return hash(domain2, JSON.stringify(canonicalize(value, false)));
+}
 
 // node_modules/.pnpm/zod@4.1.5/node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -135,7 +187,7 @@ __export(external_exports, {
   gt: () => _gt,
   gte: () => _gte,
   guid: () => guid2,
-  hash: () => hash,
+  hash: () => hash2,
   hex: () => hex2,
   hostname: () => hostname2,
   httpUrl: () => httpUrl,
@@ -11280,7 +11332,7 @@ function hostname2(_params) {
 function hex2(_params) {
   return _stringFormat(ZodCustomStringFormat, "hex", regexes_exports.hex, _params);
 }
-function hash(alg, params) {
+function hash2(alg, params) {
   const enc = params?.enc ?? "hex";
   const format = `${alg}_${enc}`;
   const regex = regexes_exports[format];
@@ -12039,7 +12091,7 @@ var ReasonCodeSchema = external_exports.enum(REASON_CODES);
 
 // packages/protocol/src/schemas.ts
 var nonEmpty = external_exports.string().min(1);
-var hash2 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
+var hash3 = external_exports.string().regex(/^[a-f0-9]{64}$/i, "expected a SHA-256 hex digest");
 var finiteNonNegative = external_exports.number().finite().nonnegative();
 var nonNegativeInt = external_exports.number().int().nonnegative();
 var ActionControlSchema = external_exports.enum([
@@ -12188,7 +12240,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
   route: external_exports.strictObject({
     toolRoute: ToolRouteSchema,
     canonicalToolMatchers: external_exports.array(nonEmpty),
-    matcherEvidenceHash: hash2
+    matcherEvidenceHash: hash3
   }),
   action: external_exports.strictObject({
     control: ActionControlSchema,
@@ -12246,7 +12298,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
     codeModePromiseSemantics: ProbeVerdictSchema,
     controlCriticalContract: external_exports.strictObject({
       status: external_exports.enum(["passed", "failed", "unknown"]),
-      matrixHash: hash2.optional(),
+      matrixHash: hash3.optional(),
       requiredFields: external_exports.array(nonEmpty),
       conditionalFields: external_exports.array(nonEmpty),
       unknownFields: external_exports.array(nonEmpty),
@@ -12279,7 +12331,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
       "disabled",
       "unknown"
     ]),
-    definitionHash: hash2,
+    definitionHash: hash3,
     concurrentConflictProbe: ProbeVerdictSchema
   }),
   nativeCapabilities: external_exports.strictObject({
@@ -12310,7 +12362,7 @@ var HostProfileBaseSchema = external_exports.strictObject({
   evidence: external_exports.strictObject({
     probeSuiteVersion: nonEmpty,
     fixtureRevision: nonEmpty,
-    traceManifestHash: hash2,
+    traceManifestHash: hash3,
     testedAt: external_exports.string().datetime(),
     validUntilHostChange: external_exports.boolean(),
     unresolved: external_exports.array(nonEmpty)
@@ -12433,7 +12485,7 @@ var ActionEnvelopeSchema = external_exports.strictObject({
   granularity: ActionControlSchema,
   actionType: nonEmpty,
   target: TargetDescriptorSchema.optional(),
-  inputDigest: hash2.optional(),
+  inputDigest: hash3.optional(),
   origin: nonEmpty.optional(),
   revision: nonNegativeInt.optional(),
   impact: external_exports.enum(["read", "reversible", "high-impact"])
@@ -12443,8 +12495,8 @@ var ActionDigestSchema = external_exports.strictObject({
   route: ToolRouteSchema,
   granularity: ActionControlSchema,
   actionType: nonEmpty,
-  targetSignature: hash2.optional(),
-  inputSignature: hash2.optional(),
+  targetSignature: hash3.optional(),
+  inputSignature: hash3.optional(),
   sourceRevision: nonNegativeInt.optional(),
   decision: external_exports.enum(["ALLOW", "DENY", "REWRITE", "REQUERY", "HANDOFF"]),
   reasonCode: ReasonCodeSchema,
@@ -12453,12 +12505,12 @@ var ActionDigestSchema = external_exports.strictObject({
 var ObservationDigestSchema = external_exports.strictObject({
   source: ObservationSourceSchema,
   tier: external_exports.enum(["O0", "O1", "O2", "O3", "O4", "O5"]),
-  stateHash: hash2,
+  stateHash: hash3,
   urlKey: nonEmpty.optional(),
   documentBinding: nonEmpty.optional(),
   revision: nonNegativeInt,
-  relevantRegionHash: hash2.optional(),
-  actionableHash: hash2.optional(),
+  relevantRegionHash: hash3.optional(),
+  actionableHash: hash3.optional(),
   blockerType: nonEmpty.optional(),
   payloadTokenEstimate: nonNegativeInt.optional(),
   omittedFields: external_exports.array(nonEmpty).optional(),
@@ -12470,11 +12522,11 @@ var StateFingerprintSchema = external_exports.strictObject({
   originKey: nonEmpty,
   routeKey: nonEmpty.optional(),
   taskPhase: nonEmpty.optional(),
-  relevantRegionHash: hash2.optional(),
-  actionableHash: hash2.optional(),
-  dialogHash: hash2.optional(),
-  goalSignalHash: hash2.optional(),
-  blockerHash: hash2.optional(),
+  relevantRegionHash: hash3.optional(),
+  actionableHash: hash3.optional(),
+  dialogHash: hash3.optional(),
+  goalSignalHash: hash3.optional(),
+  blockerHash: hash3.optional(),
   revision: nonNegativeInt
 });
 var BrowserTaskStateSchema = external_exports.strictObject({
@@ -12581,7 +12633,7 @@ var ControlCriticalContractSchema = external_exports.strictObject({
   rules: external_exports.array(ControlCriticalFieldRuleSchema),
   originalResultTiming: external_exports.enum(["PRE_MODEL_PROVEN", "UNKNOWN"]),
   verdict: external_exports.enum(["PASS", "FAIL", "INCOMPLETE"]),
-  matrixHash: hash2
+  matrixHash: hash3
 });
 var SetupVerificationSchema = external_exports.strictObject({
   schemaVersion: external_exports.literal(1),
@@ -12699,12 +12751,12 @@ var EvidenceManifestSchema = external_exports.strictObject({
   commit: nonEmpty,
   spec_version: external_exports.literal("0.5.0"),
   environment: external_exports.record(nonEmpty, nonEmpty),
-  schema_hashes: external_exports.record(evidenceArtifactPath, hash2),
+  schema_hashes: external_exports.record(evidenceArtifactPath, hash3),
   host_profiles: external_exports.array(evidenceArtifactPath),
   commands: external_exports.array(nonEmpty),
   test_results: external_exports.array(evidenceArtifactPath),
   reviewers: external_exports.array(nonEmpty),
-  sha256_manifest: hash2.nullable(),
+  sha256_manifest: hash3.nullable(),
   accepted_at: external_exports.string().datetime().nullable(),
   blockers: external_exports.array(nonEmpty),
   dependency_manifests: external_exports.array(
@@ -12810,12 +12862,12 @@ var EvidenceTraceSchema = external_exports.strictObject({
   pair_id: nonEmpty,
   run_index: external_exports.number().int().positive(),
   seed: nonEmpty,
-  control_hash: hash2,
-  model_settings_hash: hash2,
-  context_isolation_id: hash2.describe(
+  control_hash: hash3,
+  model_settings_hash: hash3,
+  context_isolation_id: hash3.describe(
     "Salted SHA-256 digest of the isolated runner's parent Hook session_id"
   ),
-  runner_id: hash2,
+  runner_id: hash3,
   spec_version: external_exports.literal("0.5.0"),
   work_package_ids: external_exports.array(nonEmpty),
   host_profile_id: nonEmpty,
@@ -12865,7 +12917,7 @@ var EvidenceTraceSchema = external_exports.strictObject({
     hook_overhead_ms: finiteNonNegative,
     secret_exposure: external_exports.literal(false)
   }),
-  artifact_hashes: external_exports.record(nonEmpty, hash2)
+  artifact_hashes: external_exports.record(nonEmpty, hash3)
 }).superRefine((trace, context) => {
   const totals = [
     trace.metrics.total_model_input_tokens,
@@ -12882,13 +12934,20 @@ var EvidenceTraceSchema = external_exports.strictObject({
 });
 
 // packages/host-openai/src/hook.ts
-import { createHash as createHash2 } from "node:crypto";
-import { readFile as readFile3 } from "node:fs/promises";
+import { createHash as createHash4 } from "node:crypto";
+import { readFile as readFile2 } from "node:fs/promises";
 import path3 from "node:path";
 
 // packages/host-openai/src/profile.ts
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash as createHash2, randomUUID } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  open,
+  rename,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import path from "node:path";
 
 // packages/core/src/policy.ts
@@ -12919,7 +12978,36 @@ function deriveHostMode(profile) {
 }
 
 // packages/host-openai/src/profile.ts
-var HOST_PROFILE_FILENAME = "host-profile.json";
+var HOSTS_DIRECTORY = "hosts";
+var HOST_PROFILE_FILENAME = "profile.json";
+var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
+var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
+var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+var sha256 = (value) => createHash2("sha256").update(value).digest("hex");
+var profileDirectory = (pluginData2, profileId) => path.join(pluginData2, HOSTS_DIRECTORY, profileId);
+async function readLimited(filename, maximumBytes) {
+  const handle = await open(filename, "r");
+  try {
+    if ((await handle.stat()).size > maximumBytes)
+      throw new Error("file exceeds local limit");
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+async function writePrivate(filename, value) {
+  const temporary = path.join(
+    path.dirname(filename),
+    `.${path.basename(filename)}.${randomUUID()}.tmp`
+  );
+  try {
+    await writeFile(temporary, value, { flag: "wx", mode: 384 });
+    await rename(temporary, filename);
+  } catch (error43) {
+    await unlink(temporary).catch(() => void 0);
+    throw error43;
+  }
+}
 function validateHostProfile(value, constraints = {}) {
   const parsed = HostProfileSchema.safeParse(value);
   if (!parsed.success) {
@@ -12961,48 +13049,118 @@ function validateHostProfile(value, constraints = {}) {
       errors.push(`profile ${field} does not match the current host`);
     }
   }
+  if (constraints.toolRoute && profile.route.toolRoute !== constraints.toolRoute) {
+    errors.push("profile tool route does not match the current host");
+  }
+  if (constraints.matcherEvidenceHash && profile.route.matcherEvidenceHash !== constraints.matcherEvidenceHash) {
+    errors.push("profile matcher evidence does not match the current host");
+  }
+  if (constraints.canonicalToolMatchers && JSON.stringify(profile.route.canonicalToolMatchers) !== JSON.stringify(constraints.canonicalToolMatchers)) {
+    errors.push("profile browser tool names do not match the current host");
+  }
   const evidenceMode = deriveHostMode(profile);
   if (!["ADVISORY_ONLY", "UNSUPPORTED"].includes(profile.derived.mode) && profile.derived.mode !== evidenceMode) {
     errors.push(`derived mode exceeds evidence (${evidenceMode})`);
   }
   return { errors, profile, valid: errors.length === 0 };
 }
-async function loadHostProfile(pluginData2, constraints = {}, profilePath = path.join(pluginData2, HOST_PROFILE_FILENAME)) {
+async function loadHostProfile(pluginData2, constraints = {}, explicitProfilePath) {
+  let profileId;
+  let profilePath;
   try {
-    const value = JSON.parse(await readFile(profilePath, "utf8"));
-    return validateHostProfile(value, constraints);
+    if (explicitProfilePath) {
+      profilePath = explicitProfilePath;
+      profileId = path.basename(path.dirname(profilePath));
+    } else {
+      const active = JSON.parse(
+        (await readLimited(
+          path.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
+          16384
+        )).toString("utf8")
+      );
+      if (!active || typeof active !== "object" || active.schemaVersion !== 1 || !safeProfileId(active.profileId)) {
+        throw new Error("invalid active profile selection");
+      }
+      profileId = active.profileId;
+      profilePath = path.join(
+        profileDirectory(pluginData2, profileId),
+        HOST_PROFILE_FILENAME
+      );
+    }
   } catch (error43) {
-    const code = error43.code;
     return {
       errors: [
-        code === "ENOENT" ? "host profile not found" : "host profile is unreadable"
+        error43.code === "ENOENT" ? "host profile not found" : "host profile selection is unreadable"
       ],
+      valid: false
+    };
+  }
+  try {
+    if (!safeProfileId(profileId))
+      throw new Error("unsafe host profile identifier");
+    const [rawProfile, rawManifest] = await Promise.all([
+      readLimited(profilePath, 1048576),
+      readLimited(
+        path.join(path.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        16384
+      )
+    ]);
+    const manifest = JSON.parse(rawManifest.toString("utf8"));
+    if (!manifest || typeof manifest !== "object" || manifest.schemaVersion !== 1 || manifest.profileId !== profileId || manifest.profileSha256 !== sha256(rawProfile)) {
+      throw new Error("profile integrity mismatch");
+    }
+    const value = JSON.parse(rawProfile.toString("utf8"));
+    if (!value || typeof value !== "object" || value.profileId !== profileId) {
+      throw new Error("profile identifier mismatch");
+    }
+    return validateHostProfile(value, constraints);
+  } catch {
+    return {
+      errors: ["host profile integrity check failed"],
       valid: false
     };
   }
 }
 async function writeHostProfile(pluginData2, input) {
   const profile = HostProfileSchema.parse(input);
-  await mkdir(pluginData2, { recursive: true, mode: 448 });
-  const destination = path.join(pluginData2, HOST_PROFILE_FILENAME);
-  const temporary = path.join(pluginData2, `.host-profile.${randomUUID()}.tmp`);
-  try {
-    await writeFile(temporary, `${JSON.stringify(profile, null, 2)}
-`, {
-      flag: "wx",
-      mode: 384
-    });
-    await rename(temporary, destination);
-  } catch (error43) {
-    await unlink(temporary).catch(() => void 0);
-    throw error43;
-  }
+  if (!safeProfileId(profile.profileId))
+    throw new Error("unsafe host profile identifier");
+  const directory = profileDirectory(pluginData2, profile.profileId);
+  const traces = path.join(directory, "sanitized-traces");
+  await mkdir(traces, { recursive: true, mode: 448 });
+  await Promise.all([
+    chmod(pluginData2, 448),
+    chmod(path.join(pluginData2, HOSTS_DIRECTORY), 448),
+    chmod(directory, 448),
+    chmod(traces, 448)
+  ]);
+  const serialized = `${JSON.stringify(profile, null, 2)}
+`;
+  await writePrivate(path.join(directory, HOST_PROFILE_FILENAME), serialized);
+  await writePrivate(
+    path.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        profileId: profile.profileId,
+        profileSha256: sha256(serialized)
+      },
+      null,
+      2
+    )}
+`
+  );
+  await writePrivate(
+    path.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
+    `${JSON.stringify({ schemaVersion: 1, profileId: profile.profileId })}
+`
+  );
   return profile;
 }
 
 // packages/host-openai/src/state.ts
-import { createHash, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir2, readFile as readFile2, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
+import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
+import { mkdir as mkdir2, readFile, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path2 from "node:path";
 var HOOK_EVENTS = [
@@ -13014,8 +13172,8 @@ var HOOK_EVENTS = [
 ];
 var HOOK_MARKER_FRESHNESS_MS = 3e4;
 var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
-var digestSessionId = (sessionId2) => createHash("sha256").update("oxrail-session-v1\0").update(sessionId2).digest("hex");
-var digestToolUseId = (toolUseId) => createHash("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
+var digestSessionId = (sessionId2) => createHash3("sha256").update("oxrail-session-v1\0").update(sessionId2).digest("hex");
+var digestToolUseId = (toolUseId) => createHash3("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
   SessionStart: "session-start.json",
   UserPromptSubmit: "user-prompt-submit.json",
@@ -13041,7 +13199,7 @@ async function recordBrowserHookPhase(pluginData2, phase, observation, now = Dat
   const destination = path2.join(directory, `${observation.toolUseDigest}.json`);
   let previous;
   try {
-    const candidate = JSON.parse(await readFile2(destination, "utf8"));
+    const candidate = JSON.parse(await readFile(destination, "utf8"));
     if (isBrowserRouteObservation(candidate) && candidate.definitionHash === observation.definitionHash && candidate.profileId === observation.profileId && candidate.sessionDigest === observation.sessionDigest && candidate.synthetic === observation.synthetic) {
       previous = candidate;
     }
@@ -13073,7 +13231,7 @@ async function readBrowserRouteObservations(pluginData2) {
       names.map(async (name) => {
         try {
           const value = JSON.parse(
-            await readFile2(path2.join(directory, name), "utf8")
+            await readFile(path2.join(directory, name), "utf8")
           );
           return isBrowserRouteObservation(value) ? value : void 0;
         } catch {
@@ -13114,7 +13272,7 @@ async function recordHookMarker(pluginData2, marker, now = Date.now()) {
 async function readHookMarker(pluginData2, event, browserHook = false) {
   try {
     const value = JSON.parse(
-      await readFile2(markerPath(pluginData2, event, browserHook), "utf8")
+      await readFile(markerPath(pluginData2, event, browserHook), "utf8")
     );
     return isMarker(value) && value.event === event && value.browserHook === browserHook ? value : void 0;
   } catch {
@@ -13135,10 +13293,20 @@ async function markerMatches(pluginData2, event, definitionHash, options = {}) {
 
 // packages/host-openai/src/hook.ts
 async function hookDefinitionHash(pluginRoot2) {
-  const definition = await readFile3(
-    path3.join(pluginRoot2, "hooks", "hooks.json")
+  const filenames = [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "dist/hooks/pre-tool.mjs",
+    "dist/hooks/post-tool.mjs"
+  ];
+  const files = await Promise.all(
+    filenames.map((filename) => readFile2(path3.join(pluginRoot2, filename)))
   );
-  return createHash2("sha256").update(definition).digest("hex");
+  const digest = createHash4("sha256").update("oxrail-hook-definition-v2\0");
+  for (const [index, filename] of filenames.entries()) {
+    digest.update(filename).update("\0").update(String(files[index].length)).update("\0").update(files[index]);
+  }
+  return digest.digest("hex");
 }
 
 // packages/host-openai/src/bootstrap.ts
@@ -13183,18 +13351,36 @@ var HostInventorySchema = external_exports.strictObject({
       message: "browser tool names must be unique"
     });
   }
+  if (inventory.surface.startsWith("codex-") && !inventory.codexVersion) {
+    context.addIssue({
+      code: "custom",
+      path: ["codexVersion"],
+      message: "Codex surfaces require a Codex version"
+    });
+  }
+});
+var canonicalBrowserToolNames = (inventory) => [...inventory.browserToolNames].sort();
+var matcherEvidenceHashForInventory = (inventory) => deterministicDigest("oxrail-host-inventory-matchers-v1", {
+  browserPath: inventory.browserPath,
+  browserToolNames: canonicalBrowserToolNames(inventory),
+  codexVersion: inventory.codexVersion,
+  computerUsePluginVersion: inventory.computerUsePluginVersion,
+  hostBuild: inventory.hostBuild,
+  os: inventory.os,
+  surface: inventory.surface,
+  toolRoute: inventory.toolRoute
 });
 async function readHostInventory(inventoryPath2) {
-  const raw = await readFile4(inventoryPath2);
+  const raw = await readFile3(inventoryPath2);
   if (raw.length > 1048576) throw new Error("host inventory exceeds 1 MiB");
   return {
     inventory: HostInventorySchema.parse(JSON.parse(raw.toString("utf8"))),
-    sha256: createHash3("sha256").update(raw).digest("hex")
+    sha256: createHash5("sha256").update(raw).digest("hex")
   };
 }
 
 // packages/host-openai/src/doctor.ts
-import { access, readFile as readFile5 } from "node:fs/promises";
+import { access, readFile as readFile4 } from "node:fs/promises";
 import path4 from "node:path";
 var inactiveHandoff = {
   conversationContextPreserved: false,
@@ -13211,7 +13397,7 @@ var exists = (filename) => access(filename).then(
 async function validPluginManifest(pluginRoot2) {
   try {
     const manifest = JSON.parse(
-      await readFile5(
+      await readFile4(
         path4.join(pluginRoot2, ".codex-plugin", "plugin.json"),
         "utf8"
       )
@@ -13226,7 +13412,7 @@ async function validPluginManifest(pluginRoot2) {
 async function registeredHookEvents(pluginRoot2) {
   try {
     const definition = JSON.parse(
-      await readFile5(path4.join(pluginRoot2, "hooks", "hooks.json"), "utf8")
+      await readFile4(path4.join(pluginRoot2, "hooks", "hooks.json"), "utf8")
     );
     if (!definition || typeof definition !== "object") return /* @__PURE__ */ new Set();
     const hooks = definition.hooks;
@@ -13325,7 +13511,16 @@ async function runDoctor(options) {
     ...definitionHash ? { definitionHash } : {},
     ...options.currentIdentity?.hostBuild ? { hostBuild: options.currentIdentity.hostBuild } : {},
     ...options.currentIdentity?.os ? { os: options.currentIdentity.os } : {},
-    ...requestedSurface ? { surface: requestedSurface } : {}
+    ...requestedSurface ? { surface: requestedSurface } : {},
+    ...options.hostInventory ? {
+      canonicalToolMatchers: [
+        ...options.hostInventory.browserToolNames
+      ].sort(),
+      matcherEvidenceHash: matcherEvidenceHashForInventory(
+        options.hostInventory
+      ),
+      toolRoute: options.hostInventory.toolRoute
+    } : {}
   });
   const profile = profileResult.profile;
   let observations = await observe(
@@ -13336,6 +13531,7 @@ async function runDoctor(options) {
     sessionDigest
   );
   let syntheticProbeUsed = false;
+  let syntheticProbeVerdict = profile?.setup.syntheticProbe ?? "unknown";
   if (options.syntheticProbe && definitionHash && profileResult.valid && profile) {
     syntheticProbeUsed = true;
     try {
@@ -13343,6 +13539,7 @@ async function runDoctor(options) {
         profileId: profile.profileId,
         toolMatchers: profile.route.canonicalToolMatchers
       });
+      syntheticProbeVerdict = result.matcherMatched && result.preToolUse && result.postToolUse ? "passed" : result.matcherMatched || result.preToolUse || result.postToolUse ? "partial" : "failed";
       const common = {
         definitionHash,
         profileId: profile.profileId,
@@ -13371,7 +13568,7 @@ async function runDoctor(options) {
           now
         );
       }
-      if (result.chromeComputerUse && result.matcherMatched && result.preToolUse && result.postToolUse) {
+      if (result.chromeComputerUse && result.matcherMatched && result.preToolUse && result.postToolUse && result.targetRouteEquivalent === true) {
         await recordBrowserHookPhase(
           options.pluginData,
           "PreToolUse",
@@ -13399,21 +13596,22 @@ async function runDoctor(options) {
         sessionDigest
       );
     } catch {
+      syntheticProbeVerdict = "failed";
     }
   }
   const profileAllowsHooks = Boolean(
     profile && !["disabled", "managed-only"].includes(profile.hooks.policy) && !["disabled", "skipped"].includes(profile.hooks.trustState)
   );
   const hooksTrusted = profileAllowsHooks && Boolean(definitionHash) && (observations.generic.PreToolUse || observations.generic.PostToolUse);
-  const chromeComputerUseDetectable = profileResult.valid && profile ? profile.identity.browserPath === "chrome-extension" && Boolean(profile.identity.computerUsePluginVersion) ? "passed" : "unsupported" : "unknown";
-  const configured = pluginInstalled && skillAvailable && hooksRegistered && hooksTrusted && observations.generic.PreToolUse && observations.generic.PostToolUse && observations.genericSessionBound && profileResult.valid && chromeComputerUseDetectable === "passed";
+  const currentIdentity2 = Boolean(
+    profile && matchesCurrentIdentity(profile, options.currentIdentity)
+  );
+  const chromeComputerUseDetectable = profileResult.valid && profile && options.currentIdentity ? currentIdentity2 && profile.identity.browserPath === "chrome-extension" && Boolean(profile.identity.computerUsePluginVersion) && ["macos", "windows"].includes(profile.identity.os) ? "passed" : "unsupported" : "unknown";
+  const configured = pluginInstalled && skillAvailable && hooksRegistered && hooksTrusted && observations.generic.PreToolUse && observations.generic.PostToolUse && observations.genericSessionBound && profileResult.valid && Boolean(options.hostInventory) && currentIdentity2 && chromeComputerUseDetectable === "passed";
   const priorVerificationSource = profile?.setup.lifecycle === "VERIFIED" && (profile.setup.verificationSource === "synthetic-probe" ? profile.setup.syntheticProbe === "passed" : profile.setup.verificationSource === "passive-first-browser-call" && profile.setup.firstBrowserHookSeen) ? profile.setup.verificationSource : void 0;
   const observedVerificationSource = observations.persistedBrowserRoute ? observations.persistedSyntheticBrowser ? "synthetic-probe" : "passive-first-browser-call" : void 0;
   const routeVerificationSource = observedVerificationSource ?? priorVerificationSource;
   const verified = configured && Boolean(routeVerificationSource);
-  const currentIdentity2 = Boolean(
-    profile && matchesCurrentIdentity(profile, options.currentIdentity)
-  );
   const resultingMode = configured ? "ADVISORY_ONLY" : "UNSUPPORTED";
   const optimization = "BYPASSED";
   const safetyProtectionActive = false;
@@ -13434,7 +13632,7 @@ async function runDoctor(options) {
     preToolUseAvailable: observations.generic.PreToolUse ? "passed" : preRegistered ? "unknown" : "unsupported",
     postToolUseAvailable: observations.generic.PostToolUse ? "passed" : postRegistered ? "unknown" : "unsupported",
     chromeComputerUseDetectable,
-    matcherProfileValid: profileResult.valid,
+    matcherProfileValid: profileResult.valid && Boolean(options.hostInventory),
     handoffCapability: profile?.handoff.capability ?? inactiveHandoff,
     syntheticProbeUsed: syntheticProbeUsed || observations.syntheticBrowser || routeVerificationSource === "synthetic-probe",
     firstBrowserHookSeen: Boolean(profile?.setup.firstBrowserHookSeen) || observations.browserPre || observations.browserPost,
@@ -13470,6 +13668,11 @@ async function runDoctor(options) {
       "Hook trust is inferred from recent current-hash execution; the host /hooks UI remains authoritative."
     );
   }
+  if (!options.hostInventory) {
+    notices.push(
+      "Current host route inventory is not confirmed; matcher/profile remains unavailable."
+    );
+  }
   if (verification.stage === "VERIFIED" && !currentIdentity2) {
     notices.push(
       "Current host version tuple is not confirmed; enforcement capabilities remain BYPASSED/INACTIVE."
@@ -13493,8 +13696,8 @@ async function runDoctor(options) {
         preToolUseAvailable: verification.preToolUseAvailable,
         postToolUseAvailable: verification.postToolUseAvailable,
         chromeComputerUseDetectable: verification.chromeComputerUseDetectable,
-        matcherProfileValid: "passed",
-        syntheticProbe: verification.syntheticProbeUsed ? "passed" : profile.setup.syntheticProbe,
+        matcherProfileValid: verification.matcherProfileValid ? "passed" : "failed",
+        syntheticProbe: syntheticProbeVerdict,
         firstBrowserHookSeen: profile.setup.firstBrowserHookSeen || verification.firstBrowserHookSeen,
         verificationSource: verification.verificationSource,
         optimization: verification.optimization
@@ -13539,17 +13742,27 @@ async function runDoctor(options) {
   }
   return {
     ...reportedVerification,
+    currentIdentityConfirmed: currentIdentity2,
     handoffInactiveReasons: reportedHandoffReasons,
+    hookDefinitionHash: definitionHash,
+    ...profile ? { hostIdentity: profile.identity } : {},
     notices,
     profileErrors: profileResult.errors,
+    profileFresh: profileResult.valid && Boolean(options.hostInventory) && currentIdentity2,
     safetyInactiveReasons: reportedSafetyReasons,
+    syntheticProbeVerdict,
     ...profile ? { profileId: profile.profileId } : {}
   };
 }
 var verdict = (value) => typeof value === "boolean" ? value ? "PASS" : "FAIL" : value.toUpperCase();
 function formatDoctorReport(report2) {
   return [
-    `Oxrail setup: ${report2.stage}`,
+    "Oxrail setup verification",
+    `Surface: ${report2.hostIdentity?.surface ?? "unknown"}`,
+    `Computer Use plugin: ${report2.hostIdentity?.computerUsePluginVersion ?? "unknown"}`,
+    `Hook definition hash: ${report2.hookDefinitionHash || "unknown"}`,
+    `Current host identity confirmed: ${verdict(report2.currentIdentityConfirmed)}`,
+    `Profile fresh: ${verdict(report2.profileFresh)}`,
     ...report2.notices,
     "",
     `Plugin package manifest present: ${verdict(report2.pluginInstalled)}`,
@@ -13560,9 +13773,13 @@ function formatDoctorReport(report2) {
     `PostToolUse available: ${verdict(report2.postToolUseAvailable)}`,
     `Chrome Computer Use detectable: ${verdict(report2.chromeComputerUseDetectable)}`,
     `Matcher/profile valid: ${verdict(report2.matcherProfileValid)}`,
+    `Synthetic probe: ${report2.syntheticProbeVerdict.toUpperCase()}`,
+    `First browser hook seen: ${report2.firstBrowserHookSeen ? "YES" : "NO"}`,
+    `Verification source: ${report2.verificationSource}`,
     `Handoff surface: ${report2.handoffCapability.surface}`,
     `Handoff lease: ${report2.handoffCapability.lease}`,
     `Handoff resume: ${report2.handoffCapability.resume}`,
+    `Lifecycle: ${report2.stage}`,
     `Oxrail mode: ${report2.resultingMode}`,
     `Optimization: ${report2.optimization}`,
     `Safety protection: ${report2.safetyProtectionActive ? "ACTIVE" : `INACTIVE \u2014 ${report2.safetyInactiveReasons.join("; ")}`}`,
@@ -13608,6 +13825,7 @@ var report = await runDoctor({
   pluginData,
   pluginRoot,
   ...currentIdentity ? { currentIdentity } : {},
+  ...inventoryIdentity ? { hostInventory: inventoryIdentity } : {},
   ...sessionId ? { sessionId } : {},
   ...browserPath ? { browserPath } : {},
   ...surface ? { surface } : {}

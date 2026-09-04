@@ -1,5 +1,12 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  open,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import { deriveHostMode } from "../../core/src/index.js";
@@ -8,22 +15,60 @@ import {
   type HostProfile,
 } from "../../protocol/src/index.js";
 
-export const HOST_PROFILE_FILENAME = "host-profile.json";
+export const HOSTS_DIRECTORY = "hosts";
+export const HOST_PROFILE_FILENAME = "profile.json";
+export const HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
+export const ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
 
 export interface ProfileConstraints {
   browserPath?: HostProfile["identity"]["browserPath"];
+  canonicalToolMatchers?: string[];
   codexVersion?: string;
   computerUsePluginVersion?: string;
   definitionHash?: string;
   hostBuild?: string;
+  matcherEvidenceHash?: string;
   os?: HostProfile["identity"]["os"];
   surface?: HostProfile["identity"]["surface"];
+  toolRoute?: HostProfile["route"]["toolRoute"];
 }
 
 export interface ProfileValidation {
   errors: string[];
   profile?: HostProfile;
   valid: boolean;
+}
+
+const safeProfileId = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+const sha256 = (value: Uint8Array | string) =>
+  createHash("sha256").update(value).digest("hex");
+const profileDirectory = (pluginData: string, profileId: string) =>
+  path.join(pluginData, HOSTS_DIRECTORY, profileId);
+
+async function readLimited(filename: string, maximumBytes: number) {
+  const handle = await open(filename, "r");
+  try {
+    if ((await handle.stat()).size > maximumBytes)
+      throw new Error("file exceeds local limit");
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writePrivate(filename: string, value: string) {
+  const temporary = path.join(
+    path.dirname(filename),
+    `.${path.basename(filename)}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(temporary, value, { flag: "wx", mode: 0o600 });
+    await rename(temporary, filename);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }
 
 export function validateHostProfile(
@@ -85,6 +130,25 @@ export function validateHostProfile(
       errors.push(`profile ${field} does not match the current host`);
     }
   }
+  if (
+    constraints.toolRoute &&
+    profile.route.toolRoute !== constraints.toolRoute
+  ) {
+    errors.push("profile tool route does not match the current host");
+  }
+  if (
+    constraints.matcherEvidenceHash &&
+    profile.route.matcherEvidenceHash !== constraints.matcherEvidenceHash
+  ) {
+    errors.push("profile matcher evidence does not match the current host");
+  }
+  if (
+    constraints.canonicalToolMatchers &&
+    JSON.stringify(profile.route.canonicalToolMatchers) !==
+      JSON.stringify(constraints.canonicalToolMatchers)
+  ) {
+    errors.push("profile browser tool names do not match the current host");
+  }
 
   const evidenceMode = deriveHostMode(profile);
   if (
@@ -100,19 +164,81 @@ export function validateHostProfile(
 export async function loadHostProfile(
   pluginData: string,
   constraints: ProfileConstraints = {},
-  profilePath = path.join(pluginData, HOST_PROFILE_FILENAME),
+  explicitProfilePath?: string,
 ): Promise<ProfileValidation> {
+  let profileId: string;
+  let profilePath: string;
   try {
-    const value: unknown = JSON.parse(await readFile(profilePath, "utf8"));
-    return validateHostProfile(value, constraints);
+    if (explicitProfilePath) {
+      profilePath = explicitProfilePath;
+      profileId = path.basename(path.dirname(profilePath));
+    } else {
+      const active = JSON.parse(
+        (
+          await readLimited(
+            path.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
+            16_384,
+          )
+        ).toString("utf8"),
+      ) as unknown;
+      if (
+        !active ||
+        typeof active !== "object" ||
+        (active as { schemaVersion?: unknown }).schemaVersion !== 1 ||
+        !safeProfileId((active as { profileId?: unknown }).profileId)
+      ) {
+        throw new Error("invalid active profile selection");
+      }
+      profileId = (active as { profileId: string }).profileId;
+      profilePath = path.join(
+        profileDirectory(pluginData, profileId),
+        HOST_PROFILE_FILENAME,
+      );
+    }
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
     return {
       errors: [
-        code === "ENOENT"
+        (error as NodeJS.ErrnoException).code === "ENOENT"
           ? "host profile not found"
-          : "host profile is unreadable",
+          : "host profile selection is unreadable",
       ],
+      valid: false,
+    };
+  }
+
+  try {
+    if (!safeProfileId(profileId))
+      throw new Error("unsafe host profile identifier");
+    const [rawProfile, rawManifest] = await Promise.all([
+      readLimited(profilePath, 1_048_576),
+      readLimited(
+        path.join(path.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        16_384,
+      ),
+    ]);
+    const manifest = JSON.parse(rawManifest.toString("utf8")) as unknown;
+    if (
+      !manifest ||
+      typeof manifest !== "object" ||
+      (manifest as { schemaVersion?: unknown }).schemaVersion !== 1 ||
+      (manifest as { profileId?: unknown }).profileId !== profileId ||
+      (manifest as { profileSha256?: unknown }).profileSha256 !==
+        sha256(rawProfile)
+    ) {
+      throw new Error("profile integrity mismatch");
+    }
+    const value: unknown = JSON.parse(rawProfile.toString("utf8"));
+    if (
+      !value ||
+      typeof value !== "object" ||
+      (value as { profileId?: unknown }).profileId !== profileId
+    ) {
+      throw new Error("profile identifier mismatch");
+    }
+    return validateHostProfile(value, constraints);
+  } catch {
+    return {
+      errors: ["host profile integrity check failed"],
       valid: false,
     };
   }
@@ -123,18 +249,35 @@ export async function writeHostProfile(
   input: unknown,
 ): Promise<HostProfile> {
   const profile = HostProfileSchema.parse(input);
-  await mkdir(pluginData, { recursive: true, mode: 0o700 });
-  const destination = path.join(pluginData, HOST_PROFILE_FILENAME);
-  const temporary = path.join(pluginData, `.host-profile.${randomUUID()}.tmp`);
-  try {
-    await writeFile(temporary, `${JSON.stringify(profile, null, 2)}\n`, {
-      flag: "wx",
-      mode: 0o600,
-    });
-    await rename(temporary, destination);
-  } catch (error) {
-    await unlink(temporary).catch(() => undefined);
-    throw error;
-  }
+  if (!safeProfileId(profile.profileId))
+    throw new Error("unsafe host profile identifier");
+  const directory = profileDirectory(pluginData, profile.profileId);
+  const traces = path.join(directory, "sanitized-traces");
+  await mkdir(traces, { recursive: true, mode: 0o700 });
+  await Promise.all([
+    chmod(pluginData, 0o700),
+    chmod(path.join(pluginData, HOSTS_DIRECTORY), 0o700),
+    chmod(directory, 0o700),
+    chmod(traces, 0o700),
+  ]);
+
+  const serialized = `${JSON.stringify(profile, null, 2)}\n`;
+  await writePrivate(path.join(directory, HOST_PROFILE_FILENAME), serialized);
+  await writePrivate(
+    path.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        profileId: profile.profileId,
+        profileSha256: sha256(serialized),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writePrivate(
+    path.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
+    `${JSON.stringify({ schemaVersion: 1, profileId: profile.profileId })}\n`,
+  );
   return profile;
 }

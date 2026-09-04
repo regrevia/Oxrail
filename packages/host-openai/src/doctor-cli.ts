@@ -57,6 +57,7 @@ const report = await runDoctor({
   pluginData,
   pluginRoot,
   ...(currentIdentity ? { currentIdentity } : {}),
+  ...(inventoryIdentity ? { hostInventory: inventoryIdentity } : {}),
   ...(sessionId ? { sessionId } : {}),
   ...(browserPath ? { browserPath } : {}),
   ...(surface ? { surface } : {}),

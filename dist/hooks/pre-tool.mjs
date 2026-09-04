@@ -5,8 +5,8 @@ var __export = (target, all) => {
 };
 
 // packages/host-openai/src/hook.ts
-import { createHash as createHash2 } from "node:crypto";
-import { readFile as readFile3 } from "node:fs/promises";
+import { createHash as createHash3 } from "node:crypto";
+import { readFile as readFile2 } from "node:fs/promises";
 import path3 from "node:path";
 
 // packages/host-openai/src/matcher.ts
@@ -15,7 +15,15 @@ function classifyTool(profile, toolName) {
 }
 
 // packages/host-openai/src/profile.ts
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  open,
+  rename,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import path from "node:path";
 
 // node_modules/.pnpm/zod@4.1.5/node_modules/zod/v4/classic/external.js
@@ -12916,7 +12924,23 @@ function deriveHostMode(profile) {
 }
 
 // packages/host-openai/src/profile.ts
-var HOST_PROFILE_FILENAME = "host-profile.json";
+var HOSTS_DIRECTORY = "hosts";
+var HOST_PROFILE_FILENAME = "profile.json";
+var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
+var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
+var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+var sha256 = (value) => createHash("sha256").update(value).digest("hex");
+var profileDirectory = (pluginData, profileId) => path.join(pluginData, HOSTS_DIRECTORY, profileId);
+async function readLimited(filename, maximumBytes) {
+  const handle = await open(filename, "r");
+  try {
+    if ((await handle.stat()).size > maximumBytes)
+      throw new Error("file exceeds local limit");
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
 function validateHostProfile(value, constraints = {}) {
   const parsed = HostProfileSchema.safeParse(value);
   if (!parsed.success) {
@@ -12958,30 +12982,82 @@ function validateHostProfile(value, constraints = {}) {
       errors.push(`profile ${field} does not match the current host`);
     }
   }
+  if (constraints.toolRoute && profile.route.toolRoute !== constraints.toolRoute) {
+    errors.push("profile tool route does not match the current host");
+  }
+  if (constraints.matcherEvidenceHash && profile.route.matcherEvidenceHash !== constraints.matcherEvidenceHash) {
+    errors.push("profile matcher evidence does not match the current host");
+  }
+  if (constraints.canonicalToolMatchers && JSON.stringify(profile.route.canonicalToolMatchers) !== JSON.stringify(constraints.canonicalToolMatchers)) {
+    errors.push("profile browser tool names do not match the current host");
+  }
   const evidenceMode = deriveHostMode(profile);
   if (!["ADVISORY_ONLY", "UNSUPPORTED"].includes(profile.derived.mode) && profile.derived.mode !== evidenceMode) {
     errors.push(`derived mode exceeds evidence (${evidenceMode})`);
   }
   return { errors, profile, valid: errors.length === 0 };
 }
-async function loadHostProfile(pluginData, constraints = {}, profilePath = path.join(pluginData, HOST_PROFILE_FILENAME)) {
+async function loadHostProfile(pluginData, constraints = {}, explicitProfilePath) {
+  let profileId;
+  let profilePath;
   try {
-    const value = JSON.parse(await readFile(profilePath, "utf8"));
-    return validateHostProfile(value, constraints);
+    if (explicitProfilePath) {
+      profilePath = explicitProfilePath;
+      profileId = path.basename(path.dirname(profilePath));
+    } else {
+      const active = JSON.parse(
+        (await readLimited(
+          path.join(pluginData, ACTIVE_HOST_PROFILE_FILENAME),
+          16384
+        )).toString("utf8")
+      );
+      if (!active || typeof active !== "object" || active.schemaVersion !== 1 || !safeProfileId(active.profileId)) {
+        throw new Error("invalid active profile selection");
+      }
+      profileId = active.profileId;
+      profilePath = path.join(
+        profileDirectory(pluginData, profileId),
+        HOST_PROFILE_FILENAME
+      );
+    }
   } catch (error43) {
-    const code = error43.code;
     return {
       errors: [
-        code === "ENOENT" ? "host profile not found" : "host profile is unreadable"
+        error43.code === "ENOENT" ? "host profile not found" : "host profile selection is unreadable"
       ],
+      valid: false
+    };
+  }
+  try {
+    if (!safeProfileId(profileId))
+      throw new Error("unsafe host profile identifier");
+    const [rawProfile, rawManifest] = await Promise.all([
+      readLimited(profilePath, 1048576),
+      readLimited(
+        path.join(path.dirname(profilePath), HOST_PROFILE_MANIFEST_FILENAME),
+        16384
+      )
+    ]);
+    const manifest = JSON.parse(rawManifest.toString("utf8"));
+    if (!manifest || typeof manifest !== "object" || manifest.schemaVersion !== 1 || manifest.profileId !== profileId || manifest.profileSha256 !== sha256(rawProfile)) {
+      throw new Error("profile integrity mismatch");
+    }
+    const value = JSON.parse(rawProfile.toString("utf8"));
+    if (!value || typeof value !== "object" || value.profileId !== profileId) {
+      throw new Error("profile identifier mismatch");
+    }
+    return validateHostProfile(value, constraints);
+  } catch {
+    return {
+      errors: ["host profile integrity check failed"],
       valid: false
     };
   }
 }
 
 // packages/host-openai/src/state.ts
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir as mkdir2, readFile as readFile2, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
+import { createHash as createHash2, randomUUID as randomUUID2 } from "node:crypto";
+import { mkdir as mkdir2, readFile, readdir, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path2 from "node:path";
 var HOOK_EVENTS = [
@@ -12992,8 +13068,8 @@ var HOOK_EVENTS = [
   "PostToolUse"
 ];
 var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
-var digestSessionId = (sessionId) => createHash("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
-var digestToolUseId = (toolUseId) => createHash("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
+var digestSessionId = (sessionId) => createHash2("sha256").update("oxrail-session-v1\0").update(sessionId).digest("hex");
+var digestToolUseId = (toolUseId) => createHash2("sha256").update("oxrail-tool-use-v1\0").update(toolUseId).digest("hex");
 var markerNames = {
   SessionStart: "session-start.json",
   UserPromptSubmit: "user-prompt-submit.json",
@@ -13019,7 +13095,7 @@ async function recordBrowserHookPhase(pluginData, phase, observation, now = Date
   const destination = path2.join(directory, `${observation.toolUseDigest}.json`);
   let previous;
   try {
-    const candidate = JSON.parse(await readFile2(destination, "utf8"));
+    const candidate = JSON.parse(await readFile(destination, "utf8"));
     if (isBrowserRouteObservation(candidate) && candidate.definitionHash === observation.definitionHash && candidate.profileId === observation.profileId && candidate.sessionDigest === observation.sessionDigest && candidate.synthetic === observation.synthetic) {
       previous = candidate;
     }
@@ -13035,7 +13111,7 @@ async function recordBrowserHookPhase(pluginData, phase, observation, now = Date
   };
   const temporary = path2.join(
     directory,
-    `.${observation.toolUseDigest}.${randomUUID()}`
+    `.${observation.toolUseDigest}.${randomUUID2()}`
   );
   await writeFile2(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
@@ -13047,7 +13123,7 @@ async function recordHookMarker(pluginData, marker, now = Date.now()) {
   const destination = markerPath(pluginData, marker.event, marker.browserHook);
   const temporary = path2.join(
     directory,
-    `.${path2.basename(destination)}.${randomUUID()}`
+    `.${path2.basename(destination)}.${randomUUID2()}`
   );
   const value = {
     ...marker,
@@ -13067,10 +13143,20 @@ var isHookInput = (value) => {
   return typeof input.hook_event_name === "string" && HOOK_EVENTS.includes(input.hook_event_name) && (input.session_id === void 0 || typeof input.session_id === "string") && (input.tool_name === void 0 || typeof input.tool_name === "string") && (input.tool_use_id === void 0 || typeof input.tool_use_id === "string");
 };
 async function hookDefinitionHash(pluginRoot) {
-  const definition = await readFile3(
-    path3.join(pluginRoot, "hooks", "hooks.json")
+  const filenames = [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "dist/hooks/pre-tool.mjs",
+    "dist/hooks/post-tool.mjs"
+  ];
+  const files = await Promise.all(
+    filenames.map((filename) => readFile2(path3.join(pluginRoot, filename)))
   );
-  return createHash2("sha256").update(definition).digest("hex");
+  const digest = createHash3("sha256").update("oxrail-hook-definition-v2\0");
+  for (const [index, filename] of filenames.entries()) {
+    digest.update(filename).update("\0").update(String(files[index].length)).update("\0").update(files[index]);
+  }
+  return digest.digest("hex");
 }
 var bypassMessage = "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE.";
 var bypassOutput = () => ({ systemMessage: bypassMessage });

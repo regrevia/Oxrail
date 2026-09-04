@@ -8,8 +8,8 @@ var __export = (target, all) => {
 import { fileURLToPath } from "node:url";
 
 // packages/host-openai/src/bootstrap.ts
-import { createHash as createHash3 } from "node:crypto";
-import { readFile as readFile3 } from "node:fs/promises";
+import { createHash as createHash4 } from "node:crypto";
+import { readFile as readFile2 } from "node:fs/promises";
 
 // packages/protocol/src/digest.ts
 import { createHash } from "node:crypto";
@@ -19,13 +19,7 @@ function hash(domain2, value) {
 }
 function canonicalize(value, redact, key = "", seen = /* @__PURE__ */ new WeakSet()) {
   if (redact && key && SENSITIVE_KEY.test(key)) {
-    const serialized = JSON.stringify(canonicalize(value, false));
-    return {
-      redactedDigest: hash(
-        "oxrail-sensitive-field-v1",
-        serialized ?? "undefined"
-      )
-    };
+    return "[REDACTED]";
   }
   if (value === null || typeof value === "string" || typeof value === "boolean")
     return value;
@@ -12940,31 +12934,75 @@ var EvidenceTraceSchema = external_exports.strictObject({
 });
 
 // packages/host-openai/src/hook.ts
-import { createHash as createHash2 } from "node:crypto";
-import { readFile as readFile2 } from "node:fs/promises";
+import { createHash as createHash3 } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path3 from "node:path";
 
 // packages/host-openai/src/profile.ts
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash as createHash2, randomUUID } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  open,
+  rename,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import path from "node:path";
-var HOST_PROFILE_FILENAME = "host-profile.json";
-async function writeHostProfile(pluginData2, input) {
-  const profile2 = HostProfileSchema.parse(input);
-  await mkdir(pluginData2, { recursive: true, mode: 448 });
-  const destination = path.join(pluginData2, HOST_PROFILE_FILENAME);
-  const temporary = path.join(pluginData2, `.host-profile.${randomUUID()}.tmp`);
+var HOSTS_DIRECTORY = "hosts";
+var HOST_PROFILE_FILENAME = "profile.json";
+var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";
+var ACTIVE_HOST_PROFILE_FILENAME = "active-profile.json";
+var safeProfileId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+var sha256 = (value) => createHash2("sha256").update(value).digest("hex");
+var profileDirectory = (pluginData2, profileId) => path.join(pluginData2, HOSTS_DIRECTORY, profileId);
+async function writePrivate(filename, value) {
+  const temporary = path.join(
+    path.dirname(filename),
+    `.${path.basename(filename)}.${randomUUID()}.tmp`
+  );
   try {
-    await writeFile(temporary, `${JSON.stringify(profile2, null, 2)}
-`, {
-      flag: "wx",
-      mode: 384
-    });
-    await rename(temporary, destination);
+    await writeFile(temporary, value, { flag: "wx", mode: 384 });
+    await rename(temporary, filename);
   } catch (error43) {
     await unlink(temporary).catch(() => void 0);
     throw error43;
   }
+}
+async function writeHostProfile(pluginData2, input) {
+  const profile2 = HostProfileSchema.parse(input);
+  if (!safeProfileId(profile2.profileId))
+    throw new Error("unsafe host profile identifier");
+  const directory = profileDirectory(pluginData2, profile2.profileId);
+  const traces = path.join(directory, "sanitized-traces");
+  await mkdir(traces, { recursive: true, mode: 448 });
+  await Promise.all([
+    chmod(pluginData2, 448),
+    chmod(path.join(pluginData2, HOSTS_DIRECTORY), 448),
+    chmod(directory, 448),
+    chmod(traces, 448)
+  ]);
+  const serialized = `${JSON.stringify(profile2, null, 2)}
+`;
+  await writePrivate(path.join(directory, HOST_PROFILE_FILENAME), serialized);
+  await writePrivate(
+    path.join(directory, HOST_PROFILE_MANIFEST_FILENAME),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        profileId: profile2.profileId,
+        profileSha256: sha256(serialized)
+      },
+      null,
+      2
+    )}
+`
+  );
+  await writePrivate(
+    path.join(pluginData2, ACTIVE_HOST_PROFILE_FILENAME),
+    `${JSON.stringify({ schemaVersion: 1, profileId: profile2.profileId })}
+`
+  );
   return profile2;
 }
 
@@ -12975,10 +13013,20 @@ var oxrailDataDirectory = (home = homedir()) => path2.join(home, ".oxrail");
 
 // packages/host-openai/src/hook.ts
 async function hookDefinitionHash(pluginRoot2) {
-  const definition = await readFile2(
-    path3.join(pluginRoot2, "hooks", "hooks.json")
+  const filenames = [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "dist/hooks/pre-tool.mjs",
+    "dist/hooks/post-tool.mjs"
+  ];
+  const files = await Promise.all(
+    filenames.map((filename) => readFile(path3.join(pluginRoot2, filename)))
   );
-  return createHash2("sha256").update(definition).digest("hex");
+  const digest = createHash3("sha256").update("oxrail-hook-definition-v2\0");
+  for (const [index, filename] of filenames.entries()) {
+    digest.update(filename).update("\0").update(String(files[index].length)).update("\0").update(files[index]);
+  }
+  return digest.digest("hex");
 }
 
 // packages/host-openai/src/bootstrap.ts
@@ -13023,16 +13071,34 @@ var HostInventorySchema = external_exports.strictObject({
       message: "browser tool names must be unique"
     });
   }
+  if (inventory.surface.startsWith("codex-") && !inventory.codexVersion) {
+    context.addIssue({
+      code: "custom",
+      path: ["codexVersion"],
+      message: "Codex surfaces require a Codex version"
+    });
+  }
+});
+var canonicalBrowserToolNames = (inventory) => [...inventory.browserToolNames].sort();
+var matcherEvidenceHashForInventory = (inventory) => deterministicDigest("oxrail-host-inventory-matchers-v1", {
+  browserPath: inventory.browserPath,
+  browserToolNames: canonicalBrowserToolNames(inventory),
+  codexVersion: inventory.codexVersion,
+  computerUsePluginVersion: inventory.computerUsePluginVersion,
+  hostBuild: inventory.hostBuild,
+  os: inventory.os,
+  surface: inventory.surface,
+  toolRoute: inventory.toolRoute
 });
 var unknownPrimitives = () => Object.fromEntries(
   NativePrimitiveSchema.options.map((primitive) => [primitive, "unknown"])
 );
 async function readHostInventory(inventoryPath2) {
-  const raw = await readFile3(inventoryPath2);
+  const raw = await readFile2(inventoryPath2);
   if (raw.length > 1048576) throw new Error("host inventory exceeds 1 MiB");
   return {
     inventory: HostInventorySchema.parse(JSON.parse(raw.toString("utf8"))),
-    sha256: createHash3("sha256").update(raw).digest("hex")
+    sha256: createHash4("sha256").update(raw).digest("hex")
   };
 }
 async function bootstrapHostProfile(options) {
@@ -13040,19 +13106,7 @@ async function bootstrapHostProfile(options) {
     options.inventoryPath
   );
   const definitionHash = await hookDefinitionHash(options.pluginRoot);
-  const matcherEvidenceHash = deterministicDigest(
-    "oxrail-host-inventory-matchers-v1",
-    {
-      browserPath: inventory.browserPath,
-      browserToolNames: inventory.browserToolNames,
-      codexVersion: inventory.codexVersion,
-      computerUsePluginVersion: inventory.computerUsePluginVersion,
-      hostBuild: inventory.hostBuild,
-      os: inventory.os,
-      surface: inventory.surface,
-      toolRoute: inventory.toolRoute
-    }
-  );
+  const matcherEvidenceHash = matcherEvidenceHashForInventory(inventory);
   const profileId = `hp_${deterministicDigest("oxrail-host-profile-id-v1", {
     definitionHash,
     matcherEvidenceHash
@@ -13068,7 +13122,7 @@ async function bootstrapHostProfile(options) {
       hooksTrusted: "unknown",
       preToolUseAvailable: "unknown",
       postToolUseAvailable: "unknown",
-      chromeComputerUseDetectable: "passed",
+      chromeComputerUseDetectable: inventory.browserPath === "chrome-extension" && ["macos", "windows"].includes(inventory.os) ? "passed" : "unknown",
       matcherProfileValid: "passed",
       syntheticProbe: "unknown",
       firstBrowserHookSeen: false,
@@ -13085,7 +13139,7 @@ async function bootstrapHostProfile(options) {
     },
     route: {
       toolRoute: inventory.toolRoute,
-      canonicalToolMatchers: inventory.browserToolNames,
+      canonicalToolMatchers: canonicalBrowserToolNames(inventory),
       matcherEvidenceHash
     },
     action: {

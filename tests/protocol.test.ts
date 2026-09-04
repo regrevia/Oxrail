@@ -11,6 +11,7 @@ import {
   NativePrimitiveSchema,
   ReasonCodeSchema,
   SetupVerificationSchema,
+  redactedDeterministicDigest,
 } from "../packages/protocol/src/index.js";
 
 const unknown = "unknown" as const;
@@ -157,6 +158,38 @@ function hostProfile() {
 }
 
 describe("versioned protocol", () => {
+  it("does not make low-entropy secret values dictionary-testable", () => {
+    const digest = redactedDeterministicDigest("evidence", {
+      action: "type",
+      otp: "000000",
+    });
+
+    expect(
+      redactedDeterministicDigest("evidence", {
+        action: "type",
+        otp: "831924",
+      }),
+    ).toBe(digest);
+    expect(
+      redactedDeterministicDigest("evidence", {
+        action: "click",
+        otp: "831924",
+      }),
+    ).not.toBe(digest);
+  });
+
+  it("does not inspect an opaque sensitive value before redaction", () => {
+    const cyclicSecret: Record<string, unknown> = {};
+    cyclicSecret.self = cyclicSecret;
+
+    expect(() =>
+      redactedDeterministicDigest("evidence", {
+        action: "type",
+        password: cyclicSecret,
+      }),
+    ).not.toThrow();
+  });
+
   it("round-trips the v3 HostProfile and rejects unknown enum values", () => {
     const parsed = HostProfileSchema.parse(hostProfile());
     expect(HostProfileSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(

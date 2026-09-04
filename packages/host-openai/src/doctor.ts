@@ -8,6 +8,10 @@ import {
   type ProbeVerdict,
   type SetupVerification,
 } from "../../protocol/src/index.js";
+import {
+  matcherEvidenceHashForInventory,
+  type HostInventory,
+} from "./bootstrap.js";
 import { hookDefinitionHash } from "./hook.js";
 import { loadHostProfile, writeHostProfile } from "./profile.js";
 import {
@@ -37,6 +41,7 @@ export interface SyntheticProbeResult {
   matcherMatched: boolean;
   postToolUse: boolean;
   preToolUse: boolean;
+  targetRouteEquivalent?: boolean;
 }
 
 export type HarmlessSyntheticProbe = (request: {
@@ -47,6 +52,7 @@ export type HarmlessSyntheticProbe = (request: {
 export interface DoctorOptions {
   browserPath?: HostProfile["identity"]["browserPath"];
   currentIdentity?: HostProfile["identity"];
+  hostInventory?: HostInventory;
   now?: () => number;
   persistProfile?: typeof writeHostProfile;
   pluginData: string;
@@ -57,11 +63,16 @@ export interface DoctorOptions {
 }
 
 export type DoctorReport = SetupVerification & {
+  currentIdentityConfirmed: boolean;
   handoffInactiveReasons: string[];
+  hookDefinitionHash: string;
+  hostIdentity?: HostProfile["identity"];
   notices: string[];
   profileErrors: string[];
+  profileFresh: boolean;
   profileId?: string;
   safetyInactiveReasons: string[];
+  syntheticProbeVerdict: ProbeVerdict;
 };
 
 const exists = (filename: string) =>
@@ -243,6 +254,17 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       : {}),
     ...(options.currentIdentity?.os ? { os: options.currentIdentity.os } : {}),
     ...(requestedSurface ? { surface: requestedSurface } : {}),
+    ...(options.hostInventory
+      ? {
+          canonicalToolMatchers: [
+            ...options.hostInventory.browserToolNames,
+          ].sort(),
+          matcherEvidenceHash: matcherEvidenceHashForInventory(
+            options.hostInventory,
+          ),
+          toolRoute: options.hostInventory.toolRoute,
+        }
+      : {}),
   });
   const profile = profileResult.profile;
   let observations = await observe(
@@ -253,6 +275,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     sessionDigest,
   );
   let syntheticProbeUsed = false;
+  let syntheticProbeVerdict: ProbeVerdict =
+    profile?.setup.syntheticProbe ?? "unknown";
 
   if (
     options.syntheticProbe &&
@@ -266,6 +290,12 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         profileId: profile.profileId,
         toolMatchers: profile.route.canonicalToolMatchers,
       });
+      syntheticProbeVerdict =
+        result.matcherMatched && result.preToolUse && result.postToolUse
+          ? "passed"
+          : result.matcherMatched || result.preToolUse || result.postToolUse
+            ? "partial"
+            : "failed";
       const common = {
         definitionHash,
         profileId: profile.profileId,
@@ -298,7 +328,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         result.chromeComputerUse &&
         result.matcherMatched &&
         result.preToolUse &&
-        result.postToolUse
+        result.postToolUse &&
+        result.targetRouteEquivalent === true
       ) {
         await recordBrowserHookPhase(
           options.pluginData,
@@ -327,6 +358,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         sessionDigest,
       );
     } catch {
+      syntheticProbeVerdict = "failed";
       // An unavailable probe leaves setup in its prior fail-open state.
     }
   }
@@ -340,10 +372,15 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     profileAllowsHooks &&
     Boolean(definitionHash) &&
     (observations.generic.PreToolUse || observations.generic.PostToolUse);
+  const currentIdentity = Boolean(
+    profile && matchesCurrentIdentity(profile, options.currentIdentity),
+  );
   const chromeComputerUseDetectable: ProbeVerdict =
-    profileResult.valid && profile
-      ? profile.identity.browserPath === "chrome-extension" &&
-        Boolean(profile.identity.computerUsePluginVersion)
+    profileResult.valid && profile && options.currentIdentity
+      ? currentIdentity &&
+        profile.identity.browserPath === "chrome-extension" &&
+        Boolean(profile.identity.computerUsePluginVersion) &&
+        ["macos", "windows"].includes(profile.identity.os)
         ? "passed"
         : "unsupported"
       : "unknown";
@@ -356,6 +393,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     observations.generic.PostToolUse &&
     observations.genericSessionBound &&
     profileResult.valid &&
+    Boolean(options.hostInventory) &&
+    currentIdentity &&
     chromeComputerUseDetectable === "passed";
   const priorVerificationSource =
     profile?.setup.lifecycle === "VERIFIED" &&
@@ -373,9 +412,6 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const routeVerificationSource =
     observedVerificationSource ?? priorVerificationSource;
   const verified = configured && Boolean(routeVerificationSource);
-  const currentIdentity = Boolean(
-    profile && matchesCurrentIdentity(profile, options.currentIdentity),
-  );
   // v0.1-alpha only verifies the passive route. No runtime enforcement or
   // Handoff adapter is connected, so evidence profiles cannot activate claims.
   const resultingMode = configured ? "ADVISORY_ONLY" : "UNSUPPORTED";
@@ -417,7 +453,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         ? "unknown"
         : "unsupported",
     chromeComputerUseDetectable,
-    matcherProfileValid: profileResult.valid,
+    matcherProfileValid: profileResult.valid && Boolean(options.hostInventory),
     handoffCapability: profile?.handoff.capability ?? inactiveHandoff,
     syntheticProbeUsed:
       syntheticProbeUsed ||
@@ -462,6 +498,11 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       "Hook trust is inferred from recent current-hash execution; the host /hooks UI remains authoritative.",
     );
   }
+  if (!options.hostInventory) {
+    notices.push(
+      "Current host route inventory is not confirmed; matcher/profile remains unavailable.",
+    );
+  }
   if (verification.stage === "VERIFIED" && !currentIdentity) {
     notices.push(
       "Current host version tuple is not confirmed; enforcement capabilities remain BYPASSED/INACTIVE.",
@@ -493,10 +534,10 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         preToolUseAvailable: verification.preToolUseAvailable,
         postToolUseAvailable: verification.postToolUseAvailable,
         chromeComputerUseDetectable: verification.chromeComputerUseDetectable,
-        matcherProfileValid: "passed",
-        syntheticProbe: verification.syntheticProbeUsed
+        matcherProfileValid: verification.matcherProfileValid
           ? "passed"
-          : profile.setup.syntheticProbe,
+          : "failed",
+        syntheticProbe: syntheticProbeVerdict,
         firstBrowserHookSeen:
           profile.setup.firstBrowserHookSeen ||
           verification.firstBrowserHookSeen,
@@ -552,10 +593,16 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
 
   return {
     ...reportedVerification,
+    currentIdentityConfirmed: currentIdentity,
     handoffInactiveReasons: reportedHandoffReasons,
+    hookDefinitionHash: definitionHash,
+    ...(profile ? { hostIdentity: profile.identity } : {}),
     notices,
     profileErrors: profileResult.errors,
+    profileFresh:
+      profileResult.valid && Boolean(options.hostInventory) && currentIdentity,
     safetyInactiveReasons: reportedSafetyReasons,
+    syntheticProbeVerdict,
     ...(profile ? { profileId: profile.profileId } : {}),
   };
 }
@@ -565,7 +612,12 @@ const verdict = (value: boolean | ProbeVerdict) =>
 
 export function formatDoctorReport(report: DoctorReport): string {
   return [
-    `Oxrail setup: ${report.stage}`,
+    "Oxrail setup verification",
+    `Surface: ${report.hostIdentity?.surface ?? "unknown"}`,
+    `Computer Use plugin: ${report.hostIdentity?.computerUsePluginVersion ?? "unknown"}`,
+    `Hook definition hash: ${report.hookDefinitionHash || "unknown"}`,
+    `Current host identity confirmed: ${verdict(report.currentIdentityConfirmed)}`,
+    `Profile fresh: ${verdict(report.profileFresh)}`,
     ...report.notices,
     "",
     `Plugin package manifest present: ${verdict(report.pluginInstalled)}`,
@@ -576,9 +628,13 @@ export function formatDoctorReport(report: DoctorReport): string {
     `PostToolUse available: ${verdict(report.postToolUseAvailable)}`,
     `Chrome Computer Use detectable: ${verdict(report.chromeComputerUseDetectable)}`,
     `Matcher/profile valid: ${verdict(report.matcherProfileValid)}`,
+    `Synthetic probe: ${report.syntheticProbeVerdict.toUpperCase()}`,
+    `First browser hook seen: ${report.firstBrowserHookSeen ? "YES" : "NO"}`,
+    `Verification source: ${report.verificationSource}`,
     `Handoff surface: ${report.handoffCapability.surface}`,
     `Handoff lease: ${report.handoffCapability.lease}`,
     `Handoff resume: ${report.handoffCapability.resume}`,
+    `Lifecycle: ${report.stage}`,
     `Oxrail mode: ${report.resultingMode}`,
     `Optimization: ${report.optimization}`,
     `Safety protection: ${

@@ -15,7 +15,7 @@ function sanitizeString(value: string): string {
     .replace(URL, (candidate) => {
       try {
         const url = new globalThis.URL(candidate);
-        return `${url.origin}${url.pathname}`;
+        return url.origin;
       } catch {
         return "[REDACTED_URL]";
       }

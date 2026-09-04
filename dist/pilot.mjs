@@ -12047,7 +12047,7 @@ function sanitizeString(value) {
   return value.replace(TOKEN_VALUE, "[REDACTED]").replace(SECRET_ASSIGNMENT, "$1[REDACTED]").replace(URL2, (candidate) => {
     try {
       const url2 = new globalThis.URL(candidate);
-      return `${url2.origin}${url2.pathname}`;
+      return url2.origin;
     } catch {
       return "[REDACTED_URL]";
     }

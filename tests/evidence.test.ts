@@ -10,21 +10,21 @@ import {
 } from "../packages/evidence/src/index.js";
 
 describe("sanitized atomic evidence", () => {
-  it("redacts secrets and URL queries before the first byte reaches disk", async () => {
+  it("redacts secrets and URL paths before the first byte reaches disk", async () => {
     const directory = await mkdtemp(join(tmpdir(), "oxrail-evidence-"));
     const path = join(directory, "trace.json");
     await atomicWriteSanitizedJson(path, {
       password: "canary-password",
       command:
-        "probe --token canary-token https://example.test/path?otp=123456#private",
+        "probe --token canary-token https://example.test/accounts/alice/reset/private-id?otp=123456#private",
       target: { text: "page secret" },
       safe: true,
     });
     const contents = await readFile(path, "utf8");
     expect(contents).not.toMatch(
-      /canary-password|canary-token|123456|page secret|private/,
+      /canary-password|canary-token|123456|page secret|accounts|alice|private/,
     );
-    expect(contents).toContain("https://example.test/path");
+    expect(contents).toContain("https://example.test");
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(
       (await readdir(directory)).filter((name) => name.endsWith(".tmp")),

@@ -62,9 +62,33 @@ export const HostInventorySchema = z
         message: "browser tool names must be unique",
       });
     }
+    if (inventory.surface.startsWith("codex-") && !inventory.codexVersion) {
+      context.addIssue({
+        code: "custom",
+        path: ["codexVersion"],
+        message: "Codex surfaces require a Codex version",
+      });
+    }
   });
 
 export type HostInventory = z.infer<typeof HostInventorySchema>;
+
+const canonicalBrowserToolNames = (inventory: HostInventory) =>
+  [...inventory.browserToolNames].sort();
+
+export const matcherEvidenceHashForInventory = (
+  inventory: HostInventory,
+): string =>
+  deterministicDigest("oxrail-host-inventory-matchers-v1", {
+    browserPath: inventory.browserPath,
+    browserToolNames: canonicalBrowserToolNames(inventory),
+    codexVersion: inventory.codexVersion,
+    computerUsePluginVersion: inventory.computerUsePluginVersion,
+    hostBuild: inventory.hostBuild,
+    os: inventory.os,
+    surface: inventory.surface,
+    toolRoute: inventory.toolRoute,
+  });
 
 const unknownPrimitives = () =>
   Object.fromEntries(
@@ -96,19 +120,7 @@ export async function bootstrapHostProfile(
     options.inventoryPath,
   );
   const definitionHash = await hookDefinitionHash(options.pluginRoot);
-  const matcherEvidenceHash = deterministicDigest(
-    "oxrail-host-inventory-matchers-v1",
-    {
-      browserPath: inventory.browserPath,
-      browserToolNames: inventory.browserToolNames,
-      codexVersion: inventory.codexVersion,
-      computerUsePluginVersion: inventory.computerUsePluginVersion,
-      hostBuild: inventory.hostBuild,
-      os: inventory.os,
-      surface: inventory.surface,
-      toolRoute: inventory.toolRoute,
-    },
-  );
+  const matcherEvidenceHash = matcherEvidenceHashForInventory(inventory);
   const profileId = `hp_${deterministicDigest("oxrail-host-profile-id-v1", {
     definitionHash,
     matcherEvidenceHash,
@@ -125,7 +137,11 @@ export async function bootstrapHostProfile(
       hooksTrusted: "unknown",
       preToolUseAvailable: "unknown",
       postToolUseAvailable: "unknown",
-      chromeComputerUseDetectable: "passed",
+      chromeComputerUseDetectable:
+        inventory.browserPath === "chrome-extension" &&
+        ["macos", "windows"].includes(inventory.os)
+          ? "passed"
+          : "unknown",
       matcherProfileValid: "passed",
       syntheticProbe: "unknown",
       firstBrowserHookSeen: false,
@@ -144,7 +160,7 @@ export async function bootstrapHostProfile(
     },
     route: {
       toolRoute: inventory.toolRoute,
-      canonicalToolMatchers: inventory.browserToolNames,
+      canonicalToolMatchers: canonicalBrowserToolNames(inventory),
       matcherEvidenceHash,
     },
     action: {

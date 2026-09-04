@@ -18,13 +18,7 @@ function canonicalize(
   seen = new WeakSet<object>(),
 ): unknown {
   if (redact && key && SENSITIVE_KEY.test(key)) {
-    const serialized = JSON.stringify(canonicalize(value, false));
-    return {
-      redactedDigest: hash(
-        "oxrail-sensitive-field-v1",
-        serialized ?? "undefined",
-      ),
-    };
+    return "[REDACTED]";
   }
   if (value === null || typeof value === "string" || typeof value === "boolean")
     return value;

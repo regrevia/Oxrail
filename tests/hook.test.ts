@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -19,6 +26,7 @@ import {
   oxrailDataDirectory,
   readBrowserRouteObservations,
   readHookMarker,
+  writeHostProfile,
 } from "../packages/host-openai/src/index.js";
 
 const temporaryDirectories: string[] = [];
@@ -176,10 +184,7 @@ async function setup() {
   const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-hook-"));
   temporaryDirectories.push(pluginData);
   const definitionHash = await hookDefinitionHash(pluginRoot);
-  await writeFile(
-    path.join(pluginData, "host-profile.json"),
-    `${JSON.stringify(await fixtureProfile(definitionHash))}\n`,
-  );
+  await writeHostProfile(pluginData, await fixtureProfile(definitionHash));
   return { definitionHash, pluginData, pluginRoot };
 }
 
@@ -200,6 +205,38 @@ describe("public Codex hooks", () => {
     expect(oxrailDataDirectory("/fixture/home")).toBe(
       path.join("/fixture/home", ".oxrail"),
     );
+  });
+
+  it("binds the Hook definition hash to its executable bundles", async () => {
+    const pluginRoot = await mkdtemp(path.join(tmpdir(), "oxrail-hook-hash-"));
+    temporaryDirectories.push(pluginRoot);
+    await Promise.all([
+      mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true }),
+      mkdir(path.join(pluginRoot, "hooks"), { recursive: true }),
+      mkdir(path.join(pluginRoot, "dist", "hooks"), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(
+        path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+        '{"name":"oxrail","version":"fixture"}\n',
+      ),
+      writeFile(path.join(pluginRoot, "hooks", "hooks.json"), "{}\n"),
+      writeFile(
+        path.join(pluginRoot, "dist", "hooks", "pre-tool.mjs"),
+        "// first\n",
+      ),
+      writeFile(
+        path.join(pluginRoot, "dist", "hooks", "post-tool.mjs"),
+        "// post\n",
+      ),
+    ]);
+    const first = await hookDefinitionHash(pluginRoot);
+    await writeFile(
+      path.join(pluginRoot, "dist", "hooks", "pre-tool.mjs"),
+      "// changed\n",
+    );
+
+    expect(await hookDefinitionHash(pluginRoot)).not.toBe(first);
   });
 
   it("matches broadly but classifies only the exact evidence-backed tool name", async () => {
@@ -296,10 +333,7 @@ describe("public Codex hooks", () => {
     ).resolves.toEqual({});
 
     const profile = await fixtureProfile("0".repeat(64));
-    await writeFile(
-      path.join(pluginData, "host-profile.json"),
-      JSON.stringify(profile),
-    );
+    await writeHostProfile(pluginData, profile);
     const staleProfileOutput = await handleHookEvent(
       {
         hook_event_name: "PreToolUse",

@@ -20,7 +20,11 @@ import {
   handleHookEvent,
   HOOK_MARKER_FRESHNESS_MS,
   hookDefinitionHash,
+  loadHostProfile,
+  matcherEvidenceHashForInventory,
   runDoctor,
+  type HostInventory,
+  writeHostProfile,
 } from "../packages/host-openai/src/index.js";
 
 const temporaryDirectories: string[] = [];
@@ -31,6 +35,20 @@ afterEach(async () => {
       .map((directory) => rm(directory, { force: true, recursive: true })),
   );
 });
+
+const fixtureInventory = {
+  schemaVersion: 1,
+  source: "host-tool-inventory",
+  capturedAt: "2026-09-04T00:00:00.000Z",
+  surface: "codex-desktop",
+  hostBuild: "fixture-host",
+  codexVersion: "fixture-codex",
+  computerUsePluginVersion: "fixture-computer-use",
+  browserPath: "chrome-extension",
+  os: "macos",
+  toolRoute: "direct-mcp",
+  browserToolNames: ["fixture.native.browser"],
+} satisfies HostInventory;
 
 const fixtureProfile = (definitionHash: string) =>
   HostProfileSchema.parse({
@@ -57,12 +75,12 @@ const fixtureProfile = (definitionHash: string) =>
       codexVersion: "fixture-codex",
       computerUsePluginVersion: "fixture-computer-use",
       browserPath: "chrome-extension",
-      os: "linux",
+      os: "macos",
     },
     route: {
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["fixture.native.browser"],
-      matcherEvidenceHash: "a".repeat(64),
+      matcherEvidenceHash: matcherEvidenceHashForInventory(fixtureInventory),
     },
     action: {
       control: "MICRO_ACTION",
@@ -178,6 +196,7 @@ async function setup() {
   temporaryDirectories.push(pluginRoot, pluginData);
   await Promise.all([
     mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true }),
+    mkdir(path.join(pluginRoot, "dist", "hooks"), { recursive: true }),
     mkdir(path.join(pluginRoot, "hooks"), { recursive: true }),
     mkdir(path.join(pluginRoot, "skills", "oxrail"), { recursive: true }),
   ]);
@@ -194,14 +213,20 @@ async function setup() {
       path.join(process.cwd(), "hooks", "hooks.json"),
       path.join(pluginRoot, "hooks", "hooks.json"),
     ),
+    copyFile(
+      path.join(process.cwd(), "dist", "hooks", "pre-tool.mjs"),
+      path.join(pluginRoot, "dist", "hooks", "pre-tool.mjs"),
+    ),
+    copyFile(
+      path.join(process.cwd(), "dist", "hooks", "post-tool.mjs"),
+      path.join(pluginRoot, "dist", "hooks", "post-tool.mjs"),
+    ),
   ]);
   const definitionHash = await hookDefinitionHash(pluginRoot);
-  await writeFile(
-    path.join(pluginData, "host-profile.json"),
-    `${JSON.stringify(fixtureProfile(definitionHash))}\n`,
-  );
+  await writeHostProfile(pluginData, fixtureProfile(definitionHash));
   return {
     definitionHash,
+    hostInventory: fixtureInventory,
     pluginData,
     pluginRoot,
     currentIdentity: {
@@ -210,7 +235,7 @@ async function setup() {
       codexVersion: "fixture-codex",
       computerUsePluginVersion: "fixture-computer-use",
       browserPath: "chrome-extension",
-      os: "linux",
+      os: "macos",
     } as const,
   };
 }
@@ -238,6 +263,15 @@ describe("oxrail doctor", () => {
     expect(formatted).toContain("Plugin package manifest present: PASS");
     expect(formatted).toContain("Oxrail Skill definition present: PASS");
     expect(formatted).toContain("Required Hook definitions present: PASS");
+    expect(formatted).toContain("Surface: codex-desktop");
+    expect(formatted).toContain("Computer Use plugin: fixture-computer-use");
+    expect(formatted).toContain(
+      `Hook definition hash: ${environment.definitionHash}`,
+    );
+    expect(formatted).toContain("Current host identity confirmed: PASS");
+    expect(formatted).toContain("Synthetic probe: UNKNOWN");
+    expect(formatted).toContain("First browser hook seen: NO");
+    expect(formatted).toContain("Verification source: none");
     expect(report.notices).toContain(
       "Package/definition checks are local file-presence checks, not host registry queries.",
     );
@@ -525,12 +559,8 @@ describe("oxrail doctor", () => {
     expect(stale.safetyProtectionActive).toBe(false);
     expect(stale.handoffProtectionActive).toBe(false);
 
-    const persistedAfterStale = JSON.parse(
-      await readFile(
-        path.join(environment.pluginData, "host-profile.json"),
-        "utf8",
-      ),
-    ) as { setup: { lifecycle: string; verificationSource: string } };
+    const persistedAfterStale = (await loadHostProfile(environment.pluginData))
+      .profile!;
     expect(persistedAfterStale.setup).toMatchObject({
       lifecycle: "VERIFIED",
       verificationSource: "passive-first-browser-call",
@@ -573,6 +603,7 @@ describe("oxrail doctor", () => {
           matcherMatched: true,
           postToolUse: true,
           preToolUse: true,
+          targetRouteEquivalent: true,
         };
       },
     });
@@ -580,6 +611,48 @@ describe("oxrail doctor", () => {
     expect(report.syntheticProbeUsed).toBe(true);
     expect(report.stage).toBe("VERIFIED");
     expect(report.firstBrowserHookSeen).toBe(true);
+  });
+
+  it("does not verify a synthetic probe without host route equivalence", async () => {
+    const environment = await setup();
+    const report = await runDoctor({
+      ...environment,
+      syntheticProbe: async () => ({
+        chromeComputerUse: true,
+        matcherMatched: true,
+        postToolUse: true,
+        preToolUse: true,
+        targetRouteEquivalent: false,
+      }),
+    });
+
+    expect(report.stage).toBe("CONFIGURED");
+    expect(report.verificationSource).toBe("none");
+    expect(report.syntheticProbeVerdict).toBe("passed");
+  });
+
+  it("requires a current host identity before reporting CONFIGURED", async () => {
+    const environment = await setup();
+    for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
+      await handleHookEvent(
+        {
+          hook_event_name,
+          session_id: "identity-required-session",
+          tool_name: "fixture.safe.probe",
+          tool_use_id: `generic-${hook_event_name}`,
+        },
+        environment,
+      );
+    }
+
+    const { currentIdentity: _currentIdentity, ...withoutIdentity } =
+      environment;
+    const report = await runDoctor({
+      ...withoutIdentity,
+      sessionId: "identity-required-session",
+    });
+    expect(report.stage).toBe("INSTALLED");
+    expect(report.chromeComputerUseDetectable).toBe("unknown");
   });
 
   it("does not combine partial synthetic probes from separate runs", async () => {
@@ -610,9 +683,9 @@ describe("oxrail doctor", () => {
 
   it("invalidates setup when the profile carries an old hook hash", async () => {
     const environment = await setup();
-    await writeFile(
-      path.join(environment.pluginData, "host-profile.json"),
-      JSON.stringify(fixtureProfile("0".repeat(64))),
+    await writeHostProfile(
+      environment.pluginData,
+      fixtureProfile("0".repeat(64)),
     );
     const report = await runDoctor(environment);
 
@@ -680,10 +753,7 @@ describe("oxrail doctor", () => {
         handoff: "ACTIVE",
       },
     });
-    await writeFile(
-      path.join(environment.pluginData, "host-profile.json"),
-      JSON.stringify(activeHandoffProfile),
-    );
+    await writeHostProfile(environment.pluginData, activeHandoffProfile);
     for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
       await handleHookEvent(
         {
@@ -733,10 +803,7 @@ describe("oxrail doctor", () => {
         handoff: "INACTIVE",
       },
     });
-    await writeFile(
-      path.join(environment.pluginData, "host-profile.json"),
-      JSON.stringify(disabledProfile),
-    );
+    await writeHostProfile(environment.pluginData, disabledProfile);
     for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
       await handleHookEvent(
         {
@@ -759,12 +826,7 @@ describe("oxrail doctor", () => {
       safetyProtectionActive: false,
       handoffProtectionActive: false,
     });
-    const persisted = JSON.parse(
-      await readFile(
-        path.join(environment.pluginData, "host-profile.json"),
-        "utf8",
-      ),
-    ) as { hooks: { trustState: string } };
+    const persisted = (await loadHostProfile(environment.pluginData)).profile!;
     expect(persisted.hooks.trustState).toBe("disabled");
   });
 

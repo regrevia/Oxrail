@@ -42,10 +42,25 @@ const isHookInput = (value: unknown): value is HookInput => {
 };
 
 export async function hookDefinitionHash(pluginRoot: string): Promise<string> {
-  const definition = await readFile(
-    path.join(pluginRoot, "hooks", "hooks.json"),
+  const filenames = [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "dist/hooks/pre-tool.mjs",
+    "dist/hooks/post-tool.mjs",
+  ];
+  const files = await Promise.all(
+    filenames.map((filename) => readFile(path.join(pluginRoot, filename))),
   );
-  return createHash("sha256").update(definition).digest("hex");
+  const digest = createHash("sha256").update("oxrail-hook-definition-v2\0");
+  for (const [index, filename] of filenames.entries()) {
+    digest
+      .update(filename)
+      .update("\0")
+      .update(String(files[index]!.length))
+      .update("\0")
+      .update(files[index]!);
+  }
+  return digest.digest("hex");
 }
 
 const bypassMessage =
