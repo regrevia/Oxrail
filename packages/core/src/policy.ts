@@ -146,7 +146,7 @@ export function evaluateAction(context: PolicyContext): PolicyDecision {
         ? state.hostProfileStatus === "VALID"
           ? "OXRAIL_HOST_ROUTE_UNPROVEN"
           : "OXRAIL_HOST_PROFILE_STALE"
-      : "OXRAIL_HOST_ROUTE_UNPROVEN",
+        : "OXRAIL_HOST_ROUTE_UNPROVEN",
     );
   }
 

@@ -29,9 +29,7 @@ function canonicalOrigin(value: string | undefined): string | undefined {
   if (!value) return undefined;
   try {
     const url = new URL(value);
-    return ["http:", "https:"].includes(url.protocol)
-      ? url.origin
-      : undefined;
+    return ["http:", "https:"].includes(url.protocol) ? url.origin : undefined;
   } catch {
     return undefined;
   }
@@ -69,8 +67,7 @@ export function sanitizeBrowserTaskStateForPersistence(
           : {}),
         ...(state.lastObservation.payloadTokenEstimate !== undefined
           ? {
-              payloadTokenEstimate:
-                state.lastObservation.payloadTokenEstimate,
+              payloadTokenEstimate: state.lastObservation.payloadTokenEstimate,
             }
           : {}),
         ...(state.lastObservation.screenshotFrameCorrelationId
@@ -128,8 +125,7 @@ export function sanitizeBrowserTaskStateForPersistence(
           activeHandoffId: persistentHandoffId(state.activeHandoffId),
         }
       : {}),
-    pendingNativeActionIds: state.pendingNativeActionIds.map(
-      persistentToolUseId,
-    ),
+    pendingNativeActionIds:
+      state.pendingNativeActionIds.map(persistentToolUseId),
   });
 }

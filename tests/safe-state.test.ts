@@ -100,9 +100,7 @@ describe("persistent BrowserTaskState boundary", () => {
 
     expect(twice).toEqual(once);
     expect(once.documentBinding).toMatch(/^oxrail-id:[a-f0-9]{64}$/);
-    expect(once.pendingNativeActionIds[0]).toMatch(
-      /^oxrail-id:[a-f0-9]{64}$/,
-    );
+    expect(once.pendingNativeActionIds[0]).toMatch(/^oxrail-id:[a-f0-9]{64}$/);
   });
 
   it("rejects invalid state without echoing its contents", () => {
