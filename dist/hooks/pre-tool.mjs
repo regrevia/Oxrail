@@ -12923,6 +12923,12 @@ function deriveHostMode(profile) {
   return "TRANSACTION_GUARD";
 }
 
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+
+// packages/core/src/tool-call.ts
+var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
+
 // packages/host-openai/src/profile.ts
 var HOSTS_DIRECTORY = "hosts";
 var HOST_PROFILE_FILENAME = "profile.json";
@@ -13092,11 +13098,14 @@ function isBrowserRouteObservation(value) {
 async function recordBrowserHookPhase(pluginData, phase, observation, now = Date.now()) {
   const directory = browserRouteDirectory(pluginData);
   await mkdir2(directory, { recursive: true, mode: 448 });
-  const destination = path2.join(directory, `${observation.toolUseDigest}.json`);
+  const destination = path2.join(
+    directory,
+    `${observation.toolUseDigest.slice(0, 2)}.json`
+  );
   let previous;
   try {
     const candidate = JSON.parse(await readFile(destination, "utf8"));
-    if (isBrowserRouteObservation(candidate) && candidate.definitionHash === observation.definitionHash && candidate.profileId === observation.profileId && candidate.sessionDigest === observation.sessionDigest && candidate.synthetic === observation.synthetic) {
+    if (isBrowserRouteObservation(candidate) && candidate.definitionHash === observation.definitionHash && candidate.profileId === observation.profileId && candidate.sessionDigest === observation.sessionDigest && candidate.synthetic === observation.synthetic && candidate.toolUseDigest === observation.toolUseDigest) {
       previous = candidate;
     }
   } catch {

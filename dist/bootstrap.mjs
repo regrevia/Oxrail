@@ -12949,6 +12949,14 @@ import {
   writeFile
 } from "node:fs/promises";
 import path from "node:path";
+
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+
+// packages/core/src/tool-call.ts
+var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
+
+// packages/host-openai/src/profile.ts
 var HOSTS_DIRECTORY = "hosts";
 var HOST_PROFILE_FILENAME = "profile.json";
 var HOST_PROFILE_MANIFEST_FILENAME = "manifest.json";

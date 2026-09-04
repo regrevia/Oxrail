@@ -12915,6 +12915,12 @@ function deriveHostMode(profile) {
   return "TRANSACTION_GUARD";
 }
 
+// packages/core/src/store.ts
+var MAX_BROWSER_TASK_STATE_BYTES = 64 * 1024;
+
+// packages/core/src/tool-call.ts
+var TOOL_CALL_POST_MAX_AGE_MS = 10 * 6e4;
+
 // packages/evidence/src/gate.ts
 var digest = (contents) => createHash("sha256").update(contents).digest("hex");
 var releaseDependencies2 = [
