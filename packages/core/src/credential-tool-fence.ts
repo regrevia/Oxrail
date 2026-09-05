@@ -201,6 +201,74 @@ export async function observeCredentialToolFenceLocked(
   };
 }
 
+/**
+ * Package-internal cleanup observation. The caller must already hold the
+ * global credential fence mutex. Completed entries are retired only after a
+ * durable Post receipt; every other physical entry keeps cleanup pending.
+ */
+export async function observeCredentialToolFenceCleanupLocked(
+  root: string,
+  expected: CredentialExecutionGateSnapshot,
+): Promise<CredentialToolFenceLockedObservation> {
+  if (
+    expected.kind !== "KNOWN" ||
+    !["ACTIVE", "CLEANUP_PENDING", "PREPARING"].includes(expected.state)
+  ) {
+    return { kind: "UNKNOWN" };
+  }
+  const locked = await readCredentialExecutionGate(root);
+  if (locked.kind !== "KNOWN" || !sameSnapshot(expected, locked)) {
+    return { kind: "UNKNOWN" };
+  }
+
+  let journal = await inspectToolCallJournal(root, CREDENTIAL_TOOL_FENCE_SCOPE);
+  let sweepKnown = true;
+  if (journal.kind === "KNOWN" && journal.completedToolUseIds.length > 0) {
+    sweepKnown =
+      (await retireCompletedToolCalls(
+        root,
+        CREDENTIAL_TOOL_FENCE_SCOPE,
+        [],
+      )) === "RETIRED";
+    journal = await inspectToolCallJournal(root, CREDENTIAL_TOOL_FENCE_SCOPE);
+  }
+  const physicalCount = await countActiveToolCalls(
+    root,
+    CREDENTIAL_TOOL_FENCE_SCOPE,
+  );
+  const current = await readCredentialExecutionGate(root);
+  if (
+    !sweepKnown ||
+    current.kind !== "KNOWN" ||
+    !sameSnapshot(expected, current) ||
+    journal.kind !== "KNOWN" ||
+    physicalCount === "UNKNOWN"
+  ) {
+    return { kind: "UNKNOWN" };
+  }
+  if (
+    journal.legacyPending ||
+    journal.pendingToolUseIds.length > 0 ||
+    journal.completedToolUseIds.length > 0 ||
+    physicalCount !== 0
+  ) {
+    return { kind: "PENDING" };
+  }
+  return {
+    kind: "QUIESCENT",
+    snapshotHash: deterministicDigest(
+      "oxrail-credential-tool-fence-empty-snapshot-v1",
+      {
+        bindingDigest: BINDING_DIGEST,
+        completedCount: 0,
+        legacyPending: false,
+        pendingCount: 0,
+        physicalCount: 0,
+      },
+    ),
+  };
+}
+
 async function runtimeRootIsMissing(root: string): Promise<boolean> {
   try {
     await lstat(root);

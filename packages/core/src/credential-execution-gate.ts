@@ -21,6 +21,7 @@ const MAX_LOCK_BYTES = 512;
 const HASH = /^[a-f0-9]{64}$/;
 const AUTHORITY = "FIXTURE_ONLY_NON_AUTHORIZING" as const;
 const EFFECT = "BLOCK_AGENT_EXECUTION_ONLY" as const;
+const FIXTURE_RESET_EFFECT = "FIXTURE_LOCAL_LEDGER_RESET_ONLY" as const;
 
 export type CredentialExecutionGateState =
   | "ACTIVE"
@@ -778,6 +779,80 @@ function cleanupEvidenceDigest(
   });
 }
 
+function cleanupTombstoneDigest(
+  evidenceHash: string,
+  operation: string,
+  generation: number,
+): string {
+  return deterministicDigest("oxrail-credential-cleanup-tombstone-v1", {
+    cleanupEvidenceDigest: cleanupEvidenceDigest(
+      evidenceHash,
+      operation,
+      generation,
+    ),
+    operationDigest: operation,
+  });
+}
+
+function fixtureResetMarker(
+  operation: string,
+  generation: number,
+  expiresAt: number,
+  outcome: "ABORTED" | "ACTIVATED",
+): string {
+  return deterministicDigest(
+    "oxrail-credential-fixture-local-ledger-reset-v1",
+    {
+      effect: FIXTURE_RESET_EFFECT,
+      expiresAt,
+      generation,
+      operationDigest: operation,
+      outcome,
+    },
+  );
+}
+
+function credentialFixtureCleanupState(
+  current: PersistedGate,
+  parsed: ReturnType<typeof credentialExecutionBinding>,
+  generation: number,
+): "BLOCKED" | "OPEN" {
+  if (
+    current.generation !== generation ||
+    current.expiresAt !== parsed.ticket.handoff.expiresAt ||
+    current.createdAt < parsed.ticket.issuedAt ||
+    current.createdAt > parsed.ticket.handoff.expiresAt
+  ) {
+    throw new CredentialExecutionGateError("INVALID_TRANSITION");
+  }
+  if (current.state === "OPEN") {
+    if (
+      current.outcome === "NONE" ||
+      current.operationDigest !==
+        cleanupTombstoneDigest(
+          fixtureResetMarker(
+            parsed.digest,
+            generation,
+            parsed.ticket.handoff.expiresAt,
+            current.outcome,
+          ),
+          parsed.digest,
+          generation,
+        )
+    ) {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    return "OPEN";
+  }
+  if (
+    current.operationDigest !== parsed.digest ||
+    !["ACTIVE", "CLEANUP_PENDING", "PREPARING"].includes(current.state)
+  ) {
+    throw new CredentialExecutionGateError("INVALID_TRANSITION");
+  }
+  return "BLOCKED";
+}
+
 function validateTransition(
   root: string,
   event: CredentialExecutionGateEvent,
@@ -831,14 +906,6 @@ async function applyCredentialExecutionGateTransition(
           digest,
           event.generation,
         );
-  const suppliedCleanupEvidence =
-    event.kind === "FINISH_CLEANUP"
-      ? cleanupEvidenceDigest(
-          event.cleanupEvidenceHash,
-          digest,
-          event.generation,
-        )
-      : null;
   const resultingReceipt =
     event.kind === "ACTIVATE" || event.kind === "ABORT_PREPARING"
       ? suppliedQuiescenceReceipt
@@ -855,10 +922,11 @@ async function applyCredentialExecutionGateTransition(
           : current.outcome;
   const resultingOperation =
     event.kind === "FINISH_CLEANUP"
-      ? deterministicDigest("oxrail-credential-cleanup-tombstone-v1", {
-          cleanupEvidenceDigest: suppliedCleanupEvidence,
-          operationDigest: digest,
-        })
+      ? cleanupTombstoneDigest(
+          event.cleanupEvidenceHash,
+          digest,
+          event.generation,
+        )
       : digest;
   if (
     current.state === target &&
@@ -946,8 +1014,9 @@ async function withCredentialExecutionGateFileLock<Result>(
 }
 
 /**
- * Package-internal read used only while the coordinator holds the global fence
- * and the matching Handoff task lock; it also recovers a dead gate file lock.
+ * Package-internal read used only while the coordinator holds the global
+ * credential fence. Callers coupling Handoff state also hold its task lock.
+ * The read recovers a dead gate file lock.
  */
 export async function readCredentialExecutionGateLocked(
   root: string,
@@ -1060,6 +1129,120 @@ export async function activateCredentialExecutionGateLocked(
     }
     return observedAt;
   });
+}
+
+/**
+ * Package-internal reset for the no-external-effects fixture only. The caller
+ * must hold the global credential fence mutex. Its marker is not cleanup
+ * evidence, Host verification, credential authority, or permission to resume.
+ */
+export async function cleanupCredentialExecutionGateLocked(
+  root: string,
+  binding: FixtureCredentialExecutionBinding,
+  generation: number,
+): Promise<"ALREADY_OPEN" | "OPENED"> {
+  if (!root || !Number.isSafeInteger(generation) || generation <= 0) {
+    throw new CredentialExecutionGateError("INVALID_INPUT");
+  }
+  const parsed = credentialExecutionBinding(binding);
+  return withCredentialExecutionGateFileLock(root, async (current) => {
+    if (credentialFixtureCleanupState(current, parsed, generation) === "OPEN") {
+      return "ALREADY_OPEN";
+    }
+    const outcome = current.state === "PREPARING" ? "ABORTED" : current.outcome;
+    if (outcome === "NONE") {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    const resetMarker = fixtureResetMarker(
+      parsed.digest,
+      generation,
+      parsed.ticket.handoff.expiresAt,
+      outcome,
+    );
+    const transitionAt = Date.now();
+    if (
+      !Number.isSafeInteger(transitionAt) ||
+      transitionAt < current.updatedAt
+    ) {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+
+    let cleanupPending = current;
+    if (current.state === "PREPARING") {
+      const abort = {
+        binding,
+        generation,
+        kind: "ABORT_PREPARING",
+        observedAt: transitionAt,
+        quiescenceReceiptHash: deterministicDigest(
+          "oxrail-credential-fixture-reset-abort-intent-v1",
+          { resetMarker },
+        ),
+      } as const;
+      const result = await applyCredentialExecutionGateTransition(
+        root,
+        abort,
+        current,
+        validateTransition(root, abort),
+      );
+      if (result !== "APPLIED") {
+        throw new CredentialExecutionGateError("INVALID_TRANSITION");
+      }
+      cleanupPending = await readCurrent(gatePath(root, CURRENT));
+    } else if (current.state === "ACTIVE") {
+      cleanupPending = {
+        ...current,
+        state: "CLEANUP_PENDING",
+        updatedAt: transitionAt,
+      };
+      await atomicWrite(
+        gateDirectory(root),
+        gatePath(root, CURRENT),
+        serializeCurrent(cleanupPending),
+        true,
+      );
+    }
+
+    const openedAt = Date.now();
+    if (
+      !Number.isSafeInteger(openedAt) ||
+      openedAt < cleanupPending.updatedAt
+    ) {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    const finish = {
+      binding,
+      cleanupEvidenceHash: resetMarker,
+      generation,
+      kind: "FINISH_CLEANUP",
+      observedAt: openedAt,
+    } as const;
+    const result = await applyCredentialExecutionGateTransition(
+      root,
+      finish,
+      cleanupPending,
+      validateTransition(root, finish),
+    );
+    if (result !== "APPLIED") {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    return "OPENED";
+  });
+}
+
+/** Package-internal, read-only reconciliation after a cleanup error. */
+export async function confirmCredentialExecutionGateCleanupLocked(
+  root: string,
+  binding: FixtureCredentialExecutionBinding,
+  generation: number,
+): Promise<"BLOCKED" | "OPEN"> {
+  if (!root || !Number.isSafeInteger(generation) || generation <= 0) {
+    throw new CredentialExecutionGateError("INVALID_INPUT");
+  }
+  const parsed = credentialExecutionBinding(binding);
+  return withCredentialExecutionGateFileLock(root, async (current) =>
+    credentialFixtureCleanupState(current, parsed, generation),
+  );
 }
 
 export async function transitionCredentialExecutionGate(

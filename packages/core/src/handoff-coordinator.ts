@@ -32,13 +32,18 @@ import {
 } from "./credential-admission.js";
 import {
   activateCredentialExecutionGateLocked,
+  cleanupCredentialExecutionGateLocked,
+  confirmCredentialExecutionGateCleanupLocked,
   credentialExecutionBinding,
   prepareCredentialExecutionGateLocked,
   readCredentialExecutionGate,
   readCredentialExecutionGateLocked,
   type FixtureCredentialExecutionBinding,
 } from "./credential-execution-gate.js";
-import { observeCredentialToolFenceLocked } from "./credential-tool-fence.js";
+import {
+  observeCredentialToolFenceCleanupLocked,
+  observeCredentialToolFenceLocked,
+} from "./credential-tool-fence.js";
 import { withCredentialToolFenceLock } from "./credential-tool-fence-lock.js";
 import {
   evaluateCompletionCandidate,
@@ -222,6 +227,11 @@ export interface CredentialInputAttemptPreparationInput {
   trustRootHash: string;
 }
 
+export interface CredentialFixtureGateCleanupInput {
+  binding: FixtureCredentialExecutionBinding;
+  generation: number;
+}
+
 type CredentialInputAttemptPreparationBase = {
   activation: "INACTIVE";
   authority: "FIXTURE_ONLY_NON_AUTHORIZING";
@@ -297,6 +307,29 @@ export type CredentialFixtureGateCommitResult =
     })
   | (CredentialFixtureGateCommitBase & {
       kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY";
+    });
+
+type CredentialFixtureGateCleanupBase = {
+  activation: "INACTIVE";
+  agentResume: "NOT_AUTHORIZED";
+  authorization: "NOT_AUTHORIZED";
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  credentialInputLease: "NOT_ESTABLISHED";
+  credentialProtection: "INACTIVE";
+  externalCleanup: "NOT_VERIFIED";
+  hostSuspension: "UNVERIFIED";
+};
+
+export type CredentialFixtureGateCleanupResult =
+  | (CredentialFixtureGateCleanupBase & {
+      gate: "OPEN";
+      generation: number;
+      kind:
+        | "FIXTURE_GATE_ALREADY_OPEN_NON_AUTHORIZING"
+        | "FIXTURE_GATE_OPENED_NON_AUTHORIZING";
+    })
+  | (CredentialFixtureGateCleanupBase & {
+      kind: "FAILED_SAFE" | "WAITING_FOR_NATIVE";
     });
 
 export type HandoffCompletionAdmissionResult = {
@@ -1056,6 +1089,39 @@ const credentialFixtureGateCommitResult = (
   authority: "FIXTURE_ONLY_NON_AUTHORIZING",
   credentialInputLease: "NOT_ESTABLISHED",
   credentialProtection: "INACTIVE",
+  hostSuspension: "UNVERIFIED",
+  kind,
+});
+
+const credentialFixtureGateCleanupResult = (
+  kind: "FAILED_SAFE" | "WAITING_FOR_NATIVE",
+): CredentialFixtureGateCleanupResult => ({
+  activation: "INACTIVE",
+  agentResume: "NOT_AUTHORIZED",
+  authorization: "NOT_AUTHORIZED",
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+  credentialInputLease: "NOT_ESTABLISHED",
+  credentialProtection: "INACTIVE",
+  externalCleanup: "NOT_VERIFIED",
+  hostSuspension: "UNVERIFIED",
+  kind,
+});
+
+const credentialFixtureGateOpenResult = (
+  kind:
+    | "FIXTURE_GATE_ALREADY_OPEN_NON_AUTHORIZING"
+    | "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+  generation: number,
+): CredentialFixtureGateCleanupResult => ({
+  activation: "INACTIVE",
+  agentResume: "NOT_AUTHORIZED",
+  authorization: "NOT_AUTHORIZED",
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+  credentialInputLease: "NOT_ESTABLISHED",
+  credentialProtection: "INACTIVE",
+  externalCleanup: "NOT_VERIFIED",
+  gate: "OPEN",
+  generation,
   hostSuspension: "UNVERIFIED",
   kind,
 });
@@ -2064,7 +2130,8 @@ export async function observePreparedCredentialHostSuspension(
  * fixture blocking-ledger fact after the final locked snapshot. It is mutually
  * exclusive with observePreparedCredentialHostSuspension and does not establish
  * Host suspension, authorization, a credential-input lease, or presentation.
- * No product adapter may call this until a bounded cleanup/recovery API exists.
+ * No product adapter may call this until authenticated Host/enclave cleanup and
+ * G15 exist; cleanupCredentialFixtureGate does not satisfy that requirement.
  */
 export async function commitPreparedCredentialFixtureGate(
   credentialFenceRoot: string,
@@ -2079,6 +2146,98 @@ export async function commitPreparedCredentialFixtureGate(
     observeHostSuspension,
     "COMMIT_FIXTURE_GATE",
   );
+}
+
+/**
+ * Reclaims only the local fixture blocking ledger. No external cleanup is
+ * observed, so this never authorizes Agent resume or product credential use.
+ * Product adapters must use a future authenticated Host/enclave cleanup path.
+ */
+export async function cleanupCredentialFixtureGate(
+  credentialFenceRoot: string,
+  value: CredentialFixtureGateCleanupInput,
+): Promise<CredentialFixtureGateCleanupResult> {
+  let input: CredentialFixtureGateCleanupInput;
+  let operation: ReturnType<typeof credentialExecutionBinding>;
+  try {
+    if (!credentialFenceRoot) {
+      return credentialFixtureGateCleanupResult("FAILED_SAFE");
+    }
+    const candidate: unknown = structuredClone(value);
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      Object.keys(candidate).sort().join(",") !== "binding,generation"
+    ) {
+      return credentialFixtureGateCleanupResult("FAILED_SAFE");
+    }
+    input = candidate as CredentialFixtureGateCleanupInput;
+    if (!Number.isSafeInteger(input.generation) || input.generation <= 0) {
+      return credentialFixtureGateCleanupResult("FAILED_SAFE");
+    }
+    operation = credentialExecutionBinding(input.binding);
+  } catch {
+    return credentialFixtureGateCleanupResult("FAILED_SAFE");
+  }
+
+  try {
+    return await withCredentialToolFenceLock(credentialFenceRoot, async () => {
+      const gate = await readCredentialExecutionGateLocked(credentialFenceRoot);
+      if (gate.generation !== input.generation) {
+        return credentialFixtureGateCleanupResult("FAILED_SAFE");
+      }
+      if (gate.state !== "OPEN") {
+        if (
+          gate.operationDigest !== operation.digest ||
+          gate.expiresAt !== operation.ticket.handoff.expiresAt
+        ) {
+          return credentialFixtureGateCleanupResult("FAILED_SAFE");
+        }
+        const toolFence = await observeCredentialToolFenceCleanupLocked(
+          credentialFenceRoot,
+          gate,
+        );
+        if (toolFence.kind === "PENDING") {
+          return credentialFixtureGateCleanupResult("WAITING_FOR_NATIVE");
+        }
+        if (toolFence.kind !== "QUIESCENT") {
+          return credentialFixtureGateCleanupResult("FAILED_SAFE");
+        }
+      }
+
+      const cleaned = await cleanupCredentialExecutionGateLocked(
+        credentialFenceRoot,
+        input.binding,
+        input.generation,
+      );
+      return credentialFixtureGateOpenResult(
+        cleaned === "ALREADY_OPEN"
+          ? "FIXTURE_GATE_ALREADY_OPEN_NON_AUTHORIZING"
+          : "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+        input.generation,
+      );
+    });
+  } catch {
+    try {
+      const state = await withCredentialToolFenceLock(credentialFenceRoot, () =>
+        confirmCredentialExecutionGateCleanupLocked(
+          credentialFenceRoot,
+          input.binding,
+          input.generation,
+        ),
+      );
+      if (state === "OPEN") {
+        return credentialFixtureGateOpenResult(
+          "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+          input.generation,
+        );
+      }
+    } catch {
+      // The exact tombstone could not be proven; keep every authority inactive.
+    }
+    return credentialFixtureGateCleanupResult("FAILED_SAFE");
+  }
 }
 
 /**

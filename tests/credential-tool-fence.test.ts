@@ -11,14 +11,18 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as core from "../packages/core/src/index.js";
 import * as executionGate from "../packages/core/src/credential-execution-gate.js";
 import * as toolCallJournal from "../packages/core/src/tool-call.js";
 import {
   credentialToolFencePost,
   credentialToolFencePre,
+  observeCredentialToolFenceCleanupLocked,
+  observeCredentialToolFenceLocked,
   readCredentialToolFenceQuiescence,
   type CredentialToolFenceCall,
 } from "../packages/core/src/credential-tool-fence.js";
+import { withCredentialToolFenceLock } from "../packages/core/src/credential-tool-fence-lock.js";
 
 const canary = "oxrail_secret_canary_must_not_persist";
 const hash = (character: string) => character.repeat(64);
@@ -31,6 +35,14 @@ async function makeRoot(): Promise<string> {
 }
 
 async function setPreparing(root: string, updatedAt = 2): Promise<void> {
+  return setGateState(root, "PREPARING", updatedAt);
+}
+
+async function setGateState(
+  root: string,
+  state: "ACTIVE" | "CLEANUP_PENDING" | "PREPARING",
+  updatedAt = 2,
+): Promise<void> {
   await writeFile(
     path.join(root, "credential-execution-gate", "current.json"),
     `${JSON.stringify({
@@ -40,10 +52,10 @@ async function setPreparing(root: string, updatedAt = 2): Promise<void> {
       expiresAt: 100,
       generation: 1,
       operationDigest: hash("a"),
-      outcome: "NONE",
-      receiptDigest: null,
+      outcome: state === "PREPARING" ? "NONE" : "ACTIVATED",
+      receiptDigest: state === "PREPARING" ? null : hash("b"),
       schemaVersion: 1,
-      state: "PREPARING",
+      state,
       updatedAt,
     })}\n`,
   );
@@ -70,6 +82,12 @@ afterEach(async () => {
 });
 
 describe("credential tool fence", () => {
+  it("keeps the cleanup observation off the public barrel", () => {
+    expect(Object.hasOwn(core, "observeCredentialToolFenceCleanupLocked")).toBe(
+      false,
+    );
+  });
+
   it("bypasses without explicit fixture initialization and creates no state", async () => {
     const root = await makeRoot();
     const call = { sessionId: "session", toolUseId: "call" };
@@ -303,5 +321,156 @@ describe("credential tool fence", () => {
     await expect(readCredentialToolFenceQuiescence(root)).resolves.toBe(
       "UNKNOWN",
     );
+  });
+
+  it.each(["PREPARING", "ACTIVE", "CLEANUP_PENDING"] as const)(
+    "proves an empty %s cleanup snapshot without changing PREPARING observation semantics",
+    async (state) => {
+      const root = await makeRoot();
+      await executionGate.initializeCredentialExecutionGate(root, 1);
+      await setGateState(root, state);
+      const expected = await executionGate.readCredentialExecutionGate(root);
+
+      await expect(
+        withCredentialToolFenceLock(root, () =>
+          observeCredentialToolFenceCleanupLocked(root, expected),
+        ),
+      ).resolves.toMatchObject({
+        kind: "QUIESCENT",
+        snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      });
+      if (state !== "PREPARING") {
+        await expect(
+          withCredentialToolFenceLock(root, () =>
+            observeCredentialToolFenceLocked(root, expected),
+          ),
+        ).resolves.toEqual({ kind: "UNKNOWN" });
+        await expect(readCredentialToolFenceQuiescence(root)).resolves.toBe(
+          "UNKNOWN",
+        );
+      }
+    },
+  );
+
+  it("sweeps only a durable completed Post before reporting cleanup quiescence", async () => {
+    const root = await makeRoot();
+    await executionGate.initializeCredentialExecutionGate(root, 1);
+    const call = {
+      sessionId: "completed-session",
+      toolUseId: "completed-call",
+    };
+    await expect(credentialToolFencePre(root, call)).resolves.toBe(
+      "NO_LEDGER_BLOCK_TRACKED",
+    );
+    const retirement = vi
+      .spyOn(toolCallJournal, "retireCompletedToolCall")
+      .mockResolvedValue("UNAVAILABLE");
+    await expect(credentialToolFencePost(root, call)).resolves.toBe("UNKNOWN");
+    retirement.mockRestore();
+    await setGateState(root, "CLEANUP_PENDING");
+    const expected = await executionGate.readCredentialExecutionGate(root);
+    const sweep = vi.spyOn(toolCallJournal, "retireCompletedToolCalls");
+
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        observeCredentialToolFenceCleanupLocked(root, expected),
+      ),
+    ).resolves.toMatchObject({ kind: "QUIESCENT" });
+    expect(sweep).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a real pending call pending until its Post arrives", async () => {
+    const root = await makeRoot();
+    await executionGate.initializeCredentialExecutionGate(root, 1);
+    const call = { sessionId: "pending-session", toolUseId: "pending-call" };
+    await expect(credentialToolFencePre(root, call)).resolves.toBe(
+      "NO_LEDGER_BLOCK_TRACKED",
+    );
+    await setGateState(root, "CLEANUP_PENDING");
+    const expected = await executionGate.readCredentialExecutionGate(root);
+
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        observeCredentialToolFenceCleanupLocked(root, expected),
+      ),
+    ).resolves.toEqual({ kind: "PENDING" });
+    await expect(credentialToolFencePost(root, call)).resolves.toBe(
+      "COMPLETED",
+    );
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        observeCredentialToolFenceCleanupLocked(root, expected),
+      ),
+    ).resolves.toMatchObject({ kind: "QUIESCENT" });
+  });
+
+  it.each([
+    [
+      "legacy pending",
+      {
+        completedToolUseIds: [],
+        kind: "KNOWN" as const,
+        legacyPending: true,
+        pendingToolUseIds: [],
+      },
+      1,
+      "PENDING",
+    ],
+    ["unknown journal", { kind: "UNKNOWN" as const }, 0, "UNKNOWN"],
+    [
+      "unknown physical count",
+      {
+        completedToolUseIds: [],
+        kind: "KNOWN" as const,
+        legacyPending: false,
+        pendingToolUseIds: [],
+      },
+      "UNKNOWN",
+      "UNKNOWN",
+    ],
+  ] as const)(
+    "reports %s conservatively",
+    async (_label, journal, physicalCount, result) => {
+      const root = await makeRoot();
+      await executionGate.initializeCredentialExecutionGate(root, 1);
+      await setGateState(root, "CLEANUP_PENDING");
+      const expected = await executionGate.readCredentialExecutionGate(root);
+      vi.spyOn(toolCallJournal, "inspectToolCallJournal").mockResolvedValue(
+        journal.kind === "KNOWN"
+          ? {
+              ...journal,
+              completedToolUseIds: [...journal.completedToolUseIds],
+              pendingToolUseIds: [...journal.pendingToolUseIds],
+            }
+          : journal,
+      );
+      vi.spyOn(toolCallJournal, "countActiveToolCalls").mockResolvedValue(
+        physicalCount,
+      );
+
+      await expect(
+        withCredentialToolFenceLock(root, () =>
+          observeCredentialToolFenceCleanupLocked(root, expected),
+        ),
+      ).resolves.toEqual({ kind: result });
+    },
+  );
+
+  it("reports UNKNOWN if the cleanup gate snapshot drifts during the bounded scan", async () => {
+    const root = await makeRoot();
+    await executionGate.initializeCredentialExecutionGate(root, 1);
+    await setGateState(root, "CLEANUP_PENDING");
+    const expected = await executionGate.readCredentialExecutionGate(root);
+    if (expected.kind !== "KNOWN") throw new Error("expected known gate");
+    const changed = { ...expected, updatedAt: expected.updatedAt + 1 };
+    vi.spyOn(executionGate, "readCredentialExecutionGate")
+      .mockResolvedValueOnce(expected)
+      .mockResolvedValueOnce(changed);
+
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        observeCredentialToolFenceCleanupLocked(root, expected),
+      ),
+    ).resolves.toEqual({ kind: "UNKNOWN" });
   });
 });

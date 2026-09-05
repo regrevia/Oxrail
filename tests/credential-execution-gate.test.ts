@@ -24,6 +24,7 @@ import * as toolCallJournal from "../packages/core/src/tool-call.js";
 
 import {
   activateCredentialExecutionGateLocked,
+  cleanupCredentialExecutionGateLocked,
   CredentialExecutionGateError,
   compareCredentialExecutionGates,
   credentialExecutionGateBlockStatus,
@@ -328,6 +329,115 @@ describe("credential execution gate", () => {
     await expect(readCredentialExecutionGate(afterCommit)).resolves.toEqual(
       expect.objectContaining({ state: "ACTIVE" }),
     );
+  });
+
+  it("opens PREPARING, ACTIVE, and CLEANUP_PENDING fixture gates and replays its exact tombstone", async () => {
+    const preparing = await initializedRoot();
+    const active = await initializedRoot();
+    const cleanupPending = await initializedRoot();
+    await transitionCredentialExecutionGate(preparing, event("PREPARE", 1, 20));
+    for (const root of [active, cleanupPending]) {
+      await transitionCredentialExecutionGate(root, event("PREPARE", 1, 20));
+      await transitionCredentialExecutionGate(root, event("ACTIVATE", 1, 30));
+    }
+    await transitionCredentialExecutionGate(
+      cleanupPending,
+      event("BEGIN_CLEANUP", 1, 40),
+    );
+
+    for (const [root, outcome] of [
+      [preparing, "ABORTED"],
+      [active, "ACTIVATED"],
+      [cleanupPending, "ACTIVATED"],
+    ] as const) {
+      await expect(
+        withCredentialToolFenceLock(root, () =>
+          cleanupCredentialExecutionGateLocked(root, binding, 1),
+        ),
+      ).resolves.toBe("OPENED");
+      await expect(readCredentialExecutionGate(root)).resolves.toMatchObject({
+        generation: 1,
+        kind: "KNOWN",
+        outcome,
+        receiptDigest: null,
+        state: "OPEN",
+      });
+      await expect(
+        withCredentialToolFenceLock(root, () =>
+          cleanupCredentialExecutionGateLocked(root, binding, 1),
+        ),
+      ).resolves.toBe("ALREADY_OPEN");
+    }
+
+    const foreignTombstone = await initializedRoot();
+    await transitionCredentialExecutionGate(
+      foreignTombstone,
+      event("PREPARE", 1, 20),
+    );
+    await transitionCredentialExecutionGate(
+      foreignTombstone,
+      event("ABORT_PREPARING", 1, 30),
+    );
+    await transitionCredentialExecutionGate(
+      foreignTombstone,
+      event("FINISH_CLEANUP", 1, 40),
+    );
+    await expect(
+      withCredentialToolFenceLock(foreignTombstone, () =>
+        cleanupCredentialExecutionGateLocked(foreignTombstone, binding, 1),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+  });
+
+  it("rejects stale fixture cleanup bindings and generations without mutation", async () => {
+    const root = await initializedRoot();
+    await transitionCredentialExecutionGate(root, event("PREPARE", 1, 20));
+    const before = await readCredentialExecutionGate(root);
+
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        cleanupCredentialExecutionGateLocked(
+          root,
+          { ...binding, trustRootHash: hash("9") },
+          1,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        cleanupCredentialExecutionGateLocked(root, binding, 2),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(readCredentialExecutionGate(root)).resolves.toEqual(before);
+  });
+
+  it("leaves CLEANUP_PENDING when the wall clock rolls back before OPEN", async () => {
+    const root = await initializedRoot();
+    await transitionCredentialExecutionGate(root, event("PREPARE", 1, 20));
+    await transitionCredentialExecutionGate(root, event("ACTIVATE", 1, 30));
+    const active = await readCredentialExecutionGate(root);
+    if (active.kind !== "KNOWN" || active.receiptDigest === null) {
+      throw new Error("expected ACTIVE receipt");
+    }
+    vi.spyOn(Date, "now")
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(40)
+      .mockReturnValueOnce(39);
+
+    await expect(
+      withCredentialToolFenceLock(root, () =>
+        cleanupCredentialExecutionGateLocked(root, binding, 1),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(readCredentialExecutionGate(root)).resolves.toMatchObject({
+      generation: 1,
+      kind: "KNOWN",
+      outcome: "ACTIVATED",
+      receiptDigest: active.receiptDigest,
+      state: "CLEANUP_PENDING",
+      updatedAt: 40,
+    });
   });
 
   it("serializes PREPARE behind an in-flight global Pre registration", async () => {

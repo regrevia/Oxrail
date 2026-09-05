@@ -8,8 +8,10 @@ import * as core from "../packages/core/src/index.js";
 import * as executionGate from "../packages/core/src/credential-execution-gate.js";
 import {
   activatePreparedHandoff,
+  cleanupCredentialFixtureGate,
   commitPreparedCredentialFixtureGate,
   createBrowserTaskState,
+  credentialToolFencePost,
   credentialToolFencePre,
   handoffScopeBindingHash,
   initializeCredentialExecutionGate,
@@ -233,9 +235,31 @@ describe("credential Host suspension observation", () => {
     expect(Object.hasOwn(core, "readCredentialExecutionGateLocked")).toBe(
       false,
     );
+    expect(Object.hasOwn(core, "cleanupCredentialExecutionGateLocked")).toBe(
+      false,
+    );
+    expect(
+      Object.hasOwn(core, "confirmCredentialExecutionGateCleanupLocked"),
+    ).toBe(false);
+    expect(Object.hasOwn(core, "observeCredentialToolFenceCleanupLocked")).toBe(
+      false,
+    );
     expect(Object.hasOwn(core, "transitionCredentialExecutionGate")).toBe(
       false,
     );
+  });
+
+  it("keeps fixture commit and cleanup disconnected from product adapters", async () => {
+    const productSources = await Promise.all(
+      [
+        "native/macos/Sources",
+        "packages/handoff-extension/src",
+        "packages/host-openai/src",
+      ].map((directory) => allFiles(path.join(process.cwd(), directory))),
+    );
+    const serialized = JSON.stringify(productSources);
+    expect(serialized).not.toContain("commitPreparedCredentialFixtureGate");
+    expect(serialized).not.toContain("cleanupCredentialFixtureGate");
   });
 
   it("matches one exact receipt without activating or exposing control identity", async () => {
@@ -570,6 +594,232 @@ describe("credential Host suspension observation", () => {
     await expect(
       readCredentialExecutionGate(afterCommit.credentialRoot),
     ).resolves.toMatchObject({ state: "ACTIVE" });
+  });
+
+  it("reclaims PREPARING without claiming external cleanup or Agent resume", async () => {
+    const value = await fixture();
+    const beforeHandoff = await allFiles(value.handoffRoot);
+    const result = await cleanupCredentialFixtureGate(value.credentialRoot, {
+      binding: value.binding,
+      generation: 1,
+    });
+
+    expect(result).toEqual({
+      activation: "INACTIVE",
+      agentResume: "NOT_AUTHORIZED",
+      authorization: "NOT_AUTHORIZED",
+      authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      credentialInputLease: "NOT_ESTABLISHED",
+      credentialProtection: "INACTIVE",
+      externalCleanup: "NOT_VERIFIED",
+      gate: "OPEN",
+      generation: 1,
+      hostSuspension: "UNVERIFIED",
+      kind: "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+    });
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({
+      generation: 1,
+      outcome: "ABORTED",
+      receiptDigest: null,
+      state: "OPEN",
+    });
+    expect(await allFiles(value.handoffRoot)).toEqual(beforeHandoff);
+  });
+
+  it("reclaims ACTIVE idempotently while preserving its non-authorizing outcome", async () => {
+    const value = await fixture();
+    const input = inputFor(value);
+    const committed = await commitPreparedCredentialFixtureGate(
+      value.credentialRoot,
+      value.handoffRoot,
+      input,
+      async (query) => wireReceiptFor(query),
+    );
+    expect(committed.kind).toBe("FIXTURE_GATE_COMMITTED_NON_AUTHORIZING");
+
+    const cleanupInput = { binding: value.binding, generation: 1 };
+    const opened = await cleanupCredentialFixtureGate(
+      value.credentialRoot,
+      cleanupInput,
+    );
+    const replay = await cleanupCredentialFixtureGate(
+      value.credentialRoot,
+      cleanupInput,
+    );
+    expect(opened).toMatchObject({
+      agentResume: "NOT_AUTHORIZED",
+      externalCleanup: "NOT_VERIFIED",
+      gate: "OPEN",
+      kind: "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+    });
+    expect(replay).toMatchObject({
+      agentResume: "NOT_AUTHORIZED",
+      externalCleanup: "NOT_VERIFIED",
+      gate: "OPEN",
+      kind: "FIXTURE_GATE_ALREADY_OPEN_NON_AUTHORIZING",
+    });
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({
+      generation: 1,
+      outcome: "ACTIVATED",
+      receiptDigest: null,
+      state: "OPEN",
+    });
+  });
+
+  it("confirms the exact OPEN tombstone after a post-commit cleanup error", async () => {
+    const value = await fixture();
+    const realCleanup = executionGate.cleanupCredentialExecutionGateLocked;
+    const cleanup = vi
+      .spyOn(executionGate, "cleanupCredentialExecutionGateLocked")
+      .mockImplementationOnce(async (root, binding, generation) => {
+        await realCleanup(root, binding, generation);
+        throw new Error("post-open uncertainty");
+      });
+
+    await expect(
+      cleanupCredentialFixtureGate(value.credentialRoot, {
+        binding: value.binding,
+        generation: 1,
+      }),
+    ).resolves.toMatchObject({
+      agentResume: "NOT_AUTHORIZED",
+      externalCleanup: "NOT_VERIFIED",
+      gate: "OPEN",
+      generation: 1,
+      kind: "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+    });
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({
+      generation: 1,
+      outcome: "ABORTED",
+      state: "OPEN",
+    });
+  });
+
+  it("rejects stale or caller-extended cleanup input without changing the gate", async () => {
+    const value = await fixture();
+    const before = await allFiles(value.credentialRoot);
+    const changedBinding = {
+      ...value.binding,
+      trustRootHash: "0".repeat(64),
+    };
+
+    for (const input of [
+      { binding: value.binding, generation: 2 },
+      { binding: changedBinding, generation: 1 },
+      { binding: value.binding, generation: 1, secret: canary },
+    ]) {
+      await expect(
+        cleanupCredentialFixtureGate(value.credentialRoot, input as never),
+      ).resolves.toMatchObject({
+        agentResume: "NOT_AUTHORIZED",
+        externalCleanup: "NOT_VERIFIED",
+        kind: "FAILED_SAFE",
+      });
+    }
+    expect(await allFiles(value.credentialRoot)).toEqual(before);
+  });
+
+  it("waits for a real Post before reopening a fixture generation", async () => {
+    const value = await fixture();
+    await executionGate.transitionCredentialExecutionGate(
+      value.credentialRoot,
+      {
+        binding: value.binding,
+        generation: 1,
+        kind: "ABORT_PREPARING",
+        observedAt: 2_001,
+        quiescenceReceiptHash: "a".repeat(64),
+      },
+    );
+    await executionGate.transitionCredentialExecutionGate(
+      value.credentialRoot,
+      {
+        binding: value.binding,
+        cleanupEvidenceHash: "b".repeat(64),
+        generation: 1,
+        kind: "FINISH_CLEANUP",
+        observedAt: 2_002,
+      },
+    );
+    const call = {
+      sessionId: "cleanup-pending-session",
+      toolUseId: "cleanup-pending-call",
+    };
+    await expect(
+      credentialToolFencePre(value.credentialRoot, call),
+    ).resolves.toBe("NO_LEDGER_BLOCK_TRACKED");
+    await executionGate.transitionCredentialExecutionGate(
+      value.credentialRoot,
+      {
+        binding: value.binding,
+        generation: 2,
+        kind: "PREPARE",
+        observedAt: 2_003,
+      },
+    );
+
+    await expect(
+      cleanupCredentialFixtureGate(value.credentialRoot, {
+        binding: value.binding,
+        generation: 2,
+      }),
+    ).resolves.toMatchObject({
+      agentResume: "NOT_AUTHORIZED",
+      kind: "WAITING_FOR_NATIVE",
+    });
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({ generation: 2, state: "PREPARING" });
+
+    await expect(
+      credentialToolFencePost(value.credentialRoot, call),
+    ).resolves.toBe("COMPLETED");
+    vi.mocked(Date.now).mockReturnValue(2_004);
+    await expect(
+      cleanupCredentialFixtureGate(value.credentialRoot, {
+        binding: value.binding,
+        generation: 2,
+      }),
+    ).resolves.toMatchObject({
+      gate: "OPEN",
+      kind: "FIXTURE_GATE_OPENED_NON_AUTHORIZING",
+    });
+  });
+
+  it("does not let an old cleanup touch a newer preparation generation", async () => {
+    const value = await fixture();
+    await expect(
+      cleanupCredentialFixtureGate(value.credentialRoot, {
+        binding: value.binding,
+        generation: 1,
+      }),
+    ).resolves.toMatchObject({ gate: "OPEN" });
+    await executionGate.transitionCredentialExecutionGate(
+      value.credentialRoot,
+      {
+        binding: value.binding,
+        generation: 2,
+        kind: "PREPARE",
+        observedAt: 2_001,
+      },
+    );
+
+    await expect(
+      cleanupCredentialFixtureGate(value.credentialRoot, {
+        binding: value.binding,
+        generation: 1,
+      }),
+    ).resolves.toMatchObject({ kind: "FAILED_SAFE" });
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({ generation: 2, state: "PREPARING" });
   });
 
   it.each([
