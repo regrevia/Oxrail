@@ -684,7 +684,7 @@ export type CredentialUseRegistryEntry = z.infer<
  * a future signed macOS verifier must mint the real enclave launch authority.
  */
 export const CredentialEnclaveTicketSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   authority: z.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
   ticketId: z.string().regex(/^oct1_[a-f0-9]{64}$/),
   credentialUseId: credentialRegistryId,
@@ -702,16 +702,10 @@ export const CredentialEnclaveTicketSchema = z.strictObject({
   registryManifestHash: hash,
   issuedAt: nonNegativeInt,
   handoff: z.strictObject({
-    handoffId: nonEmpty.max(4_096),
-    sessionId: nonEmpty.max(4_096),
-    taskId: nonEmpty.max(4_096),
-    tabId: nonNegativeInt,
-    topOrigin: canonicalHttpsOrigin,
-    documentBinding: nonEmpty.max(4_096),
+    activationAnchorHash: hash,
     leaseEpoch: positiveInt,
     acquiredAt: nonNegativeInt,
     expiresAt: nonNegativeInt,
-    bindingHash: hash,
   }),
 });
 export type CredentialEnclaveTicket = z.infer<

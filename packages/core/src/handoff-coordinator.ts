@@ -15,8 +15,14 @@ import {
   HandoffCurrentTabReceiptSchema,
   deterministicDigest,
   type BrowserTaskState,
+  type CredentialEnclaveTicket,
+  type CredentialUseRegistryEntry,
   type HandoffCurrentTabReceipt,
 } from "../../protocol/src/index.js";
+import {
+  bindCredentialIntentToActivationAnchor,
+  CredentialAdmissionError,
+} from "./credential-admission.js";
 import {
   evaluateCompletionCandidate,
   type CompletionCandidate,
@@ -38,6 +44,7 @@ import {
   transitionBrowserTaskStateWithRetry,
 } from "./store.js";
 import {
+  countActiveToolCalls,
   inspectToolCallJournal,
   retireCompletedToolCalls,
 } from "./tool-call.js";
@@ -682,6 +689,28 @@ function matchesActiveState(
   );
 }
 
+function matchesCredentialAdmissionState(
+  state: BrowserTaskState,
+  lease: HandoffLease,
+  host: HandoffHostBinding,
+): boolean {
+  return (
+    matchesActiveState(state, lease) &&
+    lease.state === "ACTIVE" &&
+    lease.holder === "USER" &&
+    state.hostProfileStatus === "VALID" &&
+    state.hostProfileId === host.profileId &&
+    state.sessionId === lease.scope.sessionId &&
+    state.taskId === lease.scope.taskId &&
+    state.currentOrigin === lease.scope.topOrigin &&
+    state.documentBinding !== undefined &&
+    canonicalPersistentDocumentBinding(state.documentBinding) ===
+      persistentDocumentBinding(lease.scope.documentBinding) &&
+    state.pendingNativeActionIds.length === 0 &&
+    state.handoffVerificationMarker === undefined
+  );
+}
+
 function matchesPreparedState(
   state: BrowserTaskState,
   lease: HandoffLease,
@@ -769,17 +798,28 @@ function matchesActiveCompletionBarrier(
   candidate: ReadyCompletionCandidate,
 ): boolean {
   return (
-    barrier.state === "ACTIVE" &&
+    matchesActiveLeaseBarrier(barrier, state, lease) &&
     barrier.leaseEpoch === candidate.lockedBinding.leaseEpoch &&
-    barrier.handoffId ===
-      persistentHandoffId(candidate.lockedBinding.handoffId) &&
+    barrier.handoffId === persistentHandoffId(candidate.lockedBinding.handoffId)
+  );
+}
+
+function matchesActiveLeaseBarrier(
+  barrier: PersistedHandoffBarrier,
+  state: BrowserTaskState,
+  lease: HandoffLease,
+): boolean {
+  return (
+    barrier.state === "ACTIVE" &&
+    barrier.leaseEpoch === lease.leaseEpoch &&
+    barrier.handoffId === persistentHandoffId(lease.handoffId) &&
     barrier.expiresAt === lease.expiresAt &&
     barrier.updatedAt === lease.acquiredAt &&
     barrier.hostProfileIdHash ===
       digest("oxrail-handoff-host-profile-id-v1", state.hostProfileId) &&
     sameHash(
       barrier.nonceDigest,
-      digest("oxrail-handoff-nonce-v1", candidate.lockedBinding.nonce),
+      digest("oxrail-handoff-nonce-v1", lease.nonce),
     ) &&
     sameHash(barrier.scopeDigest, handoffScopeBindingHash(lease.scope)) &&
     sameHash(barrier.taskBindingDigest, taskBindingDigest(lease.scope)) &&
@@ -788,6 +828,16 @@ function matchesActiveCompletionBarrier(
     barrier.tabBindingReceiptHash !== null
   );
 }
+
+const handoffActivationAnchorDigest = (barrier: PersistedHandoffBarrier) =>
+  deterministicDigest("oxrail-handoff-activation-anchor-v1", barrier);
+
+const credentialHandoffActivationAnchorHash = (
+  barrier: PersistedHandoffBarrier,
+) =>
+  deterministicDigest("oxrail-credential-handoff-activation-anchor-v1", {
+    handoffActivationAnchorDigest: handoffActivationAnchorDigest(barrier),
+  });
 
 function completionQuery(
   barrier: PersistedHandoffBarrier,
@@ -1073,6 +1123,68 @@ export async function activatePreparedHandoff(
 }
 
 /**
+ * Mints only a fixture ticket bound to the current locked Handoff activation.
+ * The anchor is not a current-tab receipt, credential lease, or launch authority.
+ */
+export async function admitCredentialIntent(
+  root: string,
+  value: unknown,
+  registry: readonly CredentialUseRegistryEntry[],
+  lease: HandoffLease,
+  host: HandoffHostBinding,
+  clock: () => number = Date.now,
+): Promise<CredentialEnclaveTicket> {
+  try {
+    const input = structuredClone({ host, lease, registry, value });
+    const issuedAt = clock();
+    if (!safeTaskScope(input.lease.scope)) {
+      throw new CredentialAdmissionError("INVALID_HANDOFF");
+    }
+    const expectedHost = persistedHostBinding(input.host);
+    return await transitionBrowserTaskState<CredentialEnclaveTicket>(
+      root,
+      input.lease.scope,
+      async (state) => {
+        const gate = await readHandoffGate(root, input.lease.scope);
+        const barrier = await readBarrier(
+          barrierPath(root, input.lease.scope, input.lease.leaseEpoch),
+        );
+        const activeToolCalls = await countActiveToolCalls(
+          root,
+          input.lease.scope,
+        );
+        if (
+          !state ||
+          !matchesCredentialAdmissionState(state, input.lease, input.host) ||
+          gate.kind !== "KNOWN" ||
+          gate.status !== "ACTIVE" ||
+          gate.generation !== input.lease.leaseEpoch ||
+          !matchesActiveLeaseBarrier(barrier, state, input.lease) ||
+          barrier.hostProfileBindingHash !==
+            expectedHost.hostProfileBindingHash ||
+          barrier.hostProfileIdHash !== expectedHost.hostProfileIdHash ||
+          activeToolCalls !== 0
+        ) {
+          throw new CredentialAdmissionError("INVALID_HANDOFF");
+        }
+        return {
+          value: bindCredentialIntentToActivationAnchor(
+            input.value,
+            input.registry,
+            input.lease,
+            issuedAt,
+            credentialHandoffActivationAnchorHash(barrier),
+          ),
+        };
+      },
+    );
+  } catch (error) {
+    if (error instanceof CredentialAdmissionError) throw error;
+    throw new CredentialAdmissionError("INVALID_HANDOFF");
+  }
+}
+
+/**
  * Evaluates and consumes one completion candidate under the same task lock.
  * This fixture foundation never releases the user lease or activates Handoff.
  */
@@ -1203,10 +1315,7 @@ export async function admitHandoffCompletionCandidate(
           return { value: completionResult("FAILED_SAFE") };
         }
 
-        const activationAnchorDigest = deterministicDigest(
-          "oxrail-handoff-activation-anchor-v1",
-          barrier,
-        );
+        const activationAnchorDigest = handoffActivationAnchorDigest(barrier);
         const query = Object.freeze(
           completionQuery(barrier, candidate, candidateDigest),
         );
@@ -1244,10 +1353,8 @@ export async function admitHandoffCompletionCandidate(
           finalGate.kind !== "KNOWN" ||
           finalGate.status !== "ACTIVE" ||
           finalGate.generation !== candidate.lockedBinding.leaseEpoch ||
-          deterministicDigest(
-            "oxrail-handoff-activation-anchor-v1",
-            finalBarrier,
-          ) !== activationAnchorDigest ||
+          handoffActivationAnchorDigest(finalBarrier) !==
+            activationAnchorDigest ||
           finalJournal.kind !== "KNOWN" ||
           finalJournal.legacyPending ||
           finalJournal.pendingToolUseIds.length > 0

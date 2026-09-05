@@ -12663,7 +12663,7 @@ var CredentialUseRegistryEntrySchema = external_exports.strictObject({
   registryManifestHash: hash3
 });
 var CredentialEnclaveTicketSchema = external_exports.strictObject({
-  schemaVersion: external_exports.literal(1),
+  schemaVersion: external_exports.literal(2),
   authority: external_exports.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
   ticketId: external_exports.string().regex(/^oct1_[a-f0-9]{64}$/),
   credentialUseId: credentialRegistryId,
@@ -12681,16 +12681,10 @@ var CredentialEnclaveTicketSchema = external_exports.strictObject({
   registryManifestHash: hash3,
   issuedAt: nonNegativeInt,
   handoff: external_exports.strictObject({
-    handoffId: nonEmpty.max(4096),
-    sessionId: nonEmpty.max(4096),
-    taskId: nonEmpty.max(4096),
-    tabId: nonNegativeInt,
-    topOrigin: canonicalHttpsOrigin,
-    documentBinding: nonEmpty.max(4096),
+    activationAnchorHash: hash3,
     leaseEpoch: positiveInt,
     acquiredAt: nonNegativeInt,
-    expiresAt: nonNegativeInt,
-    bindingHash: hash3
+    expiresAt: nonNegativeInt
   })
 });
 var opaqueCredentialRef = external_exports.string().regex(/^ocref1_[A-Za-z0-9_-]{43}$/, "expected an opaque credential ref");

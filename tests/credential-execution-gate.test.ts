@@ -37,7 +37,7 @@ import type { CredentialEnclaveTicket } from "../packages/protocol/src/index.js"
 const canary = "oxrail_api_key_canary_must_not_persist";
 const hash = (character: string) => character.repeat(64);
 const ticket: CredentialEnclaveTicket = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   authority: "FIXTURE_ONLY_NON_AUTHORIZING",
   ticketId: `oct1_${hash("1")}`,
   credentialUseId: "fixture.publish.api-key",
@@ -55,16 +55,10 @@ const ticket: CredentialEnclaveTicket = {
   registryManifestHash: hash("4"),
   issuedAt: 10,
   handoff: {
-    handoffId: canary,
-    sessionId: "session-binding",
-    taskId: "task-binding",
-    tabId: 42,
-    topOrigin: "https://credentials.example.test",
-    documentBinding: "document-binding",
+    activationAnchorHash: hash("5"),
     leaseEpoch: 1,
     acquiredAt: 5,
     expiresAt: 100,
-    bindingHash: hash("5"),
   },
 };
 const binding: FixtureCredentialExecutionBinding = {
@@ -415,6 +409,19 @@ describe("credential execution gate", () => {
   it("requires a bounded Host quiescence receipt and validates ticket time", async () => {
     const root = await initializedRoot();
     await expect(
+      transitionCredentialExecutionGate(
+        root,
+        event("PREPARE", 1, 20, {
+          ...binding,
+          ticket: { ...ticket, schemaVersion: 1 } as never,
+        }),
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<CredentialExecutionGateError>>({
+        code: "INVALID_INPUT",
+      }),
+    );
+    await expect(
       transitionCredentialExecutionGate(root, event("PREPARE", 1, 101)),
     ).rejects.toEqual(
       expect.objectContaining<Partial<CredentialExecutionGateError>>({
@@ -561,7 +568,7 @@ describe("credential execution gate", () => {
     expect(persisted).not.toContain(canary);
     expect(persisted).not.toContain(ticket.ticketId);
     expect(persisted).not.toContain(ticket.credentialUseId);
-    expect(persisted).not.toContain(ticket.handoff.bindingHash);
+    expect(persisted).not.toContain(ticket.handoff.activationAnchorHash);
   });
 
   it("fails closed for missing initialized state, corruption, and oversize data", async () => {

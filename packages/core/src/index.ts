@@ -1,5 +1,8 @@
 export * from "./cache.js";
-export * from "./credential-admission.js";
+export {
+  CredentialAdmissionError,
+  type CredentialAdmissionErrorCode,
+} from "./credential-admission.js";
 export * from "./credential-execution-gate.js";
 export * from "./credential-tool-fence.js";
 export * from "./handoff.js";

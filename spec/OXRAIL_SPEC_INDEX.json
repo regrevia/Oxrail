@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-04",
+  "generated_at": "2026-09-05",
   "canonical_file": "OXRAIL_SPEC.md",
-  "spec_version": "1.0.17",
-  "spec_sha256": "81076c67ea4f848312d60b8d8a229e5c8815ec3ddf2cafac4f335cb0ff632df3",
+  "spec_version": "1.0.18",
+  "spec_sha256": "19755a32f56f297a79b5766e44a8cff859c59a484ebe0165de17a8b049413e8d",
   "counts": {
     "sections": 51,
     "requirements": 125,
     "gates": 16,
     "kill_criteria": 33,
     "work_packages": 99,
-    "tests": 207,
+    "tests": 208,
     "evidence_ids": 20,
     "adrs": 1
   },
@@ -119,31 +119,31 @@
       "title": "Host Adapter、Host Profile 与 Capability Probe",
       "anchor": "sec-10",
       "start_line": 1908,
-      "end_line": 2386,
+      "end_line": 2388,
       "keywords": []
     },
     "SEC-11": {
       "number": 11,
       "title": "Skill 设计",
       "anchor": "sec-11",
-      "start_line": 2387,
-      "end_line": 2463,
+      "start_line": 2389,
+      "end_line": 2465,
       "keywords": []
     },
     "SEC-12": {
       "number": 12,
       "title": "Hook 设计",
       "anchor": "sec-12",
-      "start_line": 2464,
-      "end_line": 2788,
+      "start_line": 2466,
+      "end_line": 2790,
       "keywords": []
     },
     "SEC-13": {
       "number": 13,
       "title": "Oxrail Runtime 核心",
       "anchor": "sec-13",
-      "start_line": 2789,
-      "end_line": 2948,
+      "start_line": 2791,
+      "end_line": 2950,
       "keywords": [
         "runtime",
         "state",
@@ -155,8 +155,8 @@
       "number": 14,
       "title": "Scout：观察策略",
       "anchor": "sec-14",
-      "start_line": 2949,
-      "end_line": 3127,
+      "start_line": 2951,
+      "end_line": 3129,
       "keywords": [
         "observation-routing",
         "budget",
@@ -168,8 +168,8 @@
       "number": 15,
       "title": "Aim：目标检索与精准定位",
       "anchor": "sec-15",
-      "start_line": 3128,
-      "end_line": 3269,
+      "start_line": 3130,
+      "end_line": 3271,
       "keywords": [
         "target-resolution",
         "semantic-node",
@@ -181,8 +181,8 @@
       "number": 16,
       "title": "Rail：动作约束与稳定目标",
       "anchor": "sec-16",
-      "start_line": 3270,
-      "end_line": 3392,
+      "start_line": 3272,
+      "end_line": 3394,
       "keywords": [
         "action-guard",
         "target-validation",
@@ -195,8 +195,8 @@
       "number": 17,
       "title": "Whip：无效操作与死循环纠偏",
       "anchor": "sec-17",
-      "start_line": 3393,
-      "end_line": 3513,
+      "start_line": 3395,
+      "end_line": 3515,
       "keywords": [
         "progress",
         "stall",
@@ -208,8 +208,8 @@
       "number": 18,
       "title": "Recovery：确定性恢复阶梯",
       "anchor": "sec-18",
-      "start_line": 3514,
-      "end_line": 3598,
+      "start_line": 3516,
+      "end_line": 3600,
       "keywords": [
         "deterministic-recovery",
         "budget",
@@ -220,8 +220,8 @@
       "number": 19,
       "title": "Secure Micro-Handoff：不中断对话的安全微接管",
       "anchor": "sec-19",
-      "start_line": 3599,
-      "end_line": 4240,
+      "start_line": 3601,
+      "end_line": 4242,
       "keywords": [
         "secure-micro-handoff",
         "same-tab",
@@ -234,8 +234,8 @@
       "number": 20,
       "title": "认证、Cookie、MFA、OTP、CAPTCHA 与敏感操作",
       "anchor": "sec-20",
-      "start_line": 4241,
-      "end_line": 4421,
+      "start_line": 4243,
+      "end_line": 4423,
       "keywords": [
         "auth",
         "mfa",
@@ -249,8 +249,8 @@
       "number": 21,
       "title": "安全模型与不变量",
       "anchor": "sec-21",
-      "start_line": 4422,
-      "end_line": 4599,
+      "start_line": 4424,
+      "end_line": 4601,
       "keywords": [
         "trust-boundary",
         "secrets",
@@ -263,8 +263,8 @@
       "number": 22,
       "title": "Prompt Injection 与恶意页面模型",
       "anchor": "sec-22",
-      "start_line": 4600,
-      "end_line": 4675,
+      "start_line": 4602,
+      "end_line": 4677,
       "keywords": [
         "prompt-injection",
         "page-content",
@@ -275,8 +275,8 @@
       "number": 23,
       "title": "状态、协议与核心数据结构",
       "anchor": "sec-23",
-      "start_line": 4676,
-      "end_line": 4910,
+      "start_line": 4678,
+      "end_line": 4912,
       "keywords": [
         "schemas",
         "state-machine",
@@ -288,8 +288,8 @@
       "number": 24,
       "title": "模型可见 API 与内部 API",
       "anchor": "sec-24",
-      "start_line": 4911,
-      "end_line": 5024,
+      "start_line": 4913,
+      "end_line": 5026,
       "keywords": [
         "model-api",
         "mcp",
@@ -301,8 +301,8 @@
       "number": 25,
       "title": "Observer Bridge 决策与备选实现",
       "anchor": "sec-25",
-      "start_line": 5025,
-      "end_line": 5123,
+      "start_line": 5027,
+      "end_line": 5125,
       "keywords": [
         "observer-bridge",
         "native-first",
@@ -314,8 +314,8 @@
       "number": 26,
       "title": "缓存、增量与 WebMCP 路由",
       "anchor": "sec-26",
-      "start_line": 5124,
-      "end_line": 5221,
+      "start_line": 5126,
+      "end_line": 5223,
       "keywords": [
         "cache",
         "delta",
@@ -327,8 +327,8 @@
       "number": 27,
       "title": "配置、隐私与遥测",
       "anchor": "sec-27",
-      "start_line": 5222,
-      "end_line": 5350,
+      "start_line": 5224,
+      "end_line": 5352,
       "keywords": [
         "config",
         "privacy",
@@ -340,8 +340,8 @@
       "number": 28,
       "title": "Native Interaction Fidelity：原生交互保真",
       "anchor": "sec-28",
-      "start_line": 5351,
-      "end_line": 5646,
+      "start_line": 5353,
+      "end_line": 5648,
       "keywords": [
         "native-interaction-fidelity",
         "pointer",
@@ -356,8 +356,8 @@
       "number": 29,
       "title": "仓库目录结构",
       "anchor": "sec-29",
-      "start_line": 5647,
-      "end_line": 5790,
+      "start_line": 5649,
+      "end_line": 5792,
       "keywords": [
         "repository",
         "packages",
@@ -370,8 +370,8 @@
       "number": 30,
       "title": "技术栈与依赖原则",
       "anchor": "sec-30",
-      "start_line": 5791,
-      "end_line": 5847,
+      "start_line": 5793,
+      "end_line": 5849,
       "keywords": [
         "technology-stack",
         "dependencies",
@@ -382,8 +382,8 @@
       "number": 31,
       "title": "Benchmark 总体方法学",
       "anchor": "sec-31",
-      "start_line": 5848,
-      "end_line": 5986,
+      "start_line": 5850,
+      "end_line": 5988,
       "keywords": [
         "benchmark",
         "methodology",
@@ -396,8 +396,8 @@
       "number": 32,
       "title": "NativeInteractionBench",
       "anchor": "sec-32",
-      "start_line": 5987,
-      "end_line": 6100,
+      "start_line": 5989,
+      "end_line": 6102,
       "keywords": [
         "BENCH-NIF",
         "native-primitives",
@@ -409,8 +409,8 @@
       "number": 33,
       "title": "OxrailBench",
       "anchor": "sec-33",
-      "start_line": 6101,
-      "end_line": 6170,
+      "start_line": 6103,
+      "end_line": 6172,
       "keywords": [
         "oxrailbench",
         "retrieval",
@@ -423,8 +423,8 @@
       "number": 34,
       "title": "StallBench",
       "anchor": "sec-34",
-      "start_line": 6171,
-      "end_line": 6208,
+      "start_line": 6173,
+      "end_line": 6210,
       "keywords": [
         "stallbench",
         "whip",
@@ -436,8 +436,8 @@
       "number": 35,
       "title": "HandoffBench",
       "anchor": "sec-35",
-      "start_line": 6209,
-      "end_line": 6297,
+      "start_line": 6211,
+      "end_line": 6299,
       "keywords": [
         "handoffbench",
         "same-tab",
@@ -450,8 +450,8 @@
       "number": 36,
       "title": "SecretLeakBench",
       "anchor": "sec-36",
-      "start_line": 6298,
-      "end_line": 6381,
+      "start_line": 6300,
+      "end_line": 6384,
       "keywords": [
         "secretleakbench",
         "canary",
@@ -464,8 +464,8 @@
       "number": 37,
       "title": "Baseline、Ablation 与统计方法",
       "anchor": "sec-37",
-      "start_line": 6382,
-      "end_line": 6447,
+      "start_line": 6385,
+      "end_line": 6450,
       "keywords": [
         "baseline",
         "ablation",
@@ -477,8 +477,8 @@
       "number": 38,
       "title": "Trace、证据与实验可复现性",
       "anchor": "sec-38",
-      "start_line": 6448,
-      "end_line": 6545,
+      "start_line": 6451,
+      "end_line": 6548,
       "keywords": [
         "trace",
         "evidence",
@@ -491,8 +491,8 @@
       "number": 39,
       "title": "CI、Nightly 与 Release Gate",
       "anchor": "sec-39",
-      "start_line": 6546,
-      "end_line": 6647,
+      "start_line": 6549,
+      "end_line": 6650,
       "keywords": [
         "ci",
         "nightly",
@@ -504,8 +504,8 @@
       "number": 40,
       "title": "V0.0—V1.0 迭代路线与每版闭环",
       "anchor": "sec-40",
-      "start_line": 6648,
-      "end_line": 6866,
+      "start_line": 6651,
+      "end_line": 6869,
       "keywords": [
         "roadmap",
         "milestones",
@@ -518,8 +518,8 @@
       "number": 41,
       "title": "详细开发顺序与依赖图",
       "anchor": "sec-41",
-      "start_line": 6867,
-      "end_line": 6963,
+      "start_line": 6870,
+      "end_line": 6966,
       "keywords": [
         "development-order",
         "dependency-graph",
@@ -530,8 +530,8 @@
       "number": 42,
       "title": "风险清单与 Kill Criteria",
       "anchor": "sec-42",
-      "start_line": 6964,
-      "end_line": 7024,
+      "start_line": 6967,
+      "end_line": 7027,
       "keywords": [
         "risks",
         "kill-criteria",
@@ -543,8 +543,8 @@
       "number": 43,
       "title": "README 最终结构",
       "anchor": "sec-43",
-      "start_line": 7025,
-      "end_line": 7102,
+      "start_line": 7028,
+      "end_line": 7105,
       "keywords": [
         "readme",
         "claims",
@@ -556,8 +556,8 @@
       "number": 44,
       "title": "Logo / 图标设计 Brief",
       "anchor": "sec-44",
-      "start_line": 7103,
-      "end_line": 7137,
+      "start_line": 7106,
+      "end_line": 7140,
       "keywords": [
         "logo",
         "brand",
@@ -568,8 +568,8 @@
       "number": 45,
       "title": "项目不变量",
       "anchor": "sec-45",
-      "start_line": 7138,
-      "end_line": 7165,
+      "start_line": 7141,
+      "end_line": 7168,
       "keywords": [
         "invariants",
         "p0",
@@ -581,8 +581,8 @@
       "number": 46,
       "title": "最终验收场景",
       "anchor": "sec-46",
-      "start_line": 7166,
-      "end_line": 7263,
+      "start_line": 7169,
+      "end_line": 7266,
       "keywords": [
         "acceptance-scenarios",
         "end-to-end",
@@ -593,8 +593,8 @@
       "number": 47,
       "title": "交给审阅 Agent 的审阅规则",
       "anchor": "sec-47",
-      "start_line": 7264,
-      "end_line": 7317,
+      "start_line": 7267,
+      "end_line": 7320,
       "keywords": [
         "review-agent",
         "architecture-review",
@@ -605,8 +605,8 @@
       "number": 48,
       "title": "证据台账与参考资料",
       "anchor": "sec-48",
-      "start_line": 7318,
-      "end_line": 7396,
+      "start_line": 7321,
+      "end_line": 7399,
       "keywords": [
         "evidence-ledger",
         "references",
@@ -618,8 +618,8 @@
       "number": 49,
       "title": "V1.0 工作包任务单总账",
       "anchor": "sec-49",
-      "start_line": 7397,
-      "end_line": 11827,
+      "start_line": 7400,
+      "end_line": 11832,
       "keywords": [
         "work-packages",
         "task-ledger",
@@ -631,8 +631,8 @@
       "number": 50,
       "title": "文档实时维护、变更与归档协议",
       "anchor": "sec-50",
-      "start_line": 11828,
-      "end_line": 12157,
+      "start_line": 11833,
+      "end_line": 12168,
       "keywords": [
         "living-spec",
         "maintenance",
@@ -690,8 +690,8 @@
       ],
       "locations": [
         125,
-        7687,
-        8199
+        7690,
+        8202
       ]
     },
     "REQ-HOST-002": {
@@ -738,9 +738,9 @@
       ],
       "locations": [
         126,
-        7894,
-        10907,
-        11112
+        7897,
+        10912,
+        11117
       ]
     },
     "REQ-HOST-003": {
@@ -788,8 +788,8 @@
       ],
       "locations": [
         127,
-        7981,
-        8512
+        7984,
+        8515
       ]
     },
     "REQ-HOST-004": {
@@ -892,9 +892,9 @@
       ],
       "locations": [
         129,
-        8199,
-        10946,
-        11730
+        8202,
+        10951,
+        11735
       ]
     },
     "REQ-HOST-006": {
@@ -936,8 +936,8 @@
       ],
       "locations": [
         130,
-        10907,
-        11112
+        10912,
+        11117
       ]
     },
     "REQ-ACT-001": {
@@ -1008,7 +1008,7 @@
       ],
       "locations": [
         142,
-        8024
+        8027
       ]
     },
     "REQ-ACT-003": {
@@ -1044,7 +1044,7 @@
       ],
       "locations": [
         143,
-        8066
+        8069
       ]
     },
     "REQ-RES-001": {
@@ -1081,7 +1081,7 @@
       ],
       "locations": [
         144,
-        9107
+        9110
       ]
     },
     "REQ-RES-002": {
@@ -1186,8 +1186,8 @@
       ],
       "locations": [
         150,
-        8066,
-        8297
+        8069,
+        8300
       ]
     },
     "REQ-NIF-003": {
@@ -1222,7 +1222,7 @@
       ],
       "locations": [
         151,
-        8297
+        8300
       ]
     },
     "REQ-NIF-004": {
@@ -1262,7 +1262,7 @@
       ],
       "locations": [
         152,
-        9022
+        9025
       ]
     },
     "REQ-NIF-005": {
@@ -1295,7 +1295,7 @@
       ],
       "locations": [
         153,
-        8258
+        8261
       ]
     },
     "REQ-NIF-006": {
@@ -1342,8 +1342,8 @@
       ],
       "locations": [
         154,
-        8339,
-        9107
+        8342,
+        9110
       ]
     },
     "REQ-NIF-007": {
@@ -1379,7 +1379,7 @@
       ],
       "locations": [
         155,
-        8381
+        8384
       ]
     },
     "REQ-NIF-008": {
@@ -1423,8 +1423,8 @@
       ],
       "locations": [
         156,
-        8381,
-        9528
+        8384,
+        9531
       ]
     },
     "REQ-NIF-009": {
@@ -1461,7 +1461,7 @@
       ],
       "locations": [
         157,
-        9794
+        9797
       ]
     },
     "REQ-NIF-010": {
@@ -1490,8 +1490,8 @@
       ],
       "locations": [
         158,
-        8759,
-        11888
+        8762,
+        11893
       ]
     },
     "REQ-NIF-011": {
@@ -1587,8 +1587,8 @@
       ],
       "locations": [
         164,
-        8899,
-        10702
+        8902,
+        10707
       ]
     },
     "REQ-OBS-002": {
@@ -1623,7 +1623,7 @@
       ],
       "locations": [
         165,
-        9149
+        9152
       ]
     },
     "REQ-OBS-003": {
@@ -1661,7 +1661,7 @@
       ],
       "locations": [
         166,
-        8981
+        8984
       ]
     },
     "REQ-OBS-004": {
@@ -1702,8 +1702,8 @@
       ],
       "locations": [
         167,
-        8634,
-        9065
+        8637,
+        9068
       ]
     },
     "REQ-HO-001": {
@@ -1749,7 +1749,7 @@
       ],
       "locations": [
         171,
-        9528
+        9531
       ]
     },
     "REQ-HO-002": {
@@ -1790,8 +1790,8 @@
       ],
       "locations": [
         172,
-        3687,
-        9578
+        3689,
+        9581
       ]
     },
     "REQ-HO-003": {
@@ -1833,8 +1833,8 @@
       ],
       "locations": [
         173,
-        9528,
-        10010
+        9531,
+        10013
       ]
     },
     "REQ-HO-004": {
@@ -1876,8 +1876,8 @@
       "locations": [
         80,
         174,
-        9578,
-        9622
+        9581,
+        9625
       ]
     },
     "REQ-HO-005": {
@@ -1922,8 +1922,8 @@
       "locations": [
         110,
         175,
-        9664,
-        9750
+        9667,
+        9753
       ]
     },
     "REQ-HO-006": {
@@ -1960,8 +1960,8 @@
       ],
       "locations": [
         176,
-        9664,
-        9750
+        9667,
+        9753
       ]
     },
     "REQ-HO-007": {
@@ -2009,7 +2009,7 @@
       ],
       "locations": [
         177,
-        9837
+        9840
       ]
     },
     "REQ-HO-008": {
@@ -2048,7 +2048,7 @@
       ],
       "locations": [
         178,
-        9707
+        9710
       ]
     },
     "REQ-CRED-001": {
@@ -2065,8 +2065,8 @@
       ],
       "locations": [
         186,
-        10552,
-        12098
+        10555,
+        12109
       ]
     },
     "REQ-CRED-002": {
@@ -2080,11 +2080,12 @@
       "linked_tests": [
         "TEST-HO-016",
         "TEST-HO-017",
-        "TEST-HO-021"
+        "TEST-HO-021",
+        "TEST-SEC-122"
       ],
       "locations": [
         187,
-        10552
+        10555
       ]
     },
     "REQ-CRED-003": {
@@ -2101,7 +2102,7 @@
       ],
       "locations": [
         188,
-        10552
+        10555
       ]
     },
     "REQ-CRED-004": {
@@ -2121,7 +2122,7 @@
       "locations": [
         189,
         202,
-        10552
+        10555
       ]
     },
     "REQ-CRED-005": {
@@ -2135,11 +2136,12 @@
       "linked_tests": [
         "TEST-HO-018",
         "TEST-SEC-111",
-        "TEST-SEC-121"
+        "TEST-SEC-121",
+        "TEST-SEC-122"
       ],
       "locations": [
         190,
-        10552
+        10555
       ]
     },
     "REQ-CRED-006": {
@@ -2156,7 +2158,7 @@
       ],
       "locations": [
         191,
-        10552
+        10555
       ]
     },
     "REQ-CRED-007": {
@@ -2175,7 +2177,7 @@
       "locations": [
         192,
         202,
-        10552
+        10555
       ]
     },
     "REQ-CRED-008": {
@@ -2192,7 +2194,7 @@
       ],
       "locations": [
         193,
-        10552
+        10555
       ]
     },
     "REQ-CRED-009": {
@@ -2208,11 +2210,12 @@
         "TEST-HO-020",
         "TEST-SEC-114",
         "TEST-SEC-120",
-        "TEST-SEC-121"
+        "TEST-SEC-121",
+        "TEST-SEC-122"
       ],
       "locations": [
         194,
-        10552
+        10555
       ]
     },
     "REQ-CRED-010": {
@@ -2229,7 +2232,7 @@
       ],
       "locations": [
         195,
-        10552
+        10555
       ]
     },
     "REQ-CRED-011": {
@@ -2246,7 +2249,7 @@
       ],
       "locations": [
         196,
-        10552
+        10555
       ]
     },
     "REQ-CRED-012": {
@@ -2267,7 +2270,7 @@
       "locations": [
         178,
         197,
-        10552
+        10555
       ]
     },
     "REQ-CRED-013": {
@@ -2284,7 +2287,7 @@
       ],
       "locations": [
         198,
-        10552
+        10555
       ]
     },
     "REQ-SEC-001": {
@@ -2324,10 +2327,10 @@
       ],
       "locations": [
         202,
-        4410,
-        8424,
-        9969,
-        12091
+        4412,
+        8427,
+        9972,
+        12102
       ]
     },
     "REQ-SEC-002": {
@@ -2399,8 +2402,8 @@
       ],
       "locations": [
         204,
-        10052,
-        10094
+        10055,
+        10097
       ]
     },
     "REQ-BENCH-001": {
@@ -2450,7 +2453,7 @@
       ],
       "locations": [
         205,
-        8857
+        8860
       ]
     },
     "REQ-BENCH-002": {
@@ -2505,9 +2508,9 @@
       ],
       "locations": [
         206,
-        7649,
-        9883,
-        11608
+        7652,
+        9886,
+        11613
       ]
     },
     "REQ-DOC-001": {
@@ -2541,7 +2544,7 @@
       ],
       "locations": [
         207,
-        7607
+        7610
       ]
     },
     "REQ-DOC-002": {
@@ -2572,7 +2575,7 @@
       ],
       "locations": [
         208,
-        7607
+        7610
       ]
     },
     "REQ-RUN-001": {
@@ -2615,7 +2618,7 @@
         "TEST-SEC-000"
       ],
       "locations": [
-        2941
+        2943
       ]
     },
     "REQ-RUN-002": {
@@ -2661,7 +2664,7 @@
         "TEST-SEC-000"
       ],
       "locations": [
-        2942
+        2944
       ]
     },
     "REQ-RUN-003": {
@@ -2708,7 +2711,7 @@
         "TEST-SEC-000"
       ],
       "locations": [
-        2943
+        2945
       ]
     },
     "REQ-RUN-004": {
@@ -2758,7 +2761,7 @@
         "TEST-SEC-109"
       ],
       "locations": [
-        2944
+        2946
       ]
     },
     "REQ-RUN-005": {
@@ -2806,7 +2809,7 @@
         "TEST-SEC-101"
       ],
       "locations": [
-        2945
+        2947
       ]
     },
     "REQ-OBS-005": {
@@ -2837,7 +2840,7 @@
         "TEST-OBS-006"
       ],
       "locations": [
-        3121
+        3123
       ]
     },
     "REQ-OBS-006": {
@@ -2869,7 +2872,7 @@
         "TEST-OBS-001"
       ],
       "locations": [
-        3122
+        3124
       ]
     },
     "REQ-OBS-007": {
@@ -2899,7 +2902,7 @@
         "TEST-OBS-006"
       ],
       "locations": [
-        3123
+        3125
       ]
     },
     "REQ-OBS-008": {
@@ -2934,7 +2937,7 @@
         "TEST-SEC-102"
       ],
       "locations": [
-        3124
+        3126
       ]
     },
     "REQ-AIM-001": {
@@ -2957,7 +2960,7 @@
         "TEST-AIM-002"
       ],
       "locations": [
-        3262
+        3264
       ]
     },
     "REQ-AIM-002": {
@@ -2983,7 +2986,7 @@
         "TEST-WEB-006"
       ],
       "locations": [
-        3263
+        3265
       ]
     },
     "REQ-AIM-003": {
@@ -3010,7 +3013,7 @@
         "TEST-OBS-008"
       ],
       "locations": [
-        3264
+        3266
       ]
     },
     "REQ-AIM-004": {
@@ -3034,7 +3037,7 @@
         "TEST-AIM-002"
       ],
       "locations": [
-        3265
+        3267
       ]
     },
     "REQ-AIM-005": {
@@ -3057,7 +3060,7 @@
         "TEST-AIM-002"
       ],
       "locations": [
-        3266
+        3268
       ]
     },
     "REQ-RAIL-001": {
@@ -3084,7 +3087,7 @@
         "TEST-GRD-010"
       ],
       "locations": [
-        3385
+        3387
       ]
     },
     "REQ-RAIL-002": {
@@ -3112,7 +3115,7 @@
         "TEST-NIF-021"
       ],
       "locations": [
-        3386
+        3388
       ]
     },
     "REQ-RAIL-003": {
@@ -3142,7 +3145,7 @@
         "TEST-NIF-023"
       ],
       "locations": [
-        3387
+        3389
       ]
     },
     "REQ-RAIL-004": {
@@ -3172,7 +3175,7 @@
         "TEST-SEC-102"
       ],
       "locations": [
-        3388
+        3390
       ]
     },
     "REQ-RAIL-005": {
@@ -3202,7 +3205,7 @@
         "TEST-GRD-002"
       ],
       "locations": [
-        3389
+        3391
       ]
     },
     "REQ-WHIP-001": {
@@ -3226,7 +3229,7 @@
         "TEST-NIF-023"
       ],
       "locations": [
-        3506
+        3508
       ]
     },
     "REQ-WHIP-002": {
@@ -3249,7 +3252,7 @@
         "BENCH-NIF"
       ],
       "locations": [
-        3507
+        3509
       ]
     },
     "REQ-WHIP-003": {
@@ -3273,7 +3276,7 @@
         "TEST-REC-001"
       ],
       "locations": [
-        3508
+        3510
       ]
     },
     "REQ-WHIP-004": {
@@ -3303,7 +3306,7 @@
         "TEST-REC-003"
       ],
       "locations": [
-        3509
+        3511
       ]
     },
     "REQ-WHIP-005": {
@@ -3328,7 +3331,7 @@
         "TEST-HOST-004"
       ],
       "locations": [
-        3510
+        3512
       ]
     },
     "REQ-REC-001": {
@@ -3354,7 +3357,7 @@
         "TEST-REC-003"
       ],
       "locations": [
-        3592
+        3594
       ]
     },
     "REQ-REC-002": {
@@ -3381,7 +3384,7 @@
         "TEST-REC-003"
       ],
       "locations": [
-        3593
+        3595
       ]
     },
     "REQ-REC-003": {
@@ -3409,7 +3412,7 @@
         "TEST-REC-005"
       ],
       "locations": [
-        3594
+        3596
       ]
     },
     "REQ-REC-004": {
@@ -3438,7 +3441,7 @@
         "TEST-REC-005"
       ],
       "locations": [
-        3595
+        3597
       ]
     },
     "REQ-REC-005": {
@@ -3472,7 +3475,7 @@
         "TEST-REC-003"
       ],
       "locations": [
-        3596
+        3598
       ]
     },
     "REQ-HO-009": {
@@ -3508,7 +3511,7 @@
         "TEST-HO-007"
       ],
       "locations": [
-        4226
+        4228
       ]
     },
     "REQ-HO-010": {
@@ -3544,8 +3547,8 @@
         "TEST-HO-010"
       ],
       "locations": [
-        4227,
-        9883
+        4229,
+        9886
       ]
     },
     "REQ-HO-011": {
@@ -3581,7 +3584,7 @@
         "TEST-HO-005"
       ],
       "locations": [
-        4228
+        4230
       ]
     },
     "REQ-HO-012": {
@@ -3623,7 +3626,7 @@
         "TEST-HO-014"
       ],
       "locations": [
-        4229
+        4231
       ]
     },
     "REQ-HO-013": {
@@ -3659,8 +3662,8 @@
         "TEST-HO-010"
       ],
       "locations": [
-        4230,
-        9883
+        4232,
+        9886
       ]
     },
     "REQ-HO-014": {
@@ -3696,7 +3699,7 @@
         "TEST-SEC-102"
       ],
       "locations": [
-        4231
+        4233
       ]
     },
     "REQ-HO-015": {
@@ -3737,7 +3740,7 @@
         "TEST-HO-009"
       ],
       "locations": [
-        4232
+        4234
       ]
     },
     "REQ-HO-016": {
@@ -3771,7 +3774,7 @@
         "TEST-SEC-101"
       ],
       "locations": [
-        4233
+        4235
       ]
     },
     "REQ-HO-017": {
@@ -3804,9 +3807,9 @@
       ],
       "locations": [
         179,
-        4234,
-        4235,
-        9528
+        4236,
+        4237,
+        9531
       ]
     },
     "REQ-HO-018": {
@@ -3838,8 +3841,8 @@
       ],
       "locations": [
         180,
-        4235,
-        9528
+        4237,
+        9531
       ]
     },
     "REQ-HO-019": {
@@ -3868,8 +3871,8 @@
       ],
       "locations": [
         181,
-        4236,
-        9528
+        4238,
+        9531
       ]
     },
     "REQ-HO-020": {
@@ -3900,10 +3903,10 @@
       ],
       "locations": [
         182,
-        4237,
-        9528,
-        9707,
-        9750
+        4239,
+        9531,
+        9710,
+        9753
       ]
     },
     "REQ-AUTH-001": {
@@ -3942,7 +3945,7 @@
         "BENCH-NIF"
       ],
       "locations": [
-        4414
+        4416
       ]
     },
     "REQ-AUTH-002": {
@@ -3982,7 +3985,7 @@
         "TEST-SEC-101"
       ],
       "locations": [
-        4415
+        4417
       ]
     },
     "REQ-AUTH-003": {
@@ -4027,7 +4030,7 @@
         "TEST-HO-014"
       ],
       "locations": [
-        4416
+        4418
       ]
     },
     "REQ-AUTH-004": {
@@ -4075,7 +4078,7 @@
         "TEST-HO-014"
       ],
       "locations": [
-        4417
+        4419
       ]
     },
     "REQ-AUTH-005": {
@@ -4121,7 +4124,7 @@
         "TEST-REC-003"
       ],
       "locations": [
-        4418
+        4420
       ]
     },
     "REQ-SEC-004": {
@@ -4149,7 +4152,7 @@
         "TEST-SEC-105"
       ],
       "locations": [
-        4591
+        4593
       ]
     },
     "REQ-SEC-005": {
@@ -4185,7 +4188,7 @@
         "TEST-SEC-109"
       ],
       "locations": [
-        4592
+        4594
       ]
     },
     "REQ-SEC-006": {
@@ -4224,7 +4227,7 @@
         "TEST-SEC-109"
       ],
       "locations": [
-        4593
+        4595
       ]
     },
     "REQ-SEC-007": {
@@ -4255,7 +4258,7 @@
         "TEST-SEC-110"
       ],
       "locations": [
-        4594
+        4596
       ]
     },
     "REQ-SEC-008": {
@@ -4289,7 +4292,7 @@
         "TEST-SEC-101"
       ],
       "locations": [
-        4595
+        4597
       ]
     },
     "REQ-SEC-009": {
@@ -4321,7 +4324,7 @@
         "TEST-SEC-109"
       ],
       "locations": [
-        4596
+        4598
       ]
     },
     "REQ-CACHE-001": {
@@ -4352,8 +4355,8 @@
         "TEST-CACHE-006"
       ],
       "locations": [
-        5214,
-        10426
+        5216,
+        10429
       ]
     },
     "REQ-CACHE-002": {
@@ -4380,8 +4383,8 @@
         "TEST-CACHE-007"
       ],
       "locations": [
-        5215,
-        10468
+        5217,
+        10471
       ]
     },
     "REQ-CACHE-003": {
@@ -4406,7 +4409,7 @@
         "BENCH-NIF"
       ],
       "locations": [
-        5216
+        5218
       ]
     },
     "REQ-WEB-001": {
@@ -4438,8 +4441,8 @@
         "TEST-WEB-002"
       ],
       "locations": [
-        5217,
-        10662
+        5219,
+        10667
       ]
     },
     "REQ-WEB-002": {
@@ -4467,8 +4470,8 @@
         "BENCH-NIF"
       ],
       "locations": [
-        5218,
-        10825
+        5220,
+        10830
       ]
     },
     "REQ-NIF-013": {
@@ -4499,7 +4502,7 @@
         "TEST-NIF-023"
       ],
       "locations": [
-        5388
+        5390
       ]
     },
     "REQ-NIF-014": {
@@ -4536,9 +4539,9 @@
         "TEST-NIF-023"
       ],
       "locations": [
-        5389,
-        8593,
-        8676
+        5391,
+        8596,
+        8679
       ]
     },
     "REQ-NIF-015": {
@@ -4565,7 +4568,7 @@
         "TEST-NIF-020"
       ],
       "locations": [
-        5390
+        5392
       ]
     },
     "REQ-NIF-016": {
@@ -4596,7 +4599,7 @@
         "TEST-HOST-006"
       ],
       "locations": [
-        5639
+        5641
       ]
     },
     "REQ-NIF-017": {
@@ -4629,8 +4632,8 @@
         "TEST-NIF-023"
       ],
       "locations": [
-        5640,
-        8297
+        5642,
+        8300
       ]
     },
     "REQ-NIF-018": {
@@ -4662,7 +4665,7 @@
         "TEST-NIF-021"
       ],
       "locations": [
-        5641
+        5643
       ]
     },
     "REQ-NIF-019": {
@@ -4693,7 +4696,7 @@
         "TEST-GRD-002"
       ],
       "locations": [
-        5642
+        5644
       ]
     },
     "REQ-NIF-020": {
@@ -4721,7 +4724,7 @@
         "TEST-COMP-004"
       ],
       "locations": [
-        5643
+        5645
       ]
     },
     "REQ-HOST-007": {
@@ -4761,10 +4764,10 @@
       ],
       "locations": [
         131,
-        7934,
-        8199,
-        8800,
-        12109
+        7937,
+        8202,
+        8803,
+        12120
       ]
     },
     "REQ-HOST-008": {
@@ -4803,7 +4806,7 @@
       ],
       "locations": [
         132,
-        6724
+        6727
       ]
     },
     "REQ-HOST-009": {
@@ -4921,7 +4924,7 @@
       ],
       "locations": [
         135,
-        7934
+        7937
       ]
     },
     "REQ-HOST-012": {
@@ -4960,7 +4963,7 @@
       ],
       "locations": [
         136,
-        8800
+        8803
       ]
     },
     "REQ-HOST-013": {
@@ -4978,9 +4981,9 @@
       ],
       "locations": [
         137,
-        8199,
-        10552,
-        12098
+        8202,
+        10555,
+        12109
       ]
     }
   },
@@ -4994,7 +4997,7 @@
         "WP-HOST-001"
       ],
       "locations": [
-        7894
+        7897
       ]
     },
     "GATE-G1": {
@@ -5013,7 +5016,7 @@
         "WP-OBS-001"
       ],
       "locations": [
-        7981
+        7984
       ]
     },
     "GATE-G2": {
@@ -5026,7 +5029,7 @@
       ],
       "locations": [
         81,
-        8024
+        8027
       ]
     },
     "GATE-G3": {
@@ -5038,7 +5041,7 @@
         "WP-HOST-004"
       ],
       "locations": [
-        8024
+        8027
       ]
     },
     "GATE-G4": {
@@ -5050,7 +5053,7 @@
         "WP-HOST-005"
       ],
       "locations": [
-        8066
+        8069
       ]
     },
     "GATE-G5": {
@@ -5062,7 +5065,7 @@
         "WP-HOST-006"
       ],
       "locations": [
-        8109
+        8112
       ]
     },
     "GATE-G6": {
@@ -5074,7 +5077,7 @@
         "WP-HOST-006"
       ],
       "locations": [
-        8109
+        8112
       ]
     },
     "GATE-G7": {
@@ -5086,7 +5089,7 @@
         "WP-HOST-006"
       ],
       "locations": [
-        8109
+        8112
       ]
     },
     "GATE-G8": {
@@ -5098,7 +5101,7 @@
         "WP-HOST-006"
       ],
       "locations": [
-        8109
+        8112
       ]
     },
     "GATE-G9": {
@@ -5114,7 +5117,7 @@
         790,
         1173,
         1425,
-        9883
+        9886
       ]
     },
     "GATE-G10": {
@@ -5127,8 +5130,8 @@
         "WP-HOST-007"
       ],
       "locations": [
-        8156,
-        10988
+        8159,
+        10993
       ]
     },
     "GATE-G11": {
@@ -5140,7 +5143,7 @@
         "WP-OBS-001"
       ],
       "locations": [
-        8857
+        8860
       ]
     },
     "GATE-G12": {
@@ -5152,7 +5155,7 @@
         "WP-NIF-005"
       ],
       "locations": [
-        8759
+        8762
       ]
     },
     "GATE-G13": {
@@ -5165,8 +5168,8 @@
         "WP-NIF-003"
       ],
       "locations": [
-        8109,
-        8339
+        8112,
+        8342
       ]
     },
     "GATE-G14": {
@@ -5179,7 +5182,7 @@
       ],
       "locations": [
         790,
-        9794
+        9797
       ]
     },
     "GATE-G15": {
@@ -5192,13 +5195,13 @@
         "WP-RLS-060"
       ],
       "locations": [
-        2230,
-        4410,
-        5507,
-        10552,
-        10583,
-        10631,
-        12098
+        2232,
+        4412,
+        5509,
+        10555,
+        10586,
+        10635,
+        12109
       ]
     }
   },
@@ -5236,8 +5239,8 @@
         "WP-SEC-006"
       ],
       "locations": [
-        6973,
-        8010
+        6976,
+        8013
       ]
     },
     "KILL-K2": {
@@ -5264,8 +5267,8 @@
         "WP-V1-006"
       ],
       "locations": [
-        6974,
-        8052
+        6977,
+        8055
       ]
     },
     "KILL-K3": {
@@ -5278,9 +5281,9 @@
         "WP-HOST-007"
       ],
       "locations": [
-        6975,
-        8052,
-        8185
+        6978,
+        8055,
+        8188
       ]
     },
     "KILL-K4": {
@@ -5293,9 +5296,9 @@
         "WP-OBS-007"
       ],
       "locations": [
-        6976,
-        8142,
-        9135
+        6979,
+        8145,
+        9138
       ]
     },
     "KILL-K5": {
@@ -5313,14 +5316,14 @@
         "WP-SEC-005"
       ],
       "locations": [
-        6977,
-        8452,
-        8967,
-        9869,
-        9996,
-        10080,
-        10163,
-        11098
+        6980,
+        8455,
+        8970,
+        9872,
+        9999,
+        10083,
+        10166,
+        11103
       ]
     },
     "KILL-K6": {
@@ -5336,12 +5339,12 @@
         "WP-SEC-003"
       ],
       "locations": [
-        6978,
-        9564,
-        9869,
-        9911,
-        10038,
-        10080
+        6981,
+        9567,
+        9872,
+        9914,
+        10041,
+        10083
       ]
     },
     "KILL-K7": {
@@ -5356,10 +5359,10 @@
       ],
       "locations": [
         113,
-        6979,
-        9693,
-        9780,
-        9911
+        6982,
+        9696,
+        9783,
+        9914
       ]
     },
     "KILL-K8": {
@@ -5372,9 +5375,9 @@
         "WP-OBS-008"
       ],
       "locations": [
-        6980,
-        8885,
-        9178
+        6983,
+        8888,
+        9181
       ]
     },
     "KILL-K9": {
@@ -5387,9 +5390,9 @@
         "WP-REC-006"
       ],
       "locations": [
-        6981,
-        9304,
-        9471
+        6984,
+        9307,
+        9474
       ]
     },
     "KILL-K10": {
@@ -5402,9 +5405,9 @@
         "WP-RC-002"
       ],
       "locations": [
-        6982,
-        8745,
-        11263
+        6985,
+        8748,
+        11268
       ]
     },
     "KILL-K11": {
@@ -5416,8 +5419,8 @@
         "WP-COMP-001"
       ],
       "locations": [
-        6983,
-        10907
+        6986,
+        10912
       ]
     },
     "KILL-K12": {
@@ -5432,10 +5435,10 @@
       ],
       "locations": [
         83,
-        6984,
-        7794,
-        9389,
-        10412
+        6987,
+        7797,
+        9392,
+        10415
       ]
     },
     "KILL-K13": {
@@ -5451,12 +5454,12 @@
         "WP-SEC-006"
       ],
       "locations": [
-        6985,
-        7967,
-        8185,
-        8703,
-        10204,
-        11015
+        6988,
+        7970,
+        8188,
+        8706,
+        10207,
+        11020
       ]
     },
     "KILL-K14": {
@@ -5468,8 +5471,8 @@
         "WP-HOST-001"
       ],
       "locations": [
-        6986,
-        7920
+        6989,
+        7923
       ]
     },
     "KILL-K15": {
@@ -5482,9 +5485,9 @@
         "WP-NIF-005"
       ],
       "locations": [
-        6987,
-        8325,
-        8786
+        6990,
+        8328,
+        8789
       ]
     },
     "KILL-K16": {
@@ -5497,9 +5500,9 @@
         "WP-NIF-005"
       ],
       "locations": [
-        6988,
-        8410,
-        8786
+        6991,
+        8413,
+        8789
       ]
     },
     "KILL-K17": {
@@ -5515,12 +5518,12 @@
         "WP-REC-002"
       ],
       "locations": [
-        6989,
-        8095,
-        8325,
-        8620,
-        8786,
-        9304
+        6992,
+        8098,
+        8328,
+        8623,
+        8789,
+        9307
       ]
     },
     "KILL-K18": {
@@ -5537,14 +5540,14 @@
         "WP-REC-004"
       ],
       "locations": [
-        3281,
-        6990,
-        8095,
-        8325,
-        8662,
-        9051,
-        9389,
-        10412
+        3283,
+        6993,
+        8098,
+        8328,
+        8665,
+        9054,
+        9392,
+        10415
       ]
     },
     "KILL-K19": {
@@ -5559,11 +5562,11 @@
         "WP-OBS-007"
       ],
       "locations": [
-        6991,
-        8142,
-        8367,
-        8967,
-        9135
+        6994,
+        8145,
+        8370,
+        8970,
+        9138
       ]
     },
     "KILL-K20": {
@@ -5575,8 +5578,8 @@
         "WP-NIF-004"
       ],
       "locations": [
-        6992,
-        8410
+        6995,
+        8413
       ]
     },
     "KILL-K21": {
@@ -5591,13 +5594,13 @@
         "WP-OBS-006"
       ],
       "locations": [
-        5625,
-        6993,
-        9093,
-        9823,
-        9911,
-        10371,
-        11890
+        5627,
+        6996,
+        9096,
+        9826,
+        9914,
+        10374,
+        11895
       ]
     },
     "KILL-K22": {
@@ -5610,9 +5613,9 @@
         "WP-HO-009"
       ],
       "locations": [
-        6994,
-        9608,
-        9911
+        6997,
+        9611,
+        9914
       ]
     },
     "KILL-K23": {
@@ -5625,9 +5628,9 @@
         "WP-HO-009"
       ],
       "locations": [
-        6995,
-        9736,
-        9911
+        6998,
+        9739,
+        9914
       ]
     },
     "KILL-K24": {
@@ -5639,8 +5642,8 @@
         "WP-OBS-008"
       ],
       "locations": [
-        6996,
-        9178
+        6999,
+        9181
       ]
     },
     "KILL-K25": {
@@ -5654,10 +5657,10 @@
         "WP-SEC-006"
       ],
       "locations": [
-        6997,
-        7794,
-        9178,
-        10204
+        7000,
+        7797,
+        9181,
+        10207
       ]
     },
     "KILL-K26": {
@@ -5671,10 +5674,10 @@
         "WP-V1-006"
       ],
       "locations": [
-        6998,
-        8244,
-        10974,
-        11757
+        7001,
+        8247,
+        10979,
+        11762
       ]
     },
     "KILL-K27": {
@@ -5686,8 +5689,8 @@
         "WP-V1-003"
       ],
       "locations": [
-        6999,
-        11633
+        7002,
+        11638
       ]
     },
     "KILL-K28": {
@@ -5699,8 +5702,8 @@
         "WP-DOC-001"
       ],
       "locations": [
-        7000,
-        7635
+        7003,
+        7638
       ]
     },
     "KILL-K29": {
@@ -5713,9 +5716,9 @@
         "WP-RLS-060"
       ],
       "locations": [
-        7001,
-        10597,
-        12098
+        7004,
+        10601,
+        12109
       ]
     },
     "KILL-K30": {
@@ -5728,8 +5731,8 @@
         "WP-RLS-060"
       ],
       "locations": [
-        7002,
-        10597
+        7005,
+        10601
       ]
     },
     "KILL-K31": {
@@ -5742,8 +5745,8 @@
         "WP-RLS-060"
       ],
       "locations": [
-        7003,
-        10597
+        7006,
+        10601
       ]
     },
     "KILL-K32": {
@@ -5756,7 +5759,7 @@
         "WP-RLS-060"
       ],
       "locations": [
-        7004
+        7007
       ]
     },
     "KILL-K33": {
@@ -5769,7 +5772,7 @@
         "WP-RLS-060"
       ],
       "locations": [
-        7005
+        7008
       ]
     }
   },
@@ -5777,8 +5780,8 @@
     "WP-DOC-001": {
       "title": "Canonical SPEC validator and stable index",
       "anchor": "wp-doc-001",
-      "start_line": 7597,
-      "end_line": 7638,
+      "start_line": 7600,
+      "end_line": 7641,
       "milestone": "CONTINUOUS",
       "priority": "P0",
       "status": "READY",
@@ -5814,8 +5817,8 @@
     "WP-DOC-002": {
       "title": "Requirement–work-package–test coverage matrix",
       "anchor": "wp-doc-002",
-      "start_line": 7639,
-      "end_line": 7676,
+      "start_line": 7642,
+      "end_line": 7679,
       "milestone": "CONTINUOUS",
       "priority": "P1",
       "status": "PLANNED",
@@ -5849,8 +5852,8 @@
     "WP-DOC-003": {
       "title": "External evidence freshness ledger",
       "anchor": "wp-doc-003",
-      "start_line": 7677,
-      "end_line": 7715,
+      "start_line": 7680,
+      "end_line": 7718,
       "milestone": "CONTINUOUS",
       "priority": "P1",
       "status": "PLANNED",
@@ -5883,8 +5886,8 @@
     "WP-DOC-004": {
       "title": "Living-spec change, archive and migration automation",
       "anchor": "wp-doc-004",
-      "start_line": 7716,
-      "end_line": 7757,
+      "start_line": 7719,
+      "end_line": 7760,
       "milestone": "CONTINUOUS",
       "priority": "P2",
       "status": "PLANNED",
@@ -5918,8 +5921,8 @@
     "WP-FND-001": {
       "title": "Monorepo, package boundaries and canonical files",
       "anchor": "wp-fnd-001",
-      "start_line": 7758,
-      "end_line": 7797,
+      "start_line": 7761,
+      "end_line": 7800,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "READY",
@@ -5953,8 +5956,8 @@
     "WP-FND-002": {
       "title": "Core schemas, reason codes and evidence manifest",
       "anchor": "wp-fnd-002",
-      "start_line": 7798,
-      "end_line": 7840,
+      "start_line": 7801,
+      "end_line": 7843,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -5993,8 +5996,8 @@
     "WP-FND-003": {
       "title": "Controlled fixture and paired benchmark harness",
       "anchor": "wp-fnd-003",
-      "start_line": 7841,
-      "end_line": 7883,
+      "start_line": 7844,
+      "end_line": 7886,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6033,8 +6036,8 @@
     "WP-HOST-001": {
       "title": "Surface inventory and public-contract ledger",
       "anchor": "wp-host-001",
-      "start_line": 7884,
-      "end_line": 7923,
+      "start_line": 7887,
+      "end_line": 7926,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6071,8 +6074,8 @@
     "WP-HOST-002": {
       "title": "Hook recorder, trust and failure harness",
       "anchor": "wp-host-002",
-      "start_line": 7924,
-      "end_line": 7970,
+      "start_line": 7927,
+      "end_line": 7973,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6116,8 +6119,8 @@
     "WP-HOST-003": {
       "title": "Real Computer Use tool-route discovery",
       "anchor": "wp-host-003",
-      "start_line": 7971,
-      "end_line": 8013,
+      "start_line": 7974,
+      "end_line": 8016,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6155,8 +6158,8 @@
     "WP-HOST-004": {
       "title": "Action granularity and bypass characterization",
       "anchor": "wp-host-004",
-      "start_line": 8014,
-      "end_line": 8055,
+      "start_line": 8017,
+      "end_line": 8058,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6193,8 +6196,8 @@
     "WP-HOST-005": {
       "title": "PreTool deny and input-rewrite side-effect probes",
       "anchor": "wp-host-005",
-      "start_line": 8056,
-      "end_line": 8098,
+      "start_line": 8059,
+      "end_line": 8101,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6234,8 +6237,8 @@
     "WP-HOST-006": {
       "title": "Result timing, media fidelity and control-critical probes",
       "anchor": "wp-host-006",
-      "start_line": 8099,
-      "end_line": 8145,
+      "start_line": 8102,
+      "end_line": 8148,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6280,8 +6283,8 @@
     "WP-HOST-007": {
       "title": "Code Mode, specialized routes and managed-policy matrix",
       "anchor": "wp-host-007",
-      "start_line": 8146,
-      "end_line": 8188,
+      "start_line": 8149,
+      "end_line": 8191,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6320,8 +6323,8 @@
     "WP-HOST-008": {
       "title": "Host Profile, Doctor and explicit user acceptance",
       "anchor": "wp-host-008",
-      "start_line": 8189,
-      "end_line": 8247,
+      "start_line": 8192,
+      "end_line": 8250,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6386,8 +6389,8 @@
     "WP-NIF-001": {
       "title": "Native primitive fixture suite",
       "anchor": "wp-nif-001",
-      "start_line": 8248,
-      "end_line": 8286,
+      "start_line": 8251,
+      "end_line": 8289,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6423,8 +6426,8 @@
     "WP-NIF-002": {
       "title": "Ordinary-action pass-through fingerprinting",
       "anchor": "wp-nif-002",
-      "start_line": 8287,
-      "end_line": 8328,
+      "start_line": 8290,
+      "end_line": 8331,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6462,8 +6465,8 @@
     "WP-NIF-003": {
       "title": "Control-critical metadata experiment and contract",
       "anchor": "wp-nif-003",
-      "start_line": 8329,
-      "end_line": 8370,
+      "start_line": 8332,
+      "end_line": 8373,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6501,8 +6504,8 @@
     "WP-NIF-004": {
       "title": "Zero-interference UI/overlay and ownership policy",
       "anchor": "wp-nif-004",
-      "start_line": 8371,
-      "end_line": 8413,
+      "start_line": 8374,
+      "end_line": 8416,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6541,8 +6544,8 @@
     "WP-SEC-000": {
       "title": "V0.0 minimum safety and canary harness",
       "anchor": "wp-sec-000",
-      "start_line": 8414,
-      "end_line": 8455,
+      "start_line": 8417,
+      "end_line": 8458,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6580,8 +6583,8 @@
     "WP-RLS-000": {
       "title": "V0.0 feasibility decision and architecture disposition",
       "anchor": "wp-rls-000",
-      "start_line": 8456,
-      "end_line": 8501,
+      "start_line": 8459,
+      "end_line": 8504,
       "milestone": "V0.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -6623,8 +6626,8 @@
     "WP-GRD-001": {
       "title": "Browser tool classifier and versioned schema registry",
       "anchor": "wp-grd-001",
-      "start_line": 8502,
-      "end_line": 8541,
+      "start_line": 8505,
+      "end_line": 8544,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6659,8 +6662,8 @@
     "WP-GRD-002": {
       "title": "ActionDigest, state fingerprint and progress baseline",
       "anchor": "wp-grd-002",
-      "start_line": 8542,
-      "end_line": 8582,
+      "start_line": 8545,
+      "end_line": 8585,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6696,8 +6699,8 @@
     "WP-GRD-003": {
       "title": "Repeated no-progress guard",
       "anchor": "wp-grd-003",
-      "start_line": 8583,
-      "end_line": 8623,
+      "start_line": 8586,
+      "end_line": 8626,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6734,8 +6737,8 @@
     "WP-GRD-004": {
       "title": "Stale-target and risk guard",
       "anchor": "wp-grd-004",
-      "start_line": 8624,
-      "end_line": 8665,
+      "start_line": 8627,
+      "end_line": 8668,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6772,8 +6775,8 @@
     "WP-GRD-005": {
       "title": "Product-level ASK routing and high-impact policy",
       "anchor": "wp-grd-005",
-      "start_line": 8666,
-      "end_line": 8706,
+      "start_line": 8669,
+      "end_line": 8709,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6811,8 +6814,8 @@
     "WP-GRD-006": {
       "title": "Guard trace, latency and conflict handling",
       "anchor": "wp-grd-006",
-      "start_line": 8707,
-      "end_line": 8748,
+      "start_line": 8710,
+      "end_line": 8751,
       "milestone": "V0.1",
       "priority": "P1",
       "status": "PLANNED",
@@ -6850,8 +6853,8 @@
     "WP-NIF-005": {
       "title": "NativeInteractionBench CI and regression ownership",
       "anchor": "wp-nif-005",
-      "start_line": 8749,
-      "end_line": 8789,
+      "start_line": 8752,
+      "end_line": 8792,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6890,8 +6893,8 @@
     "WP-RLS-010": {
       "title": "V0.1 Guard Alpha release gate",
       "anchor": "wp-rls-010",
-      "start_line": 8790,
-      "end_line": 8846,
+      "start_line": 8793,
+      "end_line": 8849,
       "milestone": "V0.1",
       "priority": "P0",
       "status": "PLANNED",
@@ -6949,8 +6952,8 @@
     "WP-OBS-001": {
       "title": "Native Tuned baseline configuration and report",
       "anchor": "wp-obs-001",
-      "start_line": 8847,
-      "end_line": 8888,
+      "start_line": 8850,
+      "end_line": 8891,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -6989,8 +6992,8 @@
     "WP-OBS-002": {
       "title": "Observation source router",
       "anchor": "wp-obs-002",
-      "start_line": 8889,
-      "end_line": 8929,
+      "start_line": 8892,
+      "end_line": 8932,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -7027,8 +7030,8 @@
     "WP-OBS-003": {
       "title": "Normalizer, trust labels and secret redaction",
       "anchor": "wp-obs-003",
-      "start_line": 8930,
-      "end_line": 8970,
+      "start_line": 8933,
+      "end_line": 8973,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -7064,8 +7067,8 @@
     "WP-OBS-004": {
       "title": "Observation tiers and budget controller",
       "anchor": "wp-obs-004",
-      "start_line": 8971,
-      "end_line": 9011,
+      "start_line": 8974,
+      "end_line": 9014,
       "milestone": "V0.2",
       "priority": "P1",
       "status": "PLANNED",
@@ -7100,8 +7103,8 @@
     "WP-OBS-005": {
       "title": "Semantic candidates and formal target hints",
       "anchor": "wp-obs-005",
-      "start_line": 9012,
-      "end_line": 9054,
+      "start_line": 9015,
+      "end_line": 9057,
       "milestone": "V0.2",
       "priority": "P1",
       "status": "PLANNED",
@@ -7140,8 +7143,8 @@
     "WP-OBS-006": {
       "title": "Revision, delta and stable-state contract",
       "anchor": "wp-obs-006",
-      "start_line": 9055,
-      "end_line": 9096,
+      "start_line": 9058,
+      "end_line": 9099,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -7180,8 +7183,8 @@
     "WP-OBS-007": {
       "title": "Safe result-transform adapter",
       "anchor": "wp-obs-007",
-      "start_line": 9097,
-      "end_line": 9138,
+      "start_line": 9100,
+      "end_line": 9141,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -7223,8 +7226,8 @@
     "WP-OBS-008": {
       "title": "Observer Bridge decision ADR",
       "anchor": "wp-obs-008",
-      "start_line": 9139,
-      "end_line": 9181,
+      "start_line": 9142,
+      "end_line": 9184,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -7262,8 +7265,8 @@
     "WP-RLS-020": {
       "title": "V0.2 Native-first Observation gate",
       "anchor": "wp-rls-020",
-      "start_line": 9182,
-      "end_line": 9226,
+      "start_line": 9185,
+      "end_line": 9229,
       "milestone": "V0.2",
       "priority": "P0",
       "status": "PLANNED",
@@ -7305,8 +7308,8 @@
     "WP-REC-001": {
       "title": "Goal-relevant progress semantics",
       "anchor": "wp-rec-001",
-      "start_line": 9227,
-      "end_line": 9267,
+      "start_line": 9230,
+      "end_line": 9270,
       "milestone": "V0.3",
       "priority": "P0",
       "status": "PLANNED",
@@ -7342,8 +7345,8 @@
     "WP-REC-002": {
       "title": "Stall, repeated-action and oscillation detector",
       "anchor": "wp-rec-002",
-      "start_line": 9268,
-      "end_line": 9307,
+      "start_line": 9271,
+      "end_line": 9310,
       "milestone": "V0.3",
       "priority": "P0",
       "status": "PLANNED",
@@ -7378,8 +7381,8 @@
     "WP-REC-003": {
       "title": "Blocker and modal classifier",
       "anchor": "wp-rec-003",
-      "start_line": 9308,
-      "end_line": 9349,
+      "start_line": 9311,
+      "end_line": 9352,
       "milestone": "V0.3",
       "priority": "P1",
       "status": "PLANNED",
@@ -7415,8 +7418,8 @@
     "WP-REC-004": {
       "title": "Deterministic recovery ladder controller",
       "anchor": "wp-rec-004",
-      "start_line": 9350,
-      "end_line": 9392,
+      "start_line": 9353,
+      "end_line": 9395,
       "milestone": "V0.3",
       "priority": "P0",
       "status": "PLANNED",
@@ -7451,8 +7454,8 @@
     "WP-REC-005": {
       "title": "Safe back/reload and terminal-failure policy",
       "anchor": "wp-rec-005",
-      "start_line": 9393,
-      "end_line": 9433,
+      "start_line": 9396,
+      "end_line": 9436,
       "milestone": "V0.3",
       "priority": "P0",
       "status": "PLANNED",
@@ -7486,8 +7489,8 @@
     "WP-REC-006": {
       "title": "Recovery benchmark, calibration and trace review",
       "anchor": "wp-rec-006",
-      "start_line": 9434,
-      "end_line": 9474,
+      "start_line": 9437,
+      "end_line": 9477,
       "milestone": "V0.3",
       "priority": "P1",
       "status": "PLANNED",
@@ -7521,8 +7524,8 @@
     "WP-RLS-030": {
       "title": "V0.3 Whip + Recovery release gate",
       "anchor": "wp-rls-030",
-      "start_line": 9475,
-      "end_line": 9517,
+      "start_line": 9478,
+      "end_line": 9520,
       "milestone": "V0.3",
       "priority": "P0",
       "status": "PLANNED",
@@ -7557,8 +7560,8 @@
     "WP-HO-001": {
       "title": "Exclusive browser lease state machine",
       "anchor": "wp-ho-001",
-      "start_line": 9518,
-      "end_line": 9567,
+      "start_line": 9521,
+      "end_line": 9570,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7608,8 +7611,8 @@
     "WP-HO-002": {
       "title": "Same-tab detached Spotlight window",
       "anchor": "wp-ho-002",
-      "start_line": 9568,
-      "end_line": 9611,
+      "start_line": 9571,
+      "end_line": 9614,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7649,8 +7652,8 @@
     "WP-HO-003": {
       "title": "Focus-existing-tab fallback",
       "anchor": "wp-ho-003",
-      "start_line": 9612,
-      "end_line": 9653,
+      "start_line": 9615,
+      "end_line": 9656,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7686,8 +7689,8 @@
     "WP-HO-004": {
       "title": "Pending handoff tool/event continuation and UI",
       "anchor": "wp-ho-004",
-      "start_line": 9654,
-      "end_line": 9696,
+      "start_line": 9657,
+      "end_line": 9699,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7727,8 +7730,8 @@
     "WP-HO-005": {
       "title": "Narrow non-secret completion detector",
       "anchor": "wp-ho-005",
-      "start_line": 9697,
-      "end_line": 9739,
+      "start_line": 9700,
+      "end_line": 9742,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7768,8 +7771,8 @@
     "WP-HO-006": {
       "title": "Automatic resume and one-click verified fallback",
       "anchor": "wp-ho-006",
-      "start_line": 9740,
-      "end_line": 9783,
+      "start_line": 9743,
+      "end_line": 9786,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7808,8 +7811,8 @@
     "WP-HO-007": {
       "title": "Post-handoff target/action invalidation and re-resolve",
       "anchor": "wp-ho-007",
-      "start_line": 9784,
-      "end_line": 9826,
+      "start_line": 9787,
+      "end_line": 9829,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7850,8 +7853,8 @@
     "WP-HO-008": {
       "title": "Origin, SSO, tab restoration and edge cases",
       "anchor": "wp-ho-008",
-      "start_line": 9827,
-      "end_line": 9872,
+      "start_line": 9830,
+      "end_line": 9875,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7895,8 +7898,8 @@
     "WP-HO-009": {
       "title": "Full HandoffBench and friction study",
       "anchor": "wp-ho-009",
-      "start_line": 9873,
-      "end_line": 9914,
+      "start_line": 9876,
+      "end_line": 9917,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7936,8 +7939,8 @@
     "WP-RLS-040": {
       "title": "V0.4 Secure Micro-Handoff gate",
       "anchor": "wp-rls-040",
-      "start_line": 9915,
-      "end_line": 9958,
+      "start_line": 9918,
+      "end_line": 9961,
       "milestone": "V0.4",
       "priority": "P0",
       "status": "PLANNED",
@@ -7972,8 +7975,8 @@
     "WP-SEC-001": {
       "title": "Secret type system and redaction pipeline",
       "anchor": "wp-sec-001",
-      "start_line": 9959,
-      "end_line": 9999,
+      "start_line": 9962,
+      "end_line": 10002,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8009,8 +8012,8 @@
     "WP-SEC-002": {
       "title": "All-route action/observation lock enforcement",
       "anchor": "wp-sec-002",
-      "start_line": 10000,
-      "end_line": 10041,
+      "start_line": 10003,
+      "end_line": 10044,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8046,8 +8049,8 @@
     "WP-SEC-003": {
       "title": "Origin and redirect binding hardening",
       "anchor": "wp-sec-003",
-      "start_line": 10042,
-      "end_line": 10083,
+      "start_line": 10045,
+      "end_line": 10086,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8082,8 +8085,8 @@
     "WP-SEC-004": {
       "title": "Prompt-injection and malicious-page defense corpus",
       "anchor": "wp-sec-004",
-      "start_line": 10084,
-      "end_line": 10124,
+      "start_line": 10087,
+      "end_line": 10127,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8118,8 +8121,8 @@
     "WP-SEC-005": {
       "title": "Temp, transcript, crash and diagnostics scanning",
       "anchor": "wp-sec-005",
-      "start_line": 10125,
-      "end_line": 10166,
+      "start_line": 10128,
+      "end_line": 10169,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8156,8 +8159,8 @@
     "WP-SEC-006": {
       "title": "Extension permissions, trust and managed deployment review",
       "anchor": "wp-sec-006",
-      "start_line": 10167,
-      "end_line": 10207,
+      "start_line": 10170,
+      "end_line": 10210,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8195,8 +8198,8 @@
     "WP-SEC-007": {
       "title": "Race, fuzz and fault-injection hardening",
       "anchor": "wp-sec-007",
-      "start_line": 10208,
-      "end_line": 10249,
+      "start_line": 10211,
+      "end_line": 10252,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8233,8 +8236,8 @@
     "WP-SEC-008": {
       "title": "Threat model, SECURITY.md and disclosure process",
       "anchor": "wp-sec-008",
-      "start_line": 10250,
-      "end_line": 10289,
+      "start_line": 10253,
+      "end_line": 10292,
       "milestone": "V0.5",
       "priority": "P1",
       "status": "PLANNED",
@@ -8274,8 +8277,8 @@
     "WP-RLS-050": {
       "title": "V0.5 public-beta security gate",
       "anchor": "wp-rls-050",
-      "start_line": 10290,
-      "end_line": 10333,
+      "start_line": 10293,
+      "end_line": 10336,
       "milestone": "V0.5",
       "priority": "P0",
       "status": "PLANNED",
@@ -8310,8 +8313,8 @@
     "WP-CACHE-001": {
       "title": "Session-local target and observation cache",
       "anchor": "wp-cache-001",
-      "start_line": 10334,
-      "end_line": 10374,
+      "start_line": 10337,
+      "end_line": 10377,
       "milestone": "V0.6",
       "priority": "P1",
       "status": "PLANNED",
@@ -8344,8 +8347,8 @@
     "WP-CACHE-002": {
       "title": "Workflow recipe schema and recorder",
       "anchor": "wp-cache-002",
-      "start_line": 10375,
-      "end_line": 10415,
+      "start_line": 10378,
+      "end_line": 10418,
       "milestone": "V0.6",
       "priority": "P1",
       "status": "PLANNED",
@@ -8378,8 +8381,8 @@
     "WP-CACHE-003": {
       "title": "Recipe validation, invalidation and self-healing boundary",
       "anchor": "wp-cache-003",
-      "start_line": 10416,
-      "end_line": 10457,
+      "start_line": 10419,
+      "end_line": 10460,
       "milestone": "V0.6",
       "priority": "P0",
       "status": "PLANNED",
@@ -8416,8 +8419,8 @@
     "WP-CACHE-004": {
       "title": "Opt-in persistent cache privacy and controls",
       "anchor": "wp-cache-004",
-      "start_line": 10458,
-      "end_line": 10499,
+      "start_line": 10461,
+      "end_line": 10502,
       "milestone": "V0.6",
       "priority": "P1",
       "status": "PLANNED",
@@ -8453,8 +8456,8 @@
     "WP-CACHE-005": {
       "title": "Workflow-cache benchmark and go/no-go",
       "anchor": "wp-cache-005",
-      "start_line": 10500,
-      "end_line": 10541,
+      "start_line": 10503,
+      "end_line": 10544,
       "milestone": "V0.6",
       "priority": "P0",
       "status": "PLANNED",
@@ -8489,8 +8492,8 @@
     "WP-CRED-001": {
       "title": "macOS Keychain Credential Channel vertical slice",
       "anchor": "wp-cred-001",
-      "start_line": 10542,
-      "end_line": 10601,
+      "start_line": 10545,
+      "end_line": 10605,
       "milestone": "V0.6",
       "priority": "P0",
       "status": "PLANNED",
@@ -8564,6 +8567,7 @@
         "TEST-SEC-119",
         "TEST-SEC-120",
         "TEST-SEC-121",
+        "TEST-SEC-122",
         "BENCH-NIF"
       ],
       "blockers": [
@@ -8574,8 +8578,8 @@
     "WP-RLS-060": {
       "title": "V0.6 Workflow Cache and macOS Credential Channel gate",
       "anchor": "wp-rls-060",
-      "start_line": 10602,
-      "end_line": 10651,
+      "start_line": 10606,
+      "end_line": 10656,
       "milestone": "V0.6",
       "priority": "P0",
       "status": "PLANNED",
@@ -8612,7 +8616,8 @@
         "TEST-SEC-116",
         "TEST-SEC-119",
         "TEST-SEC-120",
-        "TEST-SEC-121"
+        "TEST-SEC-121",
+        "TEST-SEC-122"
       ],
       "blockers": [
         "Can release V0.6 without persistent cache if no-go ADR says so; no Credential claim without WP-CRED-001 acceptance."
@@ -8621,8 +8626,8 @@
     "WP-WEB-001": {
       "title": "Site-tool/WebMCP discovery by surface and page",
       "anchor": "wp-web-001",
-      "start_line": 10652,
-      "end_line": 10691,
+      "start_line": 10657,
+      "end_line": 10696,
       "milestone": "V0.7",
       "priority": "P1",
       "status": "PLANNED",
@@ -8657,8 +8662,8 @@
     "WP-WEB-002": {
       "title": "Structured-vs-browser route arbitration",
       "anchor": "wp-web-002",
-      "start_line": 10692,
-      "end_line": 10732,
+      "start_line": 10697,
+      "end_line": 10737,
       "milestone": "V0.7",
       "priority": "P0",
       "status": "PLANNED",
@@ -8695,8 +8700,8 @@
     "WP-WEB-003": {
       "title": "Site-tool approval, scope and high-impact policy",
       "anchor": "wp-web-003",
-      "start_line": 10733,
-      "end_line": 10773,
+      "start_line": 10738,
+      "end_line": 10778,
       "milestone": "V0.7",
       "priority": "P0",
       "status": "PLANNED",
@@ -8732,8 +8737,8 @@
     "WP-WEB-004": {
       "title": "Cross-route state, cache and recovery consistency",
       "anchor": "wp-web-004",
-      "start_line": 10774,
-      "end_line": 10814,
+      "start_line": 10779,
+      "end_line": 10819,
       "milestone": "V0.7",
       "priority": "P1",
       "status": "PLANNED",
@@ -8770,8 +8775,8 @@
     "WP-WEB-005": {
       "title": "WebMCP production parity benchmark",
       "anchor": "wp-web-005",
-      "start_line": 10815,
-      "end_line": 10854,
+      "start_line": 10820,
+      "end_line": 10859,
       "milestone": "V0.7",
       "priority": "P0",
       "status": "PLANNED",
@@ -8805,8 +8810,8 @@
     "WP-RLS-070": {
       "title": "V0.7 WebMCP production-routing gate",
       "anchor": "wp-rls-070",
-      "start_line": 10855,
-      "end_line": 10896,
+      "start_line": 10860,
+      "end_line": 10901,
       "milestone": "V0.7",
       "priority": "P0",
       "status": "PLANNED",
@@ -8840,8 +8845,8 @@
     "WP-COMP-001": {
       "title": "Supported Host/browser/OS compatibility matrix",
       "anchor": "wp-comp-001",
-      "start_line": 10897,
-      "end_line": 10935,
+      "start_line": 10902,
+      "end_line": 10940,
       "milestone": "V0.8",
       "priority": "P0",
       "status": "PLANNED",
@@ -8877,8 +8882,8 @@
     "WP-COMP-002": {
       "title": "Profile staleness, reprobe and drift response",
       "anchor": "wp-comp-002",
-      "start_line": 10936,
-      "end_line": 10977,
+      "start_line": 10941,
+      "end_line": 10982,
       "milestone": "V0.8",
       "priority": "P0",
       "status": "PLANNED",
@@ -8916,8 +8921,8 @@
     "WP-COMP-003": {
       "title": "Managed-policy and enterprise deployment path",
       "anchor": "wp-comp-003",
-      "start_line": 10978,
-      "end_line": 11018,
+      "start_line": 10983,
+      "end_line": 11023,
       "milestone": "V0.8",
       "priority": "P1",
       "status": "PLANNED",
@@ -8953,8 +8958,8 @@
     "WP-COMP-004": {
       "title": "Install, update, uninstall and rollback",
       "anchor": "wp-comp-004",
-      "start_line": 11019,
-      "end_line": 11060,
+      "start_line": 11024,
+      "end_line": 11065,
       "milestone": "V0.8",
       "priority": "P0",
       "status": "PLANNED",
@@ -8991,8 +8996,8 @@
     "WP-COMP-005": {
       "title": "Privacy-safe diagnostics bundle",
       "anchor": "wp-comp-005",
-      "start_line": 11061,
-      "end_line": 11101,
+      "start_line": 11066,
+      "end_line": 11106,
       "milestone": "V0.8",
       "priority": "P1",
       "status": "PLANNED",
@@ -9028,8 +9033,8 @@
     "WP-COMP-006": {
       "title": "Secondary surface/browser feasibility",
       "anchor": "wp-comp-006",
-      "start_line": 11102,
-      "end_line": 11141,
+      "start_line": 11107,
+      "end_line": 11146,
       "milestone": "V0.8",
       "priority": "P2",
       "status": "PLANNED",
@@ -9063,8 +9068,8 @@
     "WP-RLS-080": {
       "title": "V0.8 compatibility and lifecycle gate",
       "anchor": "wp-rls-080",
-      "start_line": 11142,
-      "end_line": 11184,
+      "start_line": 11147,
+      "end_line": 11189,
       "milestone": "V0.8",
       "priority": "P0",
       "status": "PLANNED",
@@ -9102,8 +9107,8 @@
     "WP-RC-001": {
       "title": "Full release-candidate benchmark campaign",
       "anchor": "wp-rc-001",
-      "start_line": 11185,
-      "end_line": 11224,
+      "start_line": 11190,
+      "end_line": 11229,
       "milestone": "V0.9",
       "priority": "P0",
       "status": "PLANNED",
@@ -9135,8 +9140,8 @@
     "WP-RC-002": {
       "title": "Performance and footprint hardening",
       "anchor": "wp-rc-002",
-      "start_line": 11225,
-      "end_line": 11266,
+      "start_line": 11230,
+      "end_line": 11271,
       "milestone": "V0.9",
       "priority": "P1",
       "status": "PLANNED",
@@ -9173,8 +9178,8 @@
     "WP-RC-003": {
       "title": "Packaging, signing and distribution preparation",
       "anchor": "wp-rc-003",
-      "start_line": 11267,
-      "end_line": 11308,
+      "start_line": 11272,
+      "end_line": 11313,
       "milestone": "V0.9",
       "priority": "P0",
       "status": "PLANNED",
@@ -9211,8 +9216,8 @@
     "WP-RC-004": {
       "title": "Onboarding, Doctor and user-facing docs validation",
       "anchor": "wp-rc-004",
-      "start_line": 11309,
-      "end_line": 11349,
+      "start_line": 11314,
+      "end_line": 11354,
       "milestone": "V0.9",
       "priority": "P1",
       "status": "PLANNED",
@@ -9247,8 +9252,8 @@
     "WP-RC-005": {
       "title": "State/config migration and rollback rehearsal",
       "anchor": "wp-rc-005",
-      "start_line": 11350,
-      "end_line": 11390,
+      "start_line": 11355,
+      "end_line": 11395,
       "milestone": "V0.9",
       "priority": "P0",
       "status": "PLANNED",
@@ -9284,8 +9289,8 @@
     "WP-RC-006": {
       "title": "Independent security and architecture review",
       "anchor": "wp-rc-006",
-      "start_line": 11391,
-      "end_line": 11431,
+      "start_line": 11396,
+      "end_line": 11436,
       "milestone": "V0.9",
       "priority": "P0",
       "status": "PLANNED",
@@ -9319,8 +9324,8 @@
     "WP-RC-007": {
       "title": "Soak, crash recovery and stability campaign",
       "anchor": "wp-rc-007",
-      "start_line": 11432,
-      "end_line": 11473,
+      "start_line": 11437,
+      "end_line": 11478,
       "milestone": "V0.9",
       "priority": "P0",
       "status": "PLANNED",
@@ -9353,8 +9358,8 @@
     "WP-RLS-090": {
       "title": "V0.9 release-candidate gate",
       "anchor": "wp-rls-090",
-      "start_line": 11474,
-      "end_line": 11518,
+      "start_line": 11479,
+      "end_line": 11523,
       "milestone": "V0.9",
       "priority": "P0",
       "status": "PLANNED",
@@ -9394,8 +9399,8 @@
     "WP-V1-001": {
       "title": "Stable support-matrix freeze",
       "anchor": "wp-v1-001",
-      "start_line": 11519,
-      "end_line": 11556,
+      "start_line": 11524,
+      "end_line": 11561,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9428,8 +9433,8 @@
     "WP-V1-002": {
       "title": "Kill Criteria disposition and architecture conformance",
       "anchor": "wp-v1-002",
-      "start_line": 11557,
-      "end_line": 11597,
+      "start_line": 11562,
+      "end_line": 11602,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9464,8 +9469,8 @@
     "WP-V1-003": {
       "title": "Evidence reproduction and release claim lock",
       "anchor": "wp-v1-003",
-      "start_line": 11598,
-      "end_line": 11636,
+      "start_line": 11603,
+      "end_line": 11641,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9502,8 +9507,8 @@
     "WP-V1-004": {
       "title": "Final documentation, limitations and release notes",
       "anchor": "wp-v1-004",
-      "start_line": 11637,
-      "end_line": 11677,
+      "start_line": 11642,
+      "end_line": 11682,
       "milestone": "V1.0",
       "priority": "P1",
       "status": "PLANNED",
@@ -9541,8 +9546,8 @@
     "WP-V1-005": {
       "title": "Stable publish and rollback readiness",
       "anchor": "wp-v1-005",
-      "start_line": 11678,
-      "end_line": 11719,
+      "start_line": 11683,
+      "end_line": 11724,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9580,8 +9585,8 @@
     "WP-V1-006": {
       "title": "Post-release drift and incident monitoring",
       "anchor": "wp-v1-006",
-      "start_line": 11720,
-      "end_line": 11760,
+      "start_line": 11725,
+      "end_line": 11765,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9617,8 +9622,8 @@
     "WP-RLS-100": {
       "title": "V1.0 final acceptance",
       "anchor": "wp-rls-100",
-      "start_line": 11761,
-      "end_line": 12157,
+      "start_line": 11766,
+      "end_line": 12168,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9808,48 +9813,48 @@
     },
     "BENCH-NIF": {
       "locations": [
-        5639,
-        5874,
-        5978,
-        5990,
-        5993,
-        6163,
-        6201,
-        6414,
-        6566,
-        6716,
-        6753,
-        6769,
-        6788,
-        7099,
-        8279,
-        8484,
-        8491,
-        8610,
-        8763,
-        8781,
-        8828,
-        9041,
-        9047,
-        9130,
-        9173,
-        9209,
-        9216,
-        9295,
-        9385,
-        9507,
-        9906,
-        9948,
-        10450,
-        10533,
-        10593,
-        10638,
-        10847,
-        10886,
-        11133,
-        11175,
-        11258,
-        11888
+        5641,
+        5876,
+        5980,
+        5992,
+        5995,
+        6165,
+        6203,
+        6417,
+        6569,
+        6719,
+        6756,
+        6772,
+        6791,
+        7102,
+        8282,
+        8487,
+        8494,
+        8613,
+        8766,
+        8784,
+        8831,
+        9044,
+        9050,
+        9133,
+        9176,
+        9212,
+        9219,
+        9298,
+        9388,
+        9510,
+        9909,
+        9951,
+        10453,
+        10536,
+        10597,
+        10642,
+        10852,
+        10891,
+        11138,
+        11180,
+        11263,
+        11893
       ],
       "sections": [
         "SEC-28",
@@ -9891,8 +9896,8 @@
     },
     "HR-01": {
       "locations": [
-        2328,
-        8003
+        2330,
+        8006
       ],
       "sections": [
         "SEC-10",
@@ -9904,8 +9909,8 @@
     },
     "HR-02": {
       "locations": [
-        2329,
-        8004
+        2331,
+        8007
       ],
       "sections": [
         "SEC-10",
@@ -9918,9 +9923,9 @@
     "HR-03": {
       "locations": [
         618,
-        2330,
-        7375,
-        8046
+        2332,
+        7378,
+        8049
       ],
       "sections": [
         "SEC-03",
@@ -9935,8 +9940,8 @@
     "HR-04": {
       "locations": [
         618,
-        2331,
-        8088
+        2333,
+        8091
       ],
       "sections": [
         "SEC-03",
@@ -9949,8 +9954,8 @@
     },
     "HR-05": {
       "locations": [
-        2332,
-        8089
+        2334,
+        8092
       ],
       "sections": [
         "SEC-10",
@@ -9962,9 +9967,9 @@
     },
     "HR-06": {
       "locations": [
-        2333,
-        8132,
-        9129
+        2335,
+        8135,
+        9132
       ],
       "sections": [
         "SEC-10",
@@ -9977,8 +9982,8 @@
     },
     "HR-07": {
       "locations": [
-        2334,
-        8133
+        2336,
+        8136
       ],
       "sections": [
         "SEC-10",
@@ -9990,8 +9995,8 @@
     },
     "HR-08": {
       "locations": [
-        2335,
-        8134
+        2337,
+        8137
       ],
       "sections": [
         "SEC-10",
@@ -10003,8 +10008,8 @@
     },
     "HR-09": {
       "locations": [
-        2336,
-        8135
+        2338,
+        8138
       ],
       "sections": [
         "SEC-10",
@@ -10016,10 +10021,10 @@
     },
     "HR-10": {
       "locations": [
-        2337,
-        8136,
-        8178,
-        9129
+        2339,
+        8139,
+        8181,
+        9132
       ],
       "sections": [
         "SEC-10",
@@ -10033,8 +10038,8 @@
     },
     "HR-11": {
       "locations": [
-        2338,
-        8047
+        2340,
+        8050
       ],
       "sections": [
         "SEC-10",
@@ -10046,10 +10051,10 @@
     },
     "HR-12": {
       "locations": [
-        2339,
-        7958,
-        8447,
-        10157
+        2341,
+        7961,
+        8450,
+        10160
       ],
       "sections": [
         "SEC-10",
@@ -10063,10 +10068,10 @@
     },
     "HR-13": {
       "locations": [
-        2340,
-        7959,
-        8179,
-        8739
+        2342,
+        7962,
+        8182,
+        8742
       ],
       "sections": [
         "SEC-10",
@@ -10080,10 +10085,10 @@
     },
     "HR-14": {
       "locations": [
-        2341,
-        7960,
-        8180,
-        11011
+        2343,
+        7963,
+        8183,
+        11016
       ],
       "sections": [
         "SEC-10",
@@ -10097,8 +10102,8 @@
     },
     "HR-15": {
       "locations": [
-        2342,
-        8879
+        2344,
+        8882
       ],
       "sections": [
         "SEC-10",
@@ -10110,8 +10115,8 @@
     },
     "HR-16": {
       "locations": [
-        2343,
-        8005
+        2345,
+        8008
       ],
       "sections": [
         "SEC-10",
@@ -10123,8 +10128,8 @@
     },
     "HR-17": {
       "locations": [
-        2344,
-        8006
+        2346,
+        8009
       ],
       "sections": [
         "SEC-10",
@@ -10136,10 +10141,10 @@
     },
     "HR-18": {
       "locations": [
-        2345,
-        8231,
-        9556,
-        10970
+        2347,
+        8234,
+        9559,
+        10975
       ],
       "sections": [
         "SEC-10",
@@ -10153,8 +10158,8 @@
     },
     "HR-19": {
       "locations": [
-        2346,
-        9600
+        2348,
+        9603
       ],
       "sections": [
         "SEC-10",
@@ -10166,10 +10171,10 @@
     },
     "HR-20": {
       "locations": [
-        2347,
-        8880,
-        9601,
-        9644
+        2349,
+        8883,
+        9604,
+        9647
       ],
       "sections": [
         "SEC-10",
@@ -10183,9 +10188,9 @@
     },
     "HR-21": {
       "locations": [
-        2348,
-        9557,
-        10034
+        2350,
+        9560,
+        10037
       ],
       "sections": [
         "SEC-10",
@@ -10198,8 +10203,8 @@
     },
     "HR-22": {
       "locations": [
-        2349,
-        9729
+        2351,
+        9732
       ],
       "sections": [
         "SEC-10",
@@ -10211,8 +10216,8 @@
     },
     "HR-23": {
       "locations": [
-        2350,
-        9686
+        2352,
+        9689
       ],
       "sections": [
         "SEC-10",
@@ -10224,8 +10229,8 @@
     },
     "HR-24": {
       "locations": [
-        2351,
-        9860
+        2353,
+        9863
       ],
       "sections": [
         "SEC-10",
@@ -10237,9 +10242,9 @@
     },
     "HR-25": {
       "locations": [
-        2352,
-        9602,
-        9645
+        2354,
+        9605,
+        9648
       ],
       "sections": [
         "SEC-10",
@@ -10252,8 +10257,8 @@
     },
     "HR-26": {
       "locations": [
-        2353,
-        9861
+        2355,
+        9864
       ],
       "sections": [
         "SEC-10",
@@ -10265,8 +10270,8 @@
     },
     "HR-27": {
       "locations": [
-        2354,
-        9862
+        2356,
+        9865
       ],
       "sections": [
         "SEC-10",
@@ -10278,9 +10283,9 @@
     },
     "HR-28": {
       "locations": [
-        2355,
-        8448,
-        10158
+        2357,
+        8451,
+        10161
       ],
       "sections": [
         "SEC-10",
@@ -10293,8 +10298,8 @@
     },
     "HR-29": {
       "locations": [
-        2356,
-        8181
+        2358,
+        8184
       ],
       "sections": [
         "SEC-10",
@@ -10306,8 +10311,8 @@
     },
     "HR-30": {
       "locations": [
-        2357,
-        8137
+        2359,
+        8140
       ],
       "sections": [
         "SEC-10",
@@ -10319,7 +10324,7 @@
     },
     "HR-31": {
       "locations": [
-        2358
+        2360
       ],
       "sections": [
         "SEC-10"
@@ -10328,9 +10333,9 @@
     },
     "HR-32": {
       "locations": [
-        2359,
-        8090,
-        8319
+        2361,
+        8093,
+        8322
       ],
       "sections": [
         "SEC-10",
@@ -10343,8 +10348,8 @@
     },
     "HR-33": {
       "locations": [
-        2360,
-        8403
+        2362,
+        8406
       ],
       "sections": [
         "SEC-10",
@@ -10356,8 +10361,8 @@
     },
     "HR-34": {
       "locations": [
-        2361,
-        8361
+        2363,
+        8364
       ],
       "sections": [
         "SEC-10",
@@ -10369,9 +10374,9 @@
     },
     "HR-35": {
       "locations": [
-        2362,
-        8138,
-        8362
+        2364,
+        8141,
+        8365
       ],
       "sections": [
         "SEC-10",
@@ -10384,8 +10389,8 @@
     },
     "HR-36": {
       "locations": [
-        2363,
-        8404
+        2365,
+        8407
       ],
       "sections": [
         "SEC-10",
@@ -10397,8 +10402,8 @@
     },
     "HR-37": {
       "locations": [
-        2364,
-        9816
+        2366,
+        9819
       ],
       "sections": [
         "SEC-10",
@@ -10410,7 +10415,7 @@
     },
     "HR-38": {
       "locations": [
-        2365
+        2367
       ],
       "sections": [
         "SEC-10"
@@ -10419,7 +10424,7 @@
     },
     "TEST-AIM-001": {
       "locations": [
-        9045
+        9048
       ],
       "sections": [
         "SEC-49"
@@ -10430,7 +10435,7 @@
     },
     "TEST-AIM-002": {
       "locations": [
-        9046
+        9049
       ],
       "sections": [
         "SEC-49"
@@ -10441,7 +10446,7 @@
     },
     "TEST-CACHE-001": {
       "locations": [
-        10366
+        10369
       ],
       "sections": [
         "SEC-49"
@@ -10452,7 +10457,7 @@
     },
     "TEST-CACHE-002": {
       "locations": [
-        10367
+        10370
       ],
       "sections": [
         "SEC-49"
@@ -10463,7 +10468,7 @@
     },
     "TEST-CACHE-003": {
       "locations": [
-        10407
+        10410
       ],
       "sections": [
         "SEC-49"
@@ -10474,7 +10479,7 @@
     },
     "TEST-CACHE-004": {
       "locations": [
-        10408
+        10411
       ],
       "sections": [
         "SEC-49"
@@ -10485,7 +10490,7 @@
     },
     "TEST-CACHE-005": {
       "locations": [
-        10448
+        10451
       ],
       "sections": [
         "SEC-49"
@@ -10496,7 +10501,7 @@
     },
     "TEST-CACHE-006": {
       "locations": [
-        10449
+        10452
       ],
       "sections": [
         "SEC-49"
@@ -10507,7 +10512,7 @@
     },
     "TEST-CACHE-007": {
       "locations": [
-        10491
+        10494
       ],
       "sections": [
         "SEC-49"
@@ -10518,7 +10523,7 @@
     },
     "TEST-COMP-001": {
       "locations": [
-        10927
+        10932
       ],
       "sections": [
         "SEC-49"
@@ -10529,7 +10534,7 @@
     },
     "TEST-COMP-002": {
       "locations": [
-        10928
+        10933
       ],
       "sections": [
         "SEC-49"
@@ -10540,7 +10545,7 @@
     },
     "TEST-COMP-003": {
       "locations": [
-        10968
+        10973
       ],
       "sections": [
         "SEC-49"
@@ -10551,7 +10556,7 @@
     },
     "TEST-COMP-004": {
       "locations": [
-        10969
+        10974
       ],
       "sections": [
         "SEC-49"
@@ -10562,7 +10567,7 @@
     },
     "TEST-COMP-005": {
       "locations": [
-        11010
+        11015
       ],
       "sections": [
         "SEC-49"
@@ -10573,7 +10578,7 @@
     },
     "TEST-COMP-006": {
       "locations": [
-        11052
+        11057
       ],
       "sections": [
         "SEC-49"
@@ -10584,7 +10589,7 @@
     },
     "TEST-COMP-007": {
       "locations": [
-        11053
+        11058
       ],
       "sections": [
         "SEC-49"
@@ -10595,7 +10600,7 @@
     },
     "TEST-COMP-008": {
       "locations": [
-        11093
+        11098
       ],
       "sections": [
         "SEC-49"
@@ -10606,7 +10611,7 @@
     },
     "TEST-COMP-009": {
       "locations": [
-        11094
+        11099
       ],
       "sections": [
         "SEC-49"
@@ -10617,7 +10622,7 @@
     },
     "TEST-DOC-001": {
       "locations": [
-        7629
+        7632
       ],
       "sections": [
         "SEC-49"
@@ -10628,7 +10633,7 @@
     },
     "TEST-DOC-002": {
       "locations": [
-        7630
+        7633
       ],
       "sections": [
         "SEC-49"
@@ -10639,7 +10644,7 @@
     },
     "TEST-DOC-003": {
       "locations": [
-        7631
+        7634
       ],
       "sections": [
         "SEC-49"
@@ -10650,7 +10655,7 @@
     },
     "TEST-DOC-004": {
       "locations": [
-        7669
+        7672
       ],
       "sections": [
         "SEC-49"
@@ -10661,7 +10666,7 @@
     },
     "TEST-DOC-005": {
       "locations": [
-        7707
+        7710
       ],
       "sections": [
         "SEC-49"
@@ -10672,7 +10677,7 @@
     },
     "TEST-DOC-006": {
       "locations": [
-        7708
+        7711
       ],
       "sections": [
         "SEC-49"
@@ -10683,7 +10688,7 @@
     },
     "TEST-DOC-007": {
       "locations": [
-        7747
+        7750
       ],
       "sections": [
         "SEC-49"
@@ -10694,7 +10699,7 @@
     },
     "TEST-DOC-008": {
       "locations": [
-        7748
+        7751
       ],
       "sections": [
         "SEC-49"
@@ -10705,7 +10710,7 @@
     },
     "TEST-FND-001": {
       "locations": [
-        7789
+        7792
       ],
       "sections": [
         "SEC-49"
@@ -10716,7 +10721,7 @@
     },
     "TEST-FND-002": {
       "locations": [
-        7790
+        7793
       ],
       "sections": [
         "SEC-49"
@@ -10727,7 +10732,7 @@
     },
     "TEST-FND-003": {
       "locations": [
-        7831
+        7834
       ],
       "sections": [
         "SEC-49"
@@ -10738,7 +10743,7 @@
     },
     "TEST-FND-004": {
       "locations": [
-        7832
+        7835
       ],
       "sections": [
         "SEC-49"
@@ -10749,7 +10754,7 @@
     },
     "TEST-FND-005": {
       "locations": [
-        7874
+        7877
       ],
       "sections": [
         "SEC-49"
@@ -10760,7 +10765,7 @@
     },
     "TEST-FND-006": {
       "locations": [
-        7875
+        7878
       ],
       "sections": [
         "SEC-49"
@@ -10771,7 +10776,7 @@
     },
     "TEST-FND-007": {
       "locations": [
-        7876
+        7879
       ],
       "sections": [
         "SEC-49"
@@ -10782,7 +10787,7 @@
     },
     "TEST-GRD-001": {
       "locations": [
-        8533
+        8536
       ],
       "sections": [
         "SEC-49"
@@ -10793,7 +10798,7 @@
     },
     "TEST-GRD-002": {
       "locations": [
-        8534
+        8537
       ],
       "sections": [
         "SEC-49"
@@ -10804,7 +10809,7 @@
     },
     "TEST-GRD-003": {
       "locations": [
-        8574
+        8577
       ],
       "sections": [
         "SEC-49"
@@ -10815,7 +10820,7 @@
     },
     "TEST-GRD-004": {
       "locations": [
-        8575
+        8578
       ],
       "sections": [
         "SEC-49"
@@ -10826,7 +10831,7 @@
     },
     "TEST-GRD-005": {
       "locations": [
-        8656
+        8659
       ],
       "sections": [
         "SEC-49"
@@ -10837,7 +10842,7 @@
     },
     "TEST-GRD-006": {
       "locations": [
-        8657
+        8660
       ],
       "sections": [
         "SEC-49"
@@ -10848,7 +10853,7 @@
     },
     "TEST-GRD-007": {
       "locations": [
-        8698
+        8701
       ],
       "sections": [
         "SEC-49"
@@ -10859,7 +10864,7 @@
     },
     "TEST-GRD-008": {
       "locations": [
-        8699
+        8702
       ],
       "sections": [
         "SEC-49"
@@ -10870,7 +10875,7 @@
     },
     "TEST-GRD-009": {
       "locations": [
-        8740
+        8743
       ],
       "sections": [
         "SEC-49"
@@ -10881,7 +10886,7 @@
     },
     "TEST-GRD-010": {
       "locations": [
-        8741
+        8744
       ],
       "sections": [
         "SEC-49"
@@ -10892,8 +10897,8 @@
     },
     "TEST-HO-001": {
       "locations": [
-        6246,
-        9603
+        6248,
+        9606
       ],
       "sections": [
         "SEC-35",
@@ -10905,8 +10910,8 @@
     },
     "TEST-HO-002": {
       "locations": [
-        6247,
-        9687
+        6249,
+        9690
       ],
       "sections": [
         "SEC-35",
@@ -10918,8 +10923,8 @@
     },
     "TEST-HO-003": {
       "locations": [
-        6248,
-        9558
+        6250,
+        9561
       ],
       "sections": [
         "SEC-35",
@@ -10931,8 +10936,8 @@
     },
     "TEST-HO-004": {
       "locations": [
-        6249,
-        9559
+        6251,
+        9562
       ],
       "sections": [
         "SEC-35",
@@ -10944,9 +10949,9 @@
     },
     "TEST-HO-005": {
       "locations": [
-        6250,
-        9604,
-        9646
+        6252,
+        9607,
+        9649
       ],
       "sections": [
         "SEC-35",
@@ -10959,9 +10964,9 @@
     },
     "TEST-HO-006": {
       "locations": [
-        6251,
-        9688,
-        9772
+        6253,
+        9691,
+        9775
       ],
       "sections": [
         "SEC-35",
@@ -10975,8 +10980,8 @@
     "TEST-HO-007": {
       "locations": [
         82,
-        6252,
-        9730
+        6254,
+        9733
       ],
       "sections": [
         "SEC-00",
@@ -10989,8 +10994,8 @@
     },
     "TEST-HO-008": {
       "locations": [
-        6253,
-        9863
+        6255,
+        9866
       ],
       "sections": [
         "SEC-35",
@@ -11003,9 +11008,9 @@
     "TEST-HO-009": {
       "locations": [
         112,
-        6254,
-        9689,
-        9773
+        6256,
+        9692,
+        9776
       ],
       "sections": [
         "SEC-00",
@@ -11019,8 +11024,8 @@
     },
     "TEST-HO-010": {
       "locations": [
-        6255,
-        9774
+        6257,
+        9777
       ],
       "sections": [
         "SEC-35",
@@ -11032,8 +11037,8 @@
     },
     "TEST-HO-011": {
       "locations": [
-        6256,
-        9864
+        6258,
+        9867
       ],
       "sections": [
         "SEC-35",
@@ -11045,8 +11050,8 @@
     },
     "TEST-HO-012": {
       "locations": [
-        6257,
-        9817
+        6259,
+        9820
       ],
       "sections": [
         "SEC-35",
@@ -11058,8 +11063,8 @@
     },
     "TEST-HO-013": {
       "locations": [
-        6258,
-        9818
+        6260,
+        9821
       ],
       "sections": [
         "SEC-35",
@@ -11071,8 +11076,8 @@
     },
     "TEST-HO-014": {
       "locations": [
-        6259,
-        9865
+        6261,
+        9868
       ],
       "sections": [
         "SEC-35",
@@ -11084,7 +11089,7 @@
     },
     "TEST-HO-015": {
       "locations": [
-        6260
+        6262
       ],
       "sections": [
         "SEC-35"
@@ -11093,9 +11098,9 @@
     },
     "TEST-HO-016": {
       "locations": [
-        6261,
-        10584,
-        12098
+        6263,
+        10587,
+        12109
       ],
       "sections": [
         "SEC-35",
@@ -11107,7 +11112,7 @@
     },
     "TEST-HO-017": {
       "locations": [
-        6262
+        6264
       ],
       "sections": [
         "SEC-35",
@@ -11119,7 +11124,7 @@
     },
     "TEST-HO-018": {
       "locations": [
-        6263
+        6265
       ],
       "sections": [
         "SEC-35",
@@ -11131,7 +11136,7 @@
     },
     "TEST-HO-019": {
       "locations": [
-        6264
+        6266
       ],
       "sections": [
         "SEC-35",
@@ -11143,7 +11148,7 @@
     },
     "TEST-HO-020": {
       "locations": [
-        6265
+        6267
       ],
       "sections": [
         "SEC-35",
@@ -11155,7 +11160,7 @@
     },
     "TEST-HO-021": {
       "locations": [
-        6266
+        6268
       ],
       "sections": [
         "SEC-35",
@@ -11167,7 +11172,7 @@
     },
     "TEST-HO-022": {
       "locations": [
-        6267
+        6269
       ],
       "sections": [
         "SEC-35",
@@ -11179,11 +11184,11 @@
     },
     "TEST-HO-023": {
       "locations": [
-        6268,
-        9560,
-        9731,
-        9775,
-        12000
+        6270,
+        9563,
+        9734,
+        9778,
+        12011
       ],
       "sections": [
         "SEC-35",
@@ -11197,7 +11202,7 @@
     },
     "TEST-HOST-001": {
       "locations": [
-        7915
+        7918
       ],
       "sections": [
         "SEC-49"
@@ -11208,7 +11213,7 @@
     },
     "TEST-HOST-002": {
       "locations": [
-        7916
+        7919
       ],
       "sections": [
         "SEC-49"
@@ -11219,7 +11224,7 @@
     },
     "TEST-HOST-003": {
       "locations": [
-        7963
+        7966
       ],
       "sections": [
         "SEC-49"
@@ -11230,7 +11235,7 @@
     },
     "TEST-HOST-004": {
       "locations": [
-        8048
+        8051
       ],
       "sections": [
         "SEC-49"
@@ -11241,7 +11246,7 @@
     },
     "TEST-HOST-005": {
       "locations": [
-        8239
+        8242
       ],
       "sections": [
         "SEC-49"
@@ -11252,7 +11257,7 @@
     },
     "TEST-HOST-006": {
       "locations": [
-        8240
+        8243
       ],
       "sections": [
         "SEC-49"
@@ -11263,8 +11268,8 @@
     },
     "TEST-NIF-001": {
       "locations": [
-        6017,
-        8273
+        6019,
+        8276
       ],
       "sections": [
         "SEC-32",
@@ -11276,7 +11281,7 @@
     },
     "TEST-NIF-002": {
       "locations": [
-        6018
+        6020
       ],
       "sections": [
         "SEC-32"
@@ -11285,7 +11290,7 @@
     },
     "TEST-NIF-003": {
       "locations": [
-        6019
+        6021
       ],
       "sections": [
         "SEC-32"
@@ -11294,7 +11299,7 @@
     },
     "TEST-NIF-004": {
       "locations": [
-        6020
+        6022
       ],
       "sections": [
         "SEC-32"
@@ -11303,7 +11308,7 @@
     },
     "TEST-NIF-005": {
       "locations": [
-        6021
+        6023
       ],
       "sections": [
         "SEC-32"
@@ -11312,7 +11317,7 @@
     },
     "TEST-NIF-006": {
       "locations": [
-        6022
+        6024
       ],
       "sections": [
         "SEC-32"
@@ -11321,7 +11326,7 @@
     },
     "TEST-NIF-007": {
       "locations": [
-        6023
+        6025
       ],
       "sections": [
         "SEC-32"
@@ -11330,7 +11335,7 @@
     },
     "TEST-NIF-008": {
       "locations": [
-        6024
+        6026
       ],
       "sections": [
         "SEC-32"
@@ -11339,7 +11344,7 @@
     },
     "TEST-NIF-009": {
       "locations": [
-        6025
+        6027
       ],
       "sections": [
         "SEC-32"
@@ -11348,7 +11353,7 @@
     },
     "TEST-NIF-010": {
       "locations": [
-        6026
+        6028
       ],
       "sections": [
         "SEC-32"
@@ -11357,7 +11362,7 @@
     },
     "TEST-NIF-011": {
       "locations": [
-        6027
+        6029
       ],
       "sections": [
         "SEC-32"
@@ -11366,7 +11371,7 @@
     },
     "TEST-NIF-012": {
       "locations": [
-        6028
+        6030
       ],
       "sections": [
         "SEC-32"
@@ -11375,7 +11380,7 @@
     },
     "TEST-NIF-013": {
       "locations": [
-        6029
+        6031
       ],
       "sections": [
         "SEC-32"
@@ -11384,9 +11389,9 @@
     },
     "TEST-NIF-014": {
       "locations": [
-        6030,
-        8658,
-        9089
+        6032,
+        8661,
+        9092
       ],
       "sections": [
         "SEC-32",
@@ -11399,7 +11404,7 @@
     },
     "TEST-NIF-015": {
       "locations": [
-        6031
+        6033
       ],
       "sections": [
         "SEC-32"
@@ -11408,7 +11413,7 @@
     },
     "TEST-NIF-016": {
       "locations": [
-        6032
+        6034
       ],
       "sections": [
         "SEC-32"
@@ -11417,10 +11422,10 @@
     },
     "TEST-NIF-017": {
       "locations": [
-        6033,
-        6260,
-        9812,
-        9819
+        6035,
+        6262,
+        9815,
+        9822
       ],
       "sections": [
         "SEC-32",
@@ -11433,8 +11438,8 @@
     },
     "TEST-NIF-018": {
       "locations": [
-        6034,
-        8405
+        6036,
+        8408
       ],
       "sections": [
         "SEC-32",
@@ -11446,7 +11451,7 @@
     },
     "TEST-NIF-019": {
       "locations": [
-        6035
+        6037
       ],
       "sections": [
         "SEC-32"
@@ -11455,9 +11460,9 @@
     },
     "TEST-NIF-020": {
       "locations": [
-        6036,
-        8273,
-        8363
+        6038,
+        8276,
+        8366
       ],
       "sections": [
         "SEC-32",
@@ -11470,9 +11475,9 @@
     },
     "TEST-NIF-021": {
       "locations": [
-        6037,
-        8091,
-        8320
+        6039,
+        8094,
+        8323
       ],
       "sections": [
         "SEC-32",
@@ -11485,8 +11490,8 @@
     },
     "TEST-NIF-022": {
       "locations": [
-        6038,
-        8406
+        6040,
+        8409
       ],
       "sections": [
         "SEC-32",
@@ -11498,9 +11503,9 @@
     },
     "TEST-NIF-023": {
       "locations": [
-        6039,
-        8321,
-        8616
+        6041,
+        8324,
+        8619
       ],
       "sections": [
         "SEC-32",
@@ -11513,7 +11518,7 @@
     },
     "TEST-OBS-001": {
       "locations": [
-        8881
+        8884
       ],
       "sections": [
         "SEC-49"
@@ -11524,7 +11529,7 @@
     },
     "TEST-OBS-002": {
       "locations": [
-        8921
+        8924
       ],
       "sections": [
         "SEC-49"
@@ -11535,7 +11540,7 @@
     },
     "TEST-OBS-003": {
       "locations": [
-        8922
+        8925
       ],
       "sections": [
         "SEC-49"
@@ -11546,7 +11551,7 @@
     },
     "TEST-OBS-004": {
       "locations": [
-        8962
+        8965
       ],
       "sections": [
         "SEC-49"
@@ -11557,7 +11562,7 @@
     },
     "TEST-OBS-005": {
       "locations": [
-        9003
+        9006
       ],
       "sections": [
         "SEC-49"
@@ -11568,7 +11573,7 @@
     },
     "TEST-OBS-006": {
       "locations": [
-        9004
+        9007
       ],
       "sections": [
         "SEC-49"
@@ -11579,7 +11584,7 @@
     },
     "TEST-OBS-007": {
       "locations": [
-        9087
+        9090
       ],
       "sections": [
         "SEC-49"
@@ -11590,7 +11595,7 @@
     },
     "TEST-OBS-008": {
       "locations": [
-        9088
+        9091
       ],
       "sections": [
         "SEC-49"
@@ -11601,7 +11606,7 @@
     },
     "TEST-OBS-009": {
       "locations": [
-        9131
+        9134
       ],
       "sections": [
         "SEC-49"
@@ -11612,7 +11617,7 @@
     },
     "TEST-OBS-010": {
       "locations": [
-        9171
+        9174
       ],
       "sections": [
         "SEC-49"
@@ -11623,7 +11628,7 @@
     },
     "TEST-OBS-011": {
       "locations": [
-        9172
+        9175
       ],
       "sections": [
         "SEC-49"
@@ -11634,7 +11639,7 @@
     },
     "TEST-RC-001": {
       "locations": [
-        11257
+        11262
       ],
       "sections": [
         "SEC-49"
@@ -11645,7 +11650,7 @@
     },
     "TEST-RC-002": {
       "locations": [
-        11300
+        11305
       ],
       "sections": [
         "SEC-49"
@@ -11656,7 +11661,7 @@
     },
     "TEST-RC-003": {
       "locations": [
-        11301
+        11306
       ],
       "sections": [
         "SEC-49"
@@ -11667,7 +11672,7 @@
     },
     "TEST-RC-004": {
       "locations": [
-        11341
+        11346
       ],
       "sections": [
         "SEC-49"
@@ -11678,7 +11683,7 @@
     },
     "TEST-RC-005": {
       "locations": [
-        11382
+        11387
       ],
       "sections": [
         "SEC-49"
@@ -11689,7 +11694,7 @@
     },
     "TEST-RC-006": {
       "locations": [
-        11383
+        11388
       ],
       "sections": [
         "SEC-49"
@@ -11700,7 +11705,7 @@
     },
     "TEST-RC-007": {
       "locations": [
-        11464
+        11469
       ],
       "sections": [
         "SEC-49"
@@ -11711,7 +11716,7 @@
     },
     "TEST-RC-008": {
       "locations": [
-        11465
+        11470
       ],
       "sections": [
         "SEC-49"
@@ -11722,7 +11727,7 @@
     },
     "TEST-REC-001": {
       "locations": [
-        9259
+        9262
       ],
       "sections": [
         "SEC-49"
@@ -11733,7 +11738,7 @@
     },
     "TEST-REC-002": {
       "locations": [
-        9340
+        9343
       ],
       "sections": [
         "SEC-49"
@@ -11744,7 +11749,7 @@
     },
     "TEST-REC-003": {
       "locations": [
-        9383
+        9386
       ],
       "sections": [
         "SEC-49"
@@ -11755,7 +11760,7 @@
     },
     "TEST-REC-004": {
       "locations": [
-        9424
+        9427
       ],
       "sections": [
         "SEC-49"
@@ -11766,7 +11771,7 @@
     },
     "TEST-REC-005": {
       "locations": [
-        9425
+        9428
       ],
       "sections": [
         "SEC-49"
@@ -11777,7 +11782,7 @@
     },
     "TEST-SEC-000": {
       "locations": [
-        7833
+        7836
       ],
       "sections": [
         "SEC-49"
@@ -11788,7 +11793,7 @@
     },
     "TEST-SEC-001": {
       "locations": [
-        8446
+        8449
       ],
       "sections": [
         "SEC-49"
@@ -11799,7 +11804,7 @@
     },
     "TEST-SEC-101": {
       "locations": [
-        9992
+        9995
       ],
       "sections": [
         "SEC-49"
@@ -11810,7 +11815,7 @@
     },
     "TEST-SEC-102": {
       "locations": [
-        10033
+        10036
       ],
       "sections": [
         "SEC-49"
@@ -11821,7 +11826,7 @@
     },
     "TEST-SEC-103": {
       "locations": [
-        10074
+        10077
       ],
       "sections": [
         "SEC-49"
@@ -11832,7 +11837,7 @@
     },
     "TEST-SEC-104": {
       "locations": [
-        10075
+        10078
       ],
       "sections": [
         "SEC-49"
@@ -11843,7 +11848,7 @@
     },
     "TEST-SEC-105": {
       "locations": [
-        10116
+        10119
       ],
       "sections": [
         "SEC-49"
@@ -11854,7 +11859,7 @@
     },
     "TEST-SEC-106": {
       "locations": [
-        10199
+        10202
       ],
       "sections": [
         "SEC-49"
@@ -11865,7 +11870,7 @@
     },
     "TEST-SEC-107": {
       "locations": [
-        10200
+        10203
       ],
       "sections": [
         "SEC-49"
@@ -11876,7 +11881,7 @@
     },
     "TEST-SEC-108": {
       "locations": [
-        10240
+        10243
       ],
       "sections": [
         "SEC-49"
@@ -11887,7 +11892,7 @@
     },
     "TEST-SEC-109": {
       "locations": [
-        10241
+        10244
       ],
       "sections": [
         "SEC-49"
@@ -11898,7 +11903,7 @@
     },
     "TEST-SEC-110": {
       "locations": [
-        10282
+        10285
       ],
       "sections": [
         "SEC-49"
@@ -11909,9 +11914,9 @@
     },
     "TEST-SEC-111": {
       "locations": [
-        6352,
-        10584,
-        12098
+        6354,
+        10587,
+        12109
       ],
       "sections": [
         "SEC-36",
@@ -11923,7 +11928,7 @@
     },
     "TEST-SEC-112": {
       "locations": [
-        6353
+        6355
       ],
       "sections": [
         "SEC-36",
@@ -11936,7 +11941,7 @@
     "TEST-SEC-113": {
       "locations": [
         2222,
-        6354
+        6356
       ],
       "sections": [
         "SEC-36",
@@ -11949,7 +11954,7 @@
     "TEST-SEC-114": {
       "locations": [
         2222,
-        6355
+        6357
       ],
       "sections": [
         "SEC-36",
@@ -11961,7 +11966,7 @@
     },
     "TEST-SEC-115": {
       "locations": [
-        6356
+        6358
       ],
       "sections": [
         "SEC-36",
@@ -11973,7 +11978,7 @@
     },
     "TEST-SEC-116": {
       "locations": [
-        6357
+        6359
       ],
       "sections": [
         "SEC-36",
@@ -11985,7 +11990,7 @@
     },
     "TEST-SEC-117": {
       "locations": [
-        6358
+        6360
       ],
       "sections": [
         "SEC-36",
@@ -11997,7 +12002,7 @@
     },
     "TEST-SEC-118": {
       "locations": [
-        6359
+        6361
       ],
       "sections": [
         "SEC-36",
@@ -12009,7 +12014,7 @@
     },
     "TEST-SEC-119": {
       "locations": [
-        6360
+        6362
       ],
       "sections": [
         "SEC-36",
@@ -12021,10 +12026,10 @@
     },
     "TEST-SEC-120": {
       "locations": [
-        6361,
-        10590,
-        10641,
-        11993
+        6363,
+        10593,
+        10645,
+        12004
       ],
       "sections": [
         "SEC-36",
@@ -12037,10 +12042,26 @@
     },
     "TEST-SEC-121": {
       "locations": [
-        6362,
-        10591,
-        10642,
-        11987
+        6364,
+        10594,
+        10646,
+        11998
+      ],
+      "sections": [
+        "SEC-36",
+        "SEC-49"
+      ],
+      "work_packages": [
+        "WP-CRED-001",
+        "WP-RLS-060"
+      ]
+    },
+    "TEST-SEC-122": {
+      "locations": [
+        6365,
+        10595,
+        10647,
+        11992
       ],
       "sections": [
         "SEC-36",
@@ -12053,7 +12074,7 @@
     },
     "TEST-V1-001": {
       "locations": [
-        11549
+        11554
       ],
       "sections": [
         "SEC-49"
@@ -12064,7 +12085,7 @@
     },
     "TEST-V1-002": {
       "locations": [
-        11589
+        11594
       ],
       "sections": [
         "SEC-49"
@@ -12075,7 +12096,7 @@
     },
     "TEST-V1-003": {
       "locations": [
-        11628
+        11633
       ],
       "sections": [
         "SEC-49"
@@ -12086,7 +12107,7 @@
     },
     "TEST-V1-004": {
       "locations": [
-        11629
+        11634
       ],
       "sections": [
         "SEC-49"
@@ -12097,7 +12118,7 @@
     },
     "TEST-V1-005": {
       "locations": [
-        11670
+        11675
       ],
       "sections": [
         "SEC-49"
@@ -12108,7 +12129,7 @@
     },
     "TEST-V1-006": {
       "locations": [
-        11711
+        11716
       ],
       "sections": [
         "SEC-49"
@@ -12119,7 +12140,7 @@
     },
     "TEST-V1-007": {
       "locations": [
-        11752
+        11757
       ],
       "sections": [
         "SEC-49"
@@ -12130,7 +12151,7 @@
     },
     "TEST-V1-008": {
       "locations": [
-        11753
+        11758
       ],
       "sections": [
         "SEC-49"
@@ -12141,7 +12162,7 @@
     },
     "TEST-WEB-001": {
       "locations": [
-        10683
+        10688
       ],
       "sections": [
         "SEC-49"
@@ -12152,7 +12173,7 @@
     },
     "TEST-WEB-002": {
       "locations": [
-        10684
+        10689
       ],
       "sections": [
         "SEC-49"
@@ -12163,7 +12184,7 @@
     },
     "TEST-WEB-003": {
       "locations": [
-        10724
+        10729
       ],
       "sections": [
         "SEC-49"
@@ -12174,7 +12195,7 @@
     },
     "TEST-WEB-004": {
       "locations": [
-        10725
+        10730
       ],
       "sections": [
         "SEC-49"
@@ -12185,7 +12206,7 @@
     },
     "TEST-WEB-005": {
       "locations": [
-        10765
+        10770
       ],
       "sections": [
         "SEC-49"
@@ -12196,7 +12217,7 @@
     },
     "TEST-WEB-006": {
       "locations": [
-        10766
+        10771
       ],
       "sections": [
         "SEC-49"
@@ -12207,7 +12228,7 @@
     },
     "TEST-WEB-007": {
       "locations": [
-        10806
+        10811
       ],
       "sections": [
         "SEC-49"
@@ -12218,7 +12239,7 @@
     },
     "TEST-WEB-008": {
       "locations": [
-        10807
+        10812
       ],
       "sections": [
         "SEC-49"
@@ -12229,11 +12250,11 @@
     },
     "HR-39": {
       "locations": [
-        2366,
-        7961,
-        8232,
-        8829,
-        12109
+        2368,
+        7964,
+        8235,
+        8832,
+        12120
       ],
       "sections": [
         "SEC-10",
@@ -12247,52 +12268,7 @@
     },
     "HR-40": {
       "locations": [
-        2367,
-        8233,
-        8830
-      ],
-      "sections": [
-        "SEC-10",
-        "SEC-49"
-      ],
-      "work_packages": [
-        "WP-HOST-008",
-        "WP-RLS-010"
-      ]
-    },
-    "HR-41": {
-      "locations": [
-        2368,
-        8234,
-        8831
-      ],
-      "sections": [
-        "SEC-10",
-        "SEC-49"
-      ],
-      "work_packages": [
-        "WP-HOST-008",
-        "WP-RLS-010"
-      ]
-    },
-    "HR-42": {
-      "locations": [
         2369,
-        8235,
-        8832
-      ],
-      "sections": [
-        "SEC-10",
-        "SEC-49"
-      ],
-      "work_packages": [
-        "WP-HOST-008",
-        "WP-RLS-010"
-      ]
-    },
-    "HR-43": {
-      "locations": [
-        2370,
         8236,
         8833
       ],
@@ -12305,12 +12281,57 @@
         "WP-RLS-010"
       ]
     },
-    "HR-44": {
+    "HR-41": {
       "locations": [
-        2371,
-        7962,
+        2370,
         8237,
         8834
+      ],
+      "sections": [
+        "SEC-10",
+        "SEC-49"
+      ],
+      "work_packages": [
+        "WP-HOST-008",
+        "WP-RLS-010"
+      ]
+    },
+    "HR-42": {
+      "locations": [
+        2371,
+        8238,
+        8835
+      ],
+      "sections": [
+        "SEC-10",
+        "SEC-49"
+      ],
+      "work_packages": [
+        "WP-HOST-008",
+        "WP-RLS-010"
+      ]
+    },
+    "HR-43": {
+      "locations": [
+        2372,
+        8239,
+        8836
+      ],
+      "sections": [
+        "SEC-10",
+        "SEC-49"
+      ],
+      "work_packages": [
+        "WP-HOST-008",
+        "WP-RLS-010"
+      ]
+    },
+    "HR-44": {
+      "locations": [
+        2373,
+        7965,
+        8240,
+        8837
       ],
       "sections": [
         "SEC-10",
@@ -12324,9 +12345,9 @@
     },
     "HR-45": {
       "locations": [
-        2372,
-        8238,
-        8835
+        2374,
+        8241,
+        8838
       ],
       "sections": [
         "SEC-10",
@@ -12339,7 +12360,7 @@
     },
     "TEST-CI-NIF-001": {
       "locations": [
-        8782
+        8785
       ],
       "sections": [
         "SEC-49"
@@ -12352,7 +12373,7 @@
   "evidence": {
     "EVID-CMP-001": {
       "locations": [
-        7357
+        7360
       ],
       "sections": [
         "SEC-48"
@@ -12360,7 +12381,7 @@
     },
     "EVID-CMP-002": {
       "locations": [
-        7358
+        7361
       ],
       "sections": [
         "SEC-48"
@@ -12368,7 +12389,7 @@
     },
     "EVID-CMP-003": {
       "locations": [
-        7359
+        7362
       ],
       "sections": [
         "SEC-48"
@@ -12376,7 +12397,7 @@
     },
     "EVID-CMP-004": {
       "locations": [
-        7360
+        7363
       ],
       "sections": [
         "SEC-48"
@@ -12384,7 +12405,7 @@
     },
     "EVID-CMP-005": {
       "locations": [
-        7361
+        7364
       ],
       "sections": [
         "SEC-48"
@@ -12392,7 +12413,7 @@
     },
     "EVID-HOST-001": {
       "locations": [
-        7368
+        7371
       ],
       "sections": [
         "SEC-48"
@@ -12408,7 +12429,7 @@
     },
     "EVID-OAI-001": {
       "locations": [
-        7339
+        7342
       ],
       "sections": [
         "SEC-48"
@@ -12416,7 +12437,7 @@
     },
     "EVID-OAI-002": {
       "locations": [
-        7340
+        7343
       ],
       "sections": [
         "SEC-48"
@@ -12424,7 +12445,7 @@
     },
     "EVID-OAI-003": {
       "locations": [
-        7341
+        7344
       ],
       "sections": [
         "SEC-48"
@@ -12432,7 +12453,7 @@
     },
     "EVID-OAI-004": {
       "locations": [
-        7342
+        7345
       ],
       "sections": [
         "SEC-48"
@@ -12440,7 +12461,7 @@
     },
     "EVID-OAI-005": {
       "locations": [
-        7343
+        7346
       ],
       "sections": [
         "SEC-48"
@@ -12448,7 +12469,7 @@
     },
     "EVID-OAI-006": {
       "locations": [
-        7344
+        7347
       ],
       "sections": [
         "SEC-48"
@@ -12456,7 +12477,7 @@
     },
     "EVID-OAI-007": {
       "locations": [
-        7345
+        7348
       ],
       "sections": [
         "SEC-48"
@@ -12464,7 +12485,7 @@
     },
     "EVID-OAI-008": {
       "locations": [
-        7346
+        7349
       ],
       "sections": [
         "SEC-48"
@@ -12472,7 +12493,7 @@
     },
     "EVID-OAI-009": {
       "locations": [
-        7347
+        7350
       ],
       "sections": [
         "SEC-48"
@@ -12480,7 +12501,7 @@
     },
     "EVID-OAI-010": {
       "locations": [
-        7348
+        7351
       ],
       "sections": [
         "SEC-48"
@@ -12488,7 +12509,7 @@
     },
     "EVID-WEB-001": {
       "locations": [
-        7362
+        7365
       ],
       "sections": [
         "SEC-48"
@@ -12496,7 +12517,7 @@
     },
     "EVID-WEB-002": {
       "locations": [
-        7363
+        7366
       ],
       "sections": [
         "SEC-48"
@@ -12504,7 +12525,7 @@
     },
     "EVID-OAI-011": {
       "locations": [
-        7349
+        7352
       ],
       "sections": [
         "SEC-43",
@@ -12516,11 +12537,11 @@
     "ADR-OBS-001": {
       "locations": [
         85,
-        5111,
-        5675,
-        5767,
-        6754,
-        9157
+        5113,
+        5677,
+        5769,
+        6757,
+        9160
       ],
       "sections": [
         "SEC-00",

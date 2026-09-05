@@ -85,15 +85,13 @@ function validateActiveHandoff(
   }
 }
 
-/**
- * Bind an allowlisted intent to one active real-tab Handoff. The returned
- * fixture ticket cannot authorize a helper launch or credential consumption.
- */
-export function bindCredentialIntent(
+/** Package-internal builder; only the locked coordinator may supply the anchor. */
+export function bindCredentialIntentToActivationAnchor(
   value: unknown,
   registry: readonly CredentialUseRegistryEntry[],
   handoff: HandoffLease,
   now: number,
+  activationAnchorHash: string,
 ): CredentialEnclaveTicket {
   const intent = CredentialProvisionIntentSchema.safeParse(value);
   if (!intent.success) throw new CredentialAdmissionError("INVALID_INTENT");
@@ -117,29 +115,15 @@ export function bindCredentialIntent(
   if (entry.provisioningOrigin !== handoff.scope.topOrigin) {
     deny("ORIGIN_MISMATCH");
   }
-
-  const binding = {
-    acquiredAt: handoff.acquiredAt,
-    documentBinding: handoff.scope.documentBinding,
-    expiresAt: handoff.expiresAt,
-    handoffId: handoff.handoffId,
-    leaseEpoch: handoff.leaseEpoch,
-    nonce: handoff.nonce,
-    sessionId: handoff.scope.sessionId,
-    tabId: handoff.scope.tabId,
-    taskId: handoff.scope.taskId,
-    topOrigin: handoff.scope.topOrigin,
-  };
-  const bindingHash = deterministicDigest(
-    "oxrail-credential-handoff-binding-v1",
-    binding,
-  );
+  if (!/^[a-f0-9]{64}$/.test(activationAnchorHash)) {
+    deny("INVALID_HANDOFF");
+  }
   return CredentialEnclaveTicketSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     authority: "FIXTURE_ONLY_NON_AUTHORIZING",
     ticketId: `oct1_${deterministicDigest(
-      "oxrail-credential-fixture-ticket-v1",
-      { bindingHash, entry, issuedAt: now },
+      "oxrail-credential-fixture-ticket-v2",
+      { activationAnchorHash, entry, issuedAt: now },
     )}`,
     credentialUseId: entry.credentialUseId,
     credentialKind: entry.credentialKind,
@@ -156,16 +140,10 @@ export function bindCredentialIntent(
     registryManifestHash: entry.registryManifestHash,
     issuedAt: now,
     handoff: {
-      handoffId: handoff.handoffId,
-      sessionId: handoff.scope.sessionId,
-      taskId: handoff.scope.taskId,
-      tabId: handoff.scope.tabId,
-      topOrigin: handoff.scope.topOrigin,
-      documentBinding: handoff.scope.documentBinding,
+      activationAnchorHash,
       leaseEpoch: handoff.leaseEpoch,
       acquiredAt: handoff.acquiredAt,
       expiresAt: handoff.expiresAt,
-      bindingHash,
     },
   });
 }
