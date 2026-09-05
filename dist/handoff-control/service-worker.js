@@ -490,7 +490,7 @@ if (runtime) {
       const userAgent = globalThis.navigator?.userAgent ?? "";
       const result = await runSameTabProbe(runtime, tab, {
         browserVersion: chromeVersion(userAgent),
-        buildHash: "f928eb9771f04c98e06cd6d52ae11915a7698ecc65eca9e5628af4b69e2d7999",
+        buildHash: "7c2c79d6c54d84babf05f34a810593315e56fa65788595df92c8bc022c6e0fe9",
         extensionId: runtime.runtime.id,
         extensionVersion: runtime.runtime.getManifest().version,
         platform: /\bMacintosh\b/.test(userAgent) ? "macOS" : "UNSUPPORTED",
