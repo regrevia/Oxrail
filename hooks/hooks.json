@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
             "timeout": 3,
             "statusMessage": "Checking Oxrail configuration"
           }
@@ -19,8 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
             "timeout": 3
           }
         ]
@@ -32,8 +32,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
             "timeout": 3,
             "statusMessage": "Observing the Oxrail browser path"
           }
@@ -46,8 +46,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\pre-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
             "timeout": 3
           }
         ]
@@ -59,8 +59,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$PLUGIN_ROOT/dist/hooks/post-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\post-tool.mjs\" --oxrail-build 0.1.0-alpha.0",
+            "command": "node \"$PLUGIN_ROOT/dist/hooks/post-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hooks\\post-tool.mjs\" --oxrail-build 0.1.0-alpha.1",
             "timeout": 3,
             "statusMessage": "Observing the Oxrail browser result"
           }

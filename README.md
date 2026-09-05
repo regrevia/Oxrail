@@ -29,10 +29,17 @@ Native Interaction Fidelity and real-host benchmark evidence are still in progre
 
 Requires a current Codex CLI with plugin marketplace support and Node.js 20 or newer.
 `main` is the latest accepted stable line; ongoing development happens on `dev` and reaches `main` only after a milestone gate passes.
-The marketplace currently installs the immutable `v0.1.0-alpha.0` plugin tag; `dev` may contain newer unaccepted work.
+The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the immutable `v0.1.0-alpha.1` development preview; it is not an accepted stable release.
 
 ```bash
 codex plugin marketplace add regrevia/Oxrail
+codex plugin add oxrail@oxrail
+```
+
+For the current development preview on a clean test profile, pin the marketplace checkout to `dev`:
+
+```bash
+codex plugin marketplace add regrevia/Oxrail@dev
 codex plugin add oxrail@oxrail
 ```
 
@@ -133,7 +140,7 @@ Handoff protection: INACTIVE
 
 `BYPASSED` is fail-open for the native browser capability, not proof of Oxrail protection. Safety and Handoff are shown as `ACTIVE` only when their required capabilities are verified and currently effective. Host-native approvals and safety controls remain authoritative.
 
-The current `0.1.0-alpha.0` runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff `INACTIVE`. Guard and Handoff modes cannot become active until a real adapter and its version-bound evidence are accepted.
+The current `0.1.0-alpha.1` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
 
 ## What v0.1 is testing
 

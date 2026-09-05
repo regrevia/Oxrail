@@ -5,6 +5,10 @@ All notable project changes are documented here. The normative specification his
 ## [Unreleased]
 
 - Real-host compatibility and benchmark evidence remain in progress.
+
+## [0.1.0-alpha.1] - 2026-09-05
+
+- Published the current `dev` foundations as an immutable macOS trial build; the public adapter remains passive-only and all unproven Safety, Handoff, and Credential capabilities remain explicitly `INACTIVE`.
 - Added a narrowly scoped fixture-local gate cleanup that may reopen only a ledger proven never to have caused presenter, Keychain, pasteboard, consumer, or secret effects; it holds the global mutex and gate lock, retires only durable completions, waits for real Post events, rejects generation ABA, writes an exact tombstone, and read-only reconciles errors. It never authorizes Agent resume, remains `INACTIVE`, and does not replace authenticated Host/enclave cleanup or G15 for products.
 - Added an atomic final fixture-gate commit that validates the bounded Host-suspension receipt, then holds the global credential mutex, matching Handoff task lock, and gate file lock across the exact final snapshot and `PREPARING` to `ACTIVE` ledger write; cleanup/ABA, deadline, clock, and dead-lock cases fail closed, while the result remains explicitly non-authorizing and inactive. Product wiring stays forbidden until authenticated Host/enclave cleanup and G15 exist.
 - Added one locked coordinator entry that atomically mints the current Handoff-bound fixture ticket and commits the global credential gate from `OPEN` to `PREPARING`; calls admitted first remain pending until their real Post, later Pre calls block, and all results remain non-authorizing and `INACTIVE`.

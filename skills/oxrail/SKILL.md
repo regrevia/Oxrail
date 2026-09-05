@@ -48,7 +48,7 @@ Do not issue a real browser action merely to validate installation. The alpha li
 
 Treat Safety and Handoff as active only when doctor explicitly reports `ACTIVE`. When either is `INACTIVE`, state that clearly before any step that would otherwise rely on that protection.
 
-The current `0.1.0-alpha.0` runtime is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, or Handoff enforcement from verification alone.
+The current `0.1.0-alpha.1` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, or Credential enforcement from internal fixture foundations.
 
 ## During native browser work
 

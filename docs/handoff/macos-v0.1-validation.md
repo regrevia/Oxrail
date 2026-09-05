@@ -226,7 +226,7 @@ evidence/WP-RLS-010/<run-id>/
 Phase 0 — 冻结 alpha 与预检
 
 a. 只读检查工作区和远端。要求工作区干净；若有非 evidence 改动，停止并报告，不要 reset/checkout/删除用户文件。
-b. `git fetch --tags origin`，把远端 `v0.1.0-alpha.0^{commit}` 的完整 40 位 SHA 固定为 ALPHA_COMMIT（安装命令中的 RC_COMMIT 与它是同一个值），并验证它是 origin/dev 祖先。不得直接使用随后可能移动的 dev HEAD。把 SHA、UTC 时间和远端 URL 写入 checkpoint；整轮不得 pull/rebase 或改 ALPHA_COMMIT。
+b. `git fetch --tags origin`，把远端 `v0.1.0-alpha.1^{commit}` 的完整 40 位 SHA 固定为 ALPHA_COMMIT（安装命令中的 RC_COMMIT 与它是同一个值），并验证它是 origin/dev 祖先。不得直接使用随后可能移动的 dev HEAD。把 SHA、UTC 时间和远端 URL 写入 checkpoint；整轮不得 pull/rebase 或改 ALPHA_COMMIT。
 c. 从 ALPHA_COMMIT 创建 evidence/macos-v0.1-<UTC-date>-<shortsha> 分支。RUN_ID 使用 UTC 时间 + short SHA + 随机非敏感后缀；evidence 根目录为 evidence/WP-RLS-010/<RUN_ID>/。manifest 的 commit 始终是被测 ALPHA_COMMIT，而不是后来的 evidence commit。
 d. 记录并 hash：spec、schemas、lockfile、fixture、benchmark/task manifests 和分析器。运行仓库已有的只读/构建预检，例如 corepack/pnpm install --frozen-lockfile、pnpm build、pnpm check；精确记录命令、exit code、stdout/stderr 的去敏摘要和工具版本。不要假设不存在的 bench 命令；先检查 package.json 和仓库文档。预检失败则保留结果，manifest=BLOCKED，继续到“Evidence 收束”而非修代码。
 e. 在看到任何任务结果前写 preregistration.json：Pilot 0 的固定 sentinel IDs、默认 4-task/1-pair 设计、reserve 启用条件、固定 Luna settings/seed、A/B direction、2-arm/4-arm 早停条件、不同 root parent session（或已验证 per-arm namespace）的 runner 隔离、salted session digest 方法、missing-data policy；同时记录三模型正式 63 项×5 pairs 的完整 planned denominator并全部初始化为 NOT_RUN。此时不要自动排程或执行 Luna 3-pair subset/正式矩阵。文件写入后 hash 固定，后续不得覆盖；更正只能追加 amendment 并使本轮 BLOCKED。
@@ -235,7 +235,7 @@ e. 在看到任何任务结果前写 preregistration.json：Pilot 0 的固定 se
 
 Phase 1 — 安装固定 commit、人工 trust、新会话
 
-a. 被测插件的内容必须与 ALPHA_COMMIT 字节可追溯。令 RC_COMMIT=ALPHA_COMMIT，先验证远端 `v0.1.0-alpha.0^{commit}` 精确等于 ALPHA_COMMIT；marketplace 内部插件 source 也必须是该不可变 tag。任一不等立即 BLOCKED。然后使用官方支持的固定 Git ref 安装，不得安装浮动 dev：
+a. 被测插件的内容必须与 ALPHA_COMMIT 字节可追溯。令 RC_COMMIT=ALPHA_COMMIT，先验证远端 `v0.1.0-alpha.1^{commit}` 精确等于 ALPHA_COMMIT；marketplace 内部插件 source 也必须是该不可变 tag。任一不等立即 BLOCKED。然后使用官方支持的固定 Git ref 安装，不得安装浮动 dev：
    codex plugin marketplace add regrevia/Oxrail@${RC_COMMIT}
    codex plugin add oxrail@oxrail
    若当前官方 CLI 要求独立 --ref 参数，可使用其文档化等价形式并保存精确命令。安装后通过 `codex plugin list --json`、marketplace list、宿主报告的插件来源/版本/安装路径和本地 marketplace snapshot 证明 marketplace ref 与 plugin source ref；对 plugin manifest、Skill、Hook definition 和运行产物建立 SHA-256 清单，并与 ALPHA_COMMIT checkout 对应文件核对。任何 commit/hash 不一致或无法证明 provenance，都记录 BLOCKED，不能继续实测；不得回退到浮动 dev。
