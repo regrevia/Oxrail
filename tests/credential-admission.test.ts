@@ -1,19 +1,33 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as core from "../packages/core/src/index.js";
+import * as toolCallJournal from "../packages/core/src/tool-call.js";
 import {
   activatePreparedHandoff,
   admitCredentialIntent,
   completeToolCallPost,
   createBrowserTaskState,
+  credentialToolFencePost,
+  credentialToolFencePre,
   handoffScopeBindingHash,
+  initializeCredentialExecutionGate,
+  prepareCredentialInputAttempt,
   prepareHandoffBarrier,
   prepareHandoffLease,
   readBrowserTaskState,
+  readCredentialExecutionGate,
+  readCredentialToolFenceQuiescence,
   recordToolCallPre,
   transitionHandoffLease,
   writeBrowserTaskState,
@@ -68,6 +82,24 @@ interface ActiveFixture {
   lease: HandoffLease;
 }
 
+interface FixtureTimeline {
+  activatedAt: number;
+  barrierAt: number;
+  createdAt: number;
+  expiresAt: number;
+  receiptAt: number;
+  receiptExpiresAt: number;
+}
+
+const defaultTimeline: FixtureTimeline = {
+  activatedAt: 1_200,
+  barrierAt: 1_100,
+  createdAt: 1_000,
+  expiresAt: 10_000,
+  receiptAt: 1_150,
+  receiptExpiresAt: 9_000,
+};
+
 async function makeRoot(): Promise<string> {
   const parent = await mkdtemp(
     path.join(tmpdir(), "oxrail-credential-admission-"),
@@ -76,14 +108,14 @@ async function makeRoot(): Promise<string> {
   return path.join(parent, "state");
 }
 
-function pendingHandoff(): HandoffLease {
+function pendingHandoff(timeline = defaultTimeline): HandoffLease {
   return prepareHandoffLease({
     handoffId: "credential-handoff",
     previousLeaseEpoch: 0,
     nonce: "0123456789abcdef0123456789abcdef",
     scope,
-    createdAt: 1_000,
-    expiresAt: 10_000,
+    createdAt: timeline.createdAt,
+    expiresAt: timeline.expiresAt,
   });
 }
 
@@ -107,9 +139,10 @@ function nakedActiveHandoff(): HandoffLease {
 
 async function activeFixture(
   browserInstanceBindingHash = "e".repeat(64),
+  timeline = defaultTimeline,
 ): Promise<ActiveFixture> {
   const root = await makeRoot();
-  const pending = pendingHandoff();
+  const pending = pendingHandoff(timeline);
   await writeBrowserTaskState(
     root,
     {
@@ -124,7 +157,7 @@ async function activeFixture(
     },
     null,
   );
-  await prepareHandoffBarrier(root, pending, host, () => 1_100);
+  await prepareHandoffBarrier(root, pending, host, () => timeline.barrierAt);
   const activated = await activatePreparedHandoff(
     root,
     pending,
@@ -132,14 +165,14 @@ async function activeFixture(
     async () => ({
       admissionGeneration: 1,
       browserInstanceBindingHash,
-      expiresAt: 9_000,
+      expiresAt: timeline.receiptExpiresAt,
       hostProfileBindingHash: host.profileBindingHash,
       nativeActionFenceHash: "f".repeat(64),
-      observedAt: 1_150,
+      observedAt: timeline.receiptAt,
       receiptHash: "9".repeat(64),
       scopeBindingHash: handoffScopeBindingHash(scope),
     }),
-    () => 1_200,
+    () => timeline.activatedAt,
   );
   if (activated.kind !== "ACTIVE") {
     throw new Error("fixture activation failed");
@@ -206,6 +239,7 @@ async function expectInvalidHandoffWithoutMutation(
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -214,6 +248,286 @@ afterEach(async () => {
 });
 
 describe("credential admission", () => {
+  it("keeps an incoming Pre behind the combined preparation", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const fixture = await activeFixture();
+    const credentialRoot = await makeRoot();
+    await initializeCredentialExecutionGate(credentialRoot, 1_500);
+    let releaseCount!: () => void;
+    let countStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      countStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseCount = resolve;
+    });
+    const countActiveToolCalls = toolCallJournal.countActiveToolCalls;
+    vi.spyOn(toolCallJournal, "countActiveToolCalls").mockImplementation(
+      async (...input) => {
+        countStarted();
+        await release;
+        return countActiveToolCalls(...input);
+      },
+    );
+
+    const preparation = prepareCredentialInputAttempt(
+      credentialRoot,
+      fixture.root,
+      {
+        hookDefinitionHash: "6".repeat(64),
+        host,
+        intent: {
+          schemaVersion: 1,
+          credentialUseId: registryEntry.credentialUseId,
+        },
+        lease: fixture.lease,
+        registry: [registryEntry],
+        trustRootHash: "8".repeat(64),
+      },
+    );
+    await started;
+    let preSettled = false;
+    const pre = credentialToolFencePre(credentialRoot, {
+      sessionId: "waiting-session",
+      toolUseId: "waiting-call",
+    }).finally(() => {
+      preSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(preSettled).toBe(false);
+
+    releaseCount();
+    await expect(preparation).resolves.toMatchObject({
+      gate: "PREPARING",
+      kind: "PREPARED_FIXTURE_NON_AUTHORIZING",
+    });
+    await expect(pre).resolves.toBe("BLOCKED");
+  });
+
+  it("recovers a dead gate lock before deriving the next generation", async () => {
+    const current = Date.now();
+    const fixture = await activeFixture("e".repeat(64), {
+      activatedAt: current - 800,
+      barrierAt: current - 900,
+      createdAt: current - 1_000,
+      expiresAt: current + 10_000,
+      receiptAt: current - 850,
+      receiptExpiresAt: current + 9_000,
+    });
+    const credentialRoot = await makeRoot();
+    await initializeCredentialExecutionGate(credentialRoot, current - 500);
+    const lockPath = path.join(
+      credentialRoot,
+      "credential-execution-gate",
+      ".current.lock",
+    );
+    const staleAt = current - 60_000;
+    await writeFile(
+      lockPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: 2_147_483_647,
+        createdAt: staleAt,
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { mode: 0o600 },
+    );
+    await utimes(lockPath, new Date(staleAt), new Date(staleAt));
+
+    await expect(
+      prepareCredentialInputAttempt(credentialRoot, fixture.root, {
+        hookDefinitionHash: "6".repeat(64),
+        host,
+        intent: {
+          schemaVersion: 1,
+          credentialUseId: registryEntry.credentialUseId,
+        },
+        lease: fixture.lease,
+        registry: [registryEntry],
+        trustRootHash: "8".repeat(64),
+      }),
+    ).resolves.toMatchObject({
+      gate: "PREPARING",
+      generation: 1,
+      kind: "PREPARED_FIXTURE_NON_AUTHORIZING",
+    });
+  });
+
+  it("linearizes fixture ticket minting and PREPARING against global Pre", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const inputFor = (fixture: ActiveFixture) => ({
+      hookDefinitionHash: "6".repeat(64),
+      host,
+      intent: {
+        schemaVersion: 1 as const,
+        credentialUseId: registryEntry.credentialUseId,
+      },
+      lease: fixture.lease,
+      registry: [registryEntry],
+      trustRootHash: "8".repeat(64),
+    });
+    const call = {
+      sessionId: "global-pre-session",
+      toolUseId: "global-pre-call",
+    };
+
+    const preFirst = await activeFixture();
+    const preFirstCredentialRoot = await makeRoot();
+    await initializeCredentialExecutionGate(preFirstCredentialRoot, 1_500);
+    await expect(
+      credentialToolFencePre(preFirstCredentialRoot, call),
+    ).resolves.toBe("NO_LEDGER_BLOCK_TRACKED");
+    const preparedAfterPre = await prepareCredentialInputAttempt(
+      preFirstCredentialRoot,
+      preFirst.root,
+      inputFor(preFirst),
+    );
+    expect(preparedAfterPre).toMatchObject({
+      activation: "INACTIVE",
+      authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      credentialProtection: "INACTIVE",
+      gate: "PREPARING",
+      generation: 1,
+      kind: "PREPARED_FIXTURE_NON_AUTHORIZING",
+    });
+    if (preparedAfterPre.kind !== "PREPARED_FIXTURE_NON_AUTHORIZING") {
+      throw new Error("fixture preparation failed");
+    }
+    const serializedPreparation = JSON.stringify(preparedAfterPre);
+    for (const forbidden of [
+      preFirst.lease.handoffId,
+      preFirst.lease.nonce,
+      scope.sessionId,
+      scope.taskId,
+      scope.documentBinding,
+      host.profileId,
+      "e".repeat(64),
+      "f".repeat(64),
+      "9".repeat(64),
+      canary,
+    ]) {
+      expect(serializedPreparation).not.toContain(forbidden);
+    }
+    await expect(
+      readCredentialExecutionGate(preFirstCredentialRoot),
+    ).resolves.toMatchObject({
+      expiresAt: preFirst.lease.expiresAt,
+      generation: preparedAfterPre.generation,
+      operationDigest: deterministicDigest(
+        "oxrail-credential-execution-gate-v1",
+        preparedAfterPre.binding,
+      ),
+      state: "PREPARING",
+    });
+    await expect(
+      readCredentialToolFenceQuiescence(preFirstCredentialRoot),
+    ).resolves.toBe("PENDING");
+    await expect(
+      credentialToolFencePost(preFirstCredentialRoot, call),
+    ).resolves.toBe("COMPLETED");
+    await expect(
+      readCredentialToolFenceQuiescence(preFirstCredentialRoot),
+    ).resolves.toBe("QUIESCENT");
+
+    const prepareFirst = await activeFixture();
+    const prepareFirstCredentialRoot = await makeRoot();
+    await initializeCredentialExecutionGate(prepareFirstCredentialRoot, 1_500);
+    const preparedBeforePre = await prepareCredentialInputAttempt(
+      prepareFirstCredentialRoot,
+      prepareFirst.root,
+      inputFor(prepareFirst),
+    );
+    expect(preparedBeforePre.kind).toBe("PREPARED_FIXTURE_NON_AUTHORIZING");
+    await expect(
+      credentialToolFencePre(prepareFirstCredentialRoot, call),
+    ).resolves.toBe("BLOCKED");
+    await expect(
+      readCredentialToolFenceQuiescence(prepareFirstCredentialRoot),
+    ).resolves.toBe("QUIESCENT");
+
+    if (preparedBeforePre.kind !== "PREPARED_FIXTURE_NON_AUTHORIZING") {
+      throw new Error("fixture preparation failed");
+    }
+    await expect(
+      admitCredentialIntent(
+        prepareFirst.root,
+        inputFor(prepareFirst).intent,
+        [registryEntry],
+        prepareFirst.lease,
+        host,
+        () => now,
+      ),
+    ).resolves.toEqual(preparedBeforePre.binding.ticket);
+  });
+
+  it("leaves the durable gate OPEN on pre-commit rejection", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const fixture = await activeFixture();
+    const credentialRoot = await makeRoot();
+    await initializeCredentialExecutionGate(credentialRoot, 1_500);
+    const input = {
+      hookDefinitionHash: "6".repeat(64),
+      host,
+      intent: {
+        schemaVersion: 1 as const,
+        credentialUseId: registryEntry.credentialUseId,
+      },
+      lease: fixture.lease,
+      registry: [registryEntry],
+      trustRootHash: "8".repeat(64),
+    };
+    for (const invalid of [
+      { ...input, unexpected: canary },
+      { ...input, hookDefinitionHash: "A".repeat(64) },
+      { ...input, host: { ...host, unexpected: true } },
+      { ...input, lease: { ...fixture.lease, unexpected: true } },
+    ]) {
+      const rejected = await prepareCredentialInputAttempt(
+        credentialRoot,
+        fixture.root,
+        invalid,
+      );
+      expect(rejected).toEqual({
+        activation: "INACTIVE",
+        authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+        credentialProtection: "INACTIVE",
+        kind: "FAILED_SAFE",
+      });
+      expect(JSON.stringify(rejected)).not.toContain(canary);
+      await expect(
+        readCredentialExecutionGate(credentialRoot),
+      ).resolves.toEqual(
+        expect.objectContaining({ generation: 0, state: "OPEN" }),
+      );
+    }
+
+    const state = await readBrowserTaskState(fixture.root, scope);
+    if (!state) throw new Error("fixture state missing");
+    await writeBrowserTaskState(
+      fixture.root,
+      {
+        ...state,
+        hostProfileStatus: "STALE",
+        stateVersion: state.stateVersion + 1,
+      },
+      state.stateVersion,
+    );
+    const result = await prepareCredentialInputAttempt(
+      credentialRoot,
+      fixture.root,
+      input,
+    );
+    expect(result).toEqual({
+      activation: "INACTIVE",
+      authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      credentialProtection: "INACTIVE",
+      kind: "FAILED_SAFE",
+    });
+    await expect(readCredentialExecutionGate(credentialRoot)).resolves.toEqual(
+      expect.objectContaining({ generation: 0, state: "OPEN" }),
+    );
+  });
+
   it("mints only a v2 fixture ticket anchored to the locked active Handoff", async () => {
     const fixture = await activeFixture();
     const before = await allFileContents(fixture.root);
@@ -303,6 +617,9 @@ describe("credential admission", () => {
   it("removes the naked lease binder and rejects an in-memory ACTIVE lease", async () => {
     expect(Object.hasOwn(core, "bindCredentialIntent")).toBe(false);
     expect(Object.hasOwn(core, "bindCredentialIntentToActivationAnchor")).toBe(
+      false,
+    );
+    expect(Object.hasOwn(core, "prepareCredentialExecutionGateLocked")).toBe(
       false,
     );
     const root = await makeRoot();

@@ -815,15 +815,117 @@ function validateTransition(
   return parsed;
 }
 
-/**
- * Advance the global fixture ledger. ACTIVE is a conservative blocking fact;
- * it never proves protection, launches a helper, or authorizes secret use.
- */
-async function transitionCredentialExecutionGateLocked(
+async function applyCredentialExecutionGateTransition(
   root: string,
   event: CredentialExecutionGateEvent,
+  current: PersistedGate,
+  parsed: ReturnType<typeof credentialExecutionBinding>,
 ): Promise<"APPLIED" | "REPLAY"> {
-  const { digest, ticket: parsedTicket } = validateTransition(root, event);
+  const { digest, ticket: parsedTicket } = parsed;
+  const target = targetState[event.kind];
+  const suppliedQuiescenceReceipt =
+    event.kind === "PREPARE" || event.kind === "FINISH_CLEANUP"
+      ? null
+      : quiescenceReceiptDigest(
+          event.quiescenceReceiptHash,
+          digest,
+          event.generation,
+        );
+  const suppliedCleanupEvidence =
+    event.kind === "FINISH_CLEANUP"
+      ? cleanupEvidenceDigest(
+          event.cleanupEvidenceHash,
+          digest,
+          event.generation,
+        )
+      : null;
+  const resultingReceipt =
+    event.kind === "ACTIVATE" || event.kind === "ABORT_PREPARING"
+      ? suppliedQuiescenceReceipt
+      : event.kind === "BEGIN_CLEANUP"
+        ? current.receiptDigest
+        : null;
+  const resultingOutcome =
+    event.kind === "ACTIVATE" || event.kind === "BEGIN_CLEANUP"
+      ? "ACTIVATED"
+      : event.kind === "ABORT_PREPARING"
+        ? "ABORTED"
+        : event.kind === "PREPARE"
+          ? "NONE"
+          : current.outcome;
+  const resultingOperation =
+    event.kind === "FINISH_CLEANUP"
+      ? deterministicDigest("oxrail-credential-cleanup-tombstone-v1", {
+          cleanupEvidenceDigest: suppliedCleanupEvidence,
+          operationDigest: digest,
+        })
+      : digest;
+  if (
+    current.state === target &&
+    current.generation === event.generation &&
+    current.operationDigest === resultingOperation &&
+    current.updatedAt === event.observedAt &&
+    (target === "OPEN" || current.receiptDigest === resultingReceipt) &&
+    (event.kind !== "BEGIN_CLEANUP" ||
+      current.receiptDigest === suppliedQuiescenceReceipt) &&
+    current.outcome === resultingOutcome
+  ) {
+    return "REPLAY";
+  }
+  const generationMatches =
+    event.kind === "PREPARE"
+      ? current.generation < Number.MAX_SAFE_INTEGER &&
+        event.generation === current.generation + 1
+      : event.generation === current.generation;
+  if (
+    current.state !== predecessor[event.kind] ||
+    !generationMatches ||
+    (event.kind !== "PREPARE" && current.operationDigest !== digest) ||
+    (event.kind !== "PREPARE" &&
+      current.expiresAt !== parsedTicket.handoff.expiresAt) ||
+    (event.kind === "BEGIN_CLEANUP" &&
+      current.receiptDigest !== suppliedQuiescenceReceipt) ||
+    (event.kind === "FINISH_CLEANUP" &&
+      (current.receiptDigest === null ||
+        current.receiptDigest ===
+          quiescenceReceiptDigest(
+            event.cleanupEvidenceHash,
+            digest,
+            event.generation,
+          ))) ||
+    event.observedAt < current.updatedAt
+  ) {
+    throw new CredentialExecutionGateError("INVALID_TRANSITION");
+  }
+  const replacement: PersistedGate = {
+    authority: AUTHORITY,
+    createdAt: event.kind === "PREPARE" ? event.observedAt : current.createdAt,
+    effect: EFFECT,
+    expiresAt:
+      event.kind === "PREPARE"
+        ? parsedTicket.handoff.expiresAt
+        : current.expiresAt,
+    generation: event.generation,
+    operationDigest: resultingOperation,
+    outcome: resultingOutcome,
+    receiptDigest: resultingReceipt,
+    schemaVersion: 1,
+    state: target,
+    updatedAt: event.observedAt,
+  };
+  await atomicWrite(
+    gateDirectory(root),
+    gatePath(root, CURRENT),
+    serializeCurrent(replacement),
+    true,
+  );
+  return "APPLIED";
+}
+
+async function withCredentialExecutionGateFileLock<Result>(
+  root: string,
+  operation: (current: PersistedGate) => Promise<Result>,
+): Promise<Result> {
   if (
     (await inspectPrivateDirectory(root)) !== "PRIVATE" ||
     (await inspectPrivateDirectory(gateDirectory(root))) !== "PRIVATE"
@@ -834,111 +936,61 @@ async function transitionCredentialExecutionGateLocked(
   try {
     await readSentinel(gatePath(root, SENTINEL));
     const current = await readCurrent(gatePath(root, CURRENT));
-    const target = targetState[event.kind];
-    const suppliedQuiescenceReceipt =
-      event.kind === "PREPARE" || event.kind === "FINISH_CLEANUP"
-        ? null
-        : quiescenceReceiptDigest(
-            event.quiescenceReceiptHash,
-            digest,
-            event.generation,
-          );
-    const suppliedCleanupEvidence =
-      event.kind === "FINISH_CLEANUP"
-        ? cleanupEvidenceDigest(
-            event.cleanupEvidenceHash,
-            digest,
-            event.generation,
-          )
-        : null;
-    const resultingReceipt =
-      event.kind === "ACTIVATE" || event.kind === "ABORT_PREPARING"
-        ? suppliedQuiescenceReceipt
-        : event.kind === "BEGIN_CLEANUP"
-          ? current.receiptDigest
-          : null;
-    const resultingOutcome =
-      event.kind === "ACTIVATE" || event.kind === "BEGIN_CLEANUP"
-        ? "ACTIVATED"
-        : event.kind === "ABORT_PREPARING"
-          ? "ABORTED"
-          : event.kind === "PREPARE"
-            ? "NONE"
-            : current.outcome;
-    const resultingOperation =
-      event.kind === "FINISH_CLEANUP"
-        ? deterministicDigest("oxrail-credential-cleanup-tombstone-v1", {
-            cleanupEvidenceDigest: suppliedCleanupEvidence,
-            operationDigest: digest,
-          })
-        : digest;
-    if (
-      current.state === target &&
-      current.generation === event.generation &&
-      current.operationDigest === resultingOperation &&
-      current.updatedAt === event.observedAt &&
-      (target === "OPEN" || current.receiptDigest === resultingReceipt) &&
-      (event.kind !== "BEGIN_CLEANUP" ||
-        current.receiptDigest === suppliedQuiescenceReceipt) &&
-      current.outcome === resultingOutcome
-    ) {
-      return "REPLAY";
-    }
-    const generationMatches =
-      event.kind === "PREPARE"
-        ? current.generation < Number.MAX_SAFE_INTEGER &&
-          event.generation === current.generation + 1
-        : event.generation === current.generation;
-    if (
-      current.state !== predecessor[event.kind] ||
-      !generationMatches ||
-      (event.kind !== "PREPARE" && current.operationDigest !== digest) ||
-      (event.kind !== "PREPARE" &&
-        current.expiresAt !== parsedTicket.handoff.expiresAt) ||
-      (event.kind === "BEGIN_CLEANUP" &&
-        current.receiptDigest !== suppliedQuiescenceReceipt) ||
-      (event.kind === "FINISH_CLEANUP" &&
-        (current.receiptDigest === null ||
-          current.receiptDigest ===
-            quiescenceReceiptDigest(
-              event.cleanupEvidenceHash,
-              digest,
-              event.generation,
-            ))) ||
-      event.observedAt < current.updatedAt
-    ) {
-      throw new CredentialExecutionGateError("INVALID_TRANSITION");
-    }
-    const replacement: PersistedGate = {
-      authority: AUTHORITY,
-      createdAt:
-        event.kind === "PREPARE" ? event.observedAt : current.createdAt,
-      effect: EFFECT,
-      expiresAt:
-        event.kind === "PREPARE"
-          ? parsedTicket.handoff.expiresAt
-          : current.expiresAt,
-      generation: event.generation,
-      operationDigest: resultingOperation,
-      outcome: resultingOutcome,
-      receiptDigest: resultingReceipt,
-      schemaVersion: 1,
-      state: target,
-      updatedAt: event.observedAt,
-    };
-    await atomicWrite(
-      gateDirectory(root),
-      gatePath(root, CURRENT),
-      serializeCurrent(replacement),
-      true,
-    );
-    return "APPLIED";
+    return await operation(current);
   } catch (error) {
     if (error instanceof CredentialExecutionGateError) throw error;
     throw new CredentialExecutionGateError("UNAVAILABLE");
   } finally {
     await releaseLock(root, ownership);
   }
+}
+
+/**
+ * Advance the global fixture ledger. ACTIVE is a conservative blocking fact;
+ * it never proves protection, launches a helper, or authorizes secret use.
+ */
+async function transitionCredentialExecutionGateLocked(
+  root: string,
+  event: CredentialExecutionGateEvent,
+): Promise<"APPLIED" | "REPLAY"> {
+  const parsed = validateTransition(root, event);
+  return withCredentialExecutionGateFileLock(root, (current) =>
+    applyCredentialExecutionGateTransition(root, event, current, parsed),
+  );
+}
+
+/** Package-internal PREPARE entry; the caller must hold the global fence lock. */
+export async function prepareCredentialExecutionGateLocked(
+  root: string,
+  binding: FixtureCredentialExecutionBinding,
+  observedAt: number,
+): Promise<number> {
+  const input = {
+    binding,
+    generation: 1,
+    kind: "PREPARE",
+    observedAt,
+  } as const;
+  const parsed = validateTransition(root, input);
+  return withCredentialExecutionGateFileLock(root, async (current) => {
+    if (
+      current.state !== "OPEN" ||
+      current.generation >= Number.MAX_SAFE_INTEGER
+    ) {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    const generation = current.generation + 1;
+    const result = await applyCredentialExecutionGateTransition(
+      root,
+      { ...input, generation },
+      current,
+      parsed,
+    );
+    if (result !== "APPLIED") {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    return generation;
+  });
 }
 
 export async function transitionCredentialExecutionGate(

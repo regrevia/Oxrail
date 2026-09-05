@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.20
+# Oxrail — 唯一实现规范（SPEC）v1.0.21
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.20
+  spec_version: 1.0.21
   status: AUTHORITATIVE
   effective_date: 2026-09-05
   evidence_cutoff: 2026-09-05
@@ -2221,7 +2221,9 @@ macOS native package 的 credential-registry validator foundation 只提供零�
 
 macOS native package 的 opaque credential reference lifecycle foundation 只提供零参数、仅进程内且无持久副作用的 `runEmbeddedCredentialReferenceLifecycleObservation()`：production 入口只从当前 build-fixed embedded registry 取得唯一 `API_KEY` fixture scope，并使用 Security.framework `SecRandomCopyBytes(kSecRandomDefault, 32, ...)` 生成 32-byte 随机 handle，编码为 `ocref1_` 加 43 位无填充 base64url；外部不得注入 reference、clock、registry 或 scope，测试替身只允许存在于 package-internal seam。每个 ephemeral reference 必须精确绑定 credential use/kind/template、service、provisioning origin、purpose、consumer、grant TTL、generation、registry version 与三类 registry Hash，以及 `issuedAt/expiresAt`；claim 只有在完整 scope 仍与 embedded registry 一致、时间有效、未撤销且未消费时才成立，首次成功 claim 必须在同一进程锁内原子地标记已消费，scope/Hash 不匹配、过期、撤销、generation rotation 与 replay 一律拒绝。公开报告固定为 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=OPAQUE_REFERENCE_LIFECYCLE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 registry version/Hash，绝不包含 credential reference、随机 bytes、secret 或自由文本。该 foundation 不处理任何 credential value，不显示 prompt，不访问 Keychain/pasteboard/file/env/argv/stdio/shell/network，不启动 helper/consumer，不接 Hook/Doctor/Profile activation，也不证明 G15、完成 `TEST-SEC-113`/`TEST-SEC-114`、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
 
-Core 的 credential intent 只能通过 `admitCredentialIntent()` 进入 fixture ticket builder。coordinator 必须先深拷贝调用方提供的 intent/registry/lease/Host 输入并取得唯一一次 clock sample；task lock 开始后禁止再调用调用方 callback 或读取其可变对象。在同一次 BrowserTask task lock 内必须重读 Human-owned `USER_LEASE_ACTIVE` state、`ACTIVE` gate、strict `ACTIVE` barrier、Host binding 与 bounded physical active tool-call journal，并精确核对 session/task/origin/canonical document/lease epoch/handoff、当前 VALID Host Profile、非空 browser-instance/native-action-fence/current-tab-receipt Hash、无 pending native action、无 verification marker且 physical journal count 为零。通过后只能从完整 strict barrier 计算 credential 专属、domain-separated activation anchor；`CredentialEnclaveTicket` v2 只携带 allowlisted registry scope、该 opaque anchor 与 lease 时间，不携带 raw handoff/session/task/tab/document/nonce/Host/browser/fence/receipt binding，`ticketId` 必须覆盖完整 registry entry、anchor、lease epoch/acquiredAt/expiresAt 与 issuedAt，v1 ticket 必须 fail-closed。旧的纯 binder 不属于 package public API；仅凭调用方提供的内存 `ACTIVE` lease 不得 mint ticket。该本地 barrier/anchor、无密钥 `ticketId` 完整性摘要与 v2 fixture ticket 仍固定为 `FIXTURE_ONLY_NON_AUTHORIZING`：它们不是签名 Host 事实，不是 prompt-time fresh current-tab receipt、credential-input lease、helper/prompt/Keychain/consumer authority 或 G15 证据，也不得令 Credential protection 进入 `ACTIVE`。当前没有独立可信 commitment 可判断本地 barrier 中格式合法的 browser/fence/receipt Hash 是否被替换；这种替换只会产生不同 anchor/ticketId，绝不能被解释成已验证，未来真实 prompt 必须用 authenticated Host receipt 在 prompt-time 重新核对。
+Core 的 credential intent 只能通过 coordinator 的 locked admission 进入 fixture ticket builder：单独 mint 使用 `admitCredentialIntent()`，与全局 gate `PREPARING` 组合时必须使用 `prepareCredentialInputAttempt()`；Host/product adapter 禁止自行串联两个较低层公开调用来重建该组合。coordinator 必须先深拷贝调用方提供的 intent/registry/lease/Host 输入并取得唯一一次 clock sample；task lock 开始后禁止再调用调用方 callback 或读取其可变对象。在同一次 BrowserTask task lock 内必须重读 Human-owned `USER_LEASE_ACTIVE` state、`ACTIVE` gate、strict `ACTIVE` barrier、Host binding 与 bounded physical active tool-call journal，并精确核对 session/task/origin/canonical document/lease epoch/handoff、当前 VALID Host Profile、非空 browser-instance/native-action-fence/current-tab-receipt Hash、无 pending native action、无 verification marker且 physical journal count 为零。通过后只能从完整 strict barrier 计算 credential 专属、domain-separated activation anchor；`CredentialEnclaveTicket` v2 只携带 allowlisted registry scope、该 opaque anchor 与 lease 时间，不携带 raw handoff/session/task/tab/document/nonce/Host/browser/fence/receipt binding，`ticketId` 必须覆盖完整 registry entry、anchor、lease epoch/acquiredAt/expiresAt 与 issuedAt，v1 ticket 必须 fail-closed。旧的纯 binder 不属于 package public API；仅凭调用方提供的内存 `ACTIVE` lease 不得 mint ticket。该本地 barrier/anchor、无密钥 `ticketId` 完整性摘要与 v2 fixture ticket 仍固定为 `FIXTURE_ONLY_NON_AUTHORIZING`：它们不是签名 Host 事实，不是 prompt-time fresh current-tab receipt、credential-input lease、helper/prompt/Keychain/consumer authority 或 G15 证据，也不得令 Credential protection 进入 `ACTIVE`。当前没有独立可信 commitment 可判断本地 barrier 中格式合法的 browser/fence/receipt Hash 是否被替换；这种替换只会产生不同 anchor/ticketId，绝不能被解释成已验证，未来真实 prompt 必须用 authenticated Host receipt 在 prompt-time 重新核对。
+
+Core 的 `prepareCredentialInputAttempt()` 是上述 fixture admission 与全局 credential gate `PREPARING` 的唯一组合入口：它必须先深拷贝并严格校验 exact top-level/Host/lease/Hash 输入，不接受调用方 clock 或 callback，再按 global credential mutex → 同一 Handoff task lock → credential gate file lock 的固定顺序，在锁内取得唯一一次 wall-clock sample、复用相同的 current Human-owned Handoff/barrier/journal 校验和 ticket builder，并在取得或恢复 gate file lock 后从已知 `OPEN` gate 单调派生 `generation + 1`。持久写入 `PREPARING` 是线性化点：先进入 global Pre 的真实调用保持 pending 且只能由对应真实 Post 结算；先提交 preparation 时后续 Pre 必须阻断。受控 rejection，以及未提交且所有锁安全释放的 pre-commit failure，不改变 durable `OPEN`；一旦提交状态或锁状态无法证明，只能按 `PREPARING/UNKNOWN` fail-closed 并返回固定 `FAILED_SAFE`，不得猜测回滚，只有显式 cleanup/recovery 可以恢复。成功结果仅返回 non-secret fixture binding、generation 与固定 `PREPARED_FIXTURE_NON_AUTHORIZING / credentialProtection=INACTIVE / activation=INACTIVE`；package-internal locked gate helper 不属于公共 barrel API。该组合操作仍不建立 Host-wide continuous suspension、credential-input lease、prompt authority、helper/presenter、Keychain、pasteboard、consumer 或 G15，也不得把 PREPARING 解释为安全能力已生效。
 
 macOS non-product credential target 的 presentation checkpoint 只能接收最大 16 KiB 的 `CredentialEnclaveTicket` v2 JSON，并对解析后的 top-level/handoff 精确 key set、固定 non-authorizing authority、strict lowercase Hash、safe-integer/lease 时间关系、完整 embedded registry scope 与 `ticketId` 进行校验。Core 与 Swift 必须消费同一 golden ticket；Swift 必须按 domain `oxrail-credential-fixture-ticket-v2` 对完整 registry entry、handoff projection 与 issuedAt 重算 `ticketId`，再按 `oxrail-credential-prompt-context-v1` 对 `{ observedAt, ticket }` 生成固定 cross-language `promptContextHash`。成功结果只允许携带 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`activation=INACTIVE`、`authorization=NOT_AUTHORIZED`、`hostSuspension=UNVERIFIED`、`presentation=NOT_PRESENTED`、credentialUseId、lease expiry、promptContextHash 与 embedded non-secret scope；不得返回 ticketId、activation anchor 或 raw control-plane identity。该 checkpoint 不构造或展示窗口，不接收 secret，不访问 secure field、Keychain、pasteboard、file/env/argv/stdio/shell/network/IPC，也不连接现有 inert surface。`ticketId` 与 promptContextHash 均为无密钥完整性摘要，不是来源认证或授权；在 prompt-time authenticated Host-wide suspension/current-tab receipt、credential-input lease、G15 与真实 presenter 接线全部存在前，任何成功 checkpoint 仍必须是 `NOT_PRESENTED / INACTIVE`。
 
@@ -6369,6 +6371,7 @@ Credential fixture 由目标服务验证 canary 并只返回布尔成功状态�
 | `TEST-SEC-122` | 只有 locked coordinator 在深拷贝调用方输入并严格复读当前 Human-owned ACTIVE state/gate/barrier、Host binding 与 physical journal count 为零后才能 mint v2 opaque-anchor fixture ticket；裸 ACTIVE lease、旧 v1 ticket、scope/Host mismatch、browser/fence/receipt 缺失或畸形、非 ACTIVE gate、verification marker、非空或 UNKNOWN journal 及损坏状态均拒绝且不改写任务状态；票据不携带 raw control-plane identity 并保持 INACTIVE，格式合法的本地 binding 替换只能改变非授权 anchor，不能充当 Host verification |
 | `TEST-SEC-123` | Core 与 macOS Swift 消费同一 v2 golden ticket，ticketId 覆盖完整 registry entry/handoff projection/issuedAt；native checkpoint 只接受有界 strict shape、完整 embedded registry scope 与有效时间，重算 ticketId 后的 scope/时间负例、未承诺 drift、畸形/超限输入均拒绝；固定 cross-language promptContextHash 且输出不含 ticketId/anchor/raw control identity，target 默认 source path 与无 presenter/Keychain/通用 secret channel tripwire 通过，结果固定 NOT_AUTHORIZED/UNVERIFIED/NOT_PRESENTED/INACTIVE |
 | `TEST-SEC-124` | fixture-only Host suspension observer 以两次 global credential mutex → Handoff task lock 的 exact snapshot 夹住锁外 bounded wire observer；要求 PREPARING operation、当前 Human-owned ACTIVE barrier、严格 ticket ID、空 Handoff/global journal、receiver deadline、wall clock 不回退与前后状态不变；同一 PREPARING 未漂移时新 Pre 阻断，callback 内外部 cleanup→OPEN 可让 native Pre 通过但 final 必须拒绝，fixture 不声明连续排他；strict receipt 精确绑定 one-shot challenge、prompt/Handoff/Host/browser/gate/fence/coverage/verifier context，全部 Agent lane suspended 且 enclave-only，throw/timeout/late/malformed/非 wire 类型/binding drift/lane drift/replay 与 prompt/raw-control Hash alias 均拒绝；query/result 不携带 raw control identity，gate 不转 ACTIVE，输出固定 UNVERIFIED/INACTIVE |
+| `TEST-SEC-125` | `prepareCredentialInputAttempt()` 在 global credential mutex → Handoff task lock → gate file lock 内复核 current Human-owned Handoff，并在取得或恢复 gate file lock 后把 v2 fixture ticket mint 与 `OPEN → PREPARING` 合成一次线性化提交；Pre-first 调用保留 pending 并由真实 Post 排空，prepare-first 后续 Pre 阻断；未提交且所有锁安全释放的 failure 保持 durable OPEN，提交或锁状态不确定时按 PREPARING/UNKNOWN fail-closed；严格 top-level/Host/lease/Hash 输入、结果与 public barrel 均不泄露 secret/raw control identity 或内部 locked helper，输出固定 non-authorizing/INACTIVE且不声明 credential-input lease、Host suspension、UI/Keychain/consumer 或 G15 |
 
 ## 36.5 Gate
 
@@ -10590,7 +10593,7 @@ Prove one narrow macOS API-key path from the exact authenticated Chrome tab thro
 - [ ] Default doctor is read-only; explicit extended probe cleans its unique temporary Keychain item on success and failure.
 - [ ] Fixture-only capability is marked experimental/inactive; one audited real consumer passes its bound live-service probe before public activation.
 - [ ] Doctor reports Credential protection `ACTIVE` only after `GATE-G15` and current evidence pass; every other state is explicit `INACTIVE`.
-- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`124` pass with sanitized evidence.
+- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`125` pass with sanitized evidence.
 
 **测试 / 证据**
 
@@ -10601,6 +10604,7 @@ Prove one narrow macOS API-key path from the exact authenticated Chrome tab thro
 - TEST-SEC-122 locked credential Handoff-anchor admission
 - TEST-SEC-123 Core-to-macOS presentation checkpoint
 - TEST-SEC-124 fixture Host suspension receipt observation
+- TEST-SEC-125 atomic fixture credential-input preparation
 - HostProfile v5 contract and doctor probes
 - Full BENCH-NIF handoff subset
 
@@ -10655,6 +10659,7 @@ Release only semantic, validated caching and a scoped macOS Credential Channel t
 - TEST-SEC-122 locked credential Handoff-anchor admission
 - TEST-SEC-123 Core-to-macOS presentation checkpoint
 - TEST-SEC-124 fixture Host suspension receipt observation
+- TEST-SEC-125 atomic fixture credential-input preparation
 
 **阻断 / Kill**
 
@@ -11994,6 +11999,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.21 — 2026-09-05
+
+- 新增 Core `prepareCredentialInputAttempt()`，以 global credential mutex → Handoff task lock → gate file lock 的固定顺序复用 current Handoff ticket admission，并把 fixture ticket mint 与 `OPEN → PREPARING` 合成一次线性化提交；
+- 明确 Pre-first 只由真实 Post 排空、prepare-first 阻断后续 Pre，gate file lock 内派生 generation 并恢复 dead-owner lock；未提交且所有锁安全释放的 failure 保持 durable OPEN，提交或锁状态不确定时按 PREPARING/UNKNOWN fail-closed；内部 locked helper 不进入公共 barrel；
+- 新增 `TEST-SEC-125`；结果仍固定 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`，不建立 Host suspension、credential-input lease、prompt/Keychain/consumer authority 或 G15。
 
 ### v1.0.20 — 2026-09-05
 

@@ -32,6 +32,7 @@ import {
 } from "./credential-admission.js";
 import {
   credentialExecutionBinding,
+  prepareCredentialExecutionGateLocked,
   readCredentialExecutionGate,
   type FixtureCredentialExecutionBinding,
 } from "./credential-execution-gate.js";
@@ -209,6 +210,30 @@ export interface CredentialHostSuspensionObservationInput {
   lease: HandoffLease;
   promptContextHash: string;
 }
+
+export interface CredentialInputAttemptPreparationInput {
+  hookDefinitionHash: string;
+  host: HandoffHostBinding;
+  intent: unknown;
+  lease: HandoffLease;
+  registry: readonly CredentialUseRegistryEntry[];
+  trustRootHash: string;
+}
+
+type CredentialInputAttemptPreparationBase = {
+  activation: "INACTIVE";
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  credentialProtection: "INACTIVE";
+};
+
+export type CredentialInputAttemptPreparationResult =
+  | (CredentialInputAttemptPreparationBase & {
+      binding: FixtureCredentialExecutionBinding;
+      gate: "PREPARING";
+      generation: number;
+      kind: "PREPARED_FIXTURE_NON_AUTHORIZING";
+    })
+  | (CredentialInputAttemptPreparationBase & { kind: "FAILED_SAFE" });
 
 export interface CredentialHostSuspensionQuery {
   admissionGeneration: number;
@@ -1375,6 +1400,45 @@ export async function activatePreparedHandoff(
  * Mints only a fixture ticket bound to the current locked Handoff activation.
  * The anchor is not a current-tab receipt, credential lease, or launch authority.
  */
+async function credentialTicketFromLockedHandoff(
+  root: string,
+  input: {
+    host: HandoffHostBinding;
+    lease: HandoffLease;
+    registry: readonly CredentialUseRegistryEntry[];
+    value: unknown;
+  },
+  expectedHost: PersistedHostBinding,
+  state: BrowserTaskState | undefined,
+  issuedAt: number,
+): Promise<CredentialEnclaveTicket> {
+  const gate = await readHandoffGate(root, input.lease.scope);
+  const barrier = await readBarrier(
+    barrierPath(root, input.lease.scope, input.lease.leaseEpoch),
+  );
+  const activeToolCalls = await countActiveToolCalls(root, input.lease.scope);
+  if (
+    !state ||
+    !matchesCredentialAdmissionState(state, input.lease, input.host) ||
+    gate.kind !== "KNOWN" ||
+    gate.status !== "ACTIVE" ||
+    gate.generation !== input.lease.leaseEpoch ||
+    !matchesActiveLeaseBarrier(barrier, state, input.lease) ||
+    barrier.hostProfileBindingHash !== expectedHost.hostProfileBindingHash ||
+    barrier.hostProfileIdHash !== expectedHost.hostProfileIdHash ||
+    activeToolCalls !== 0
+  ) {
+    throw new CredentialAdmissionError("INVALID_HANDOFF");
+  }
+  return bindCredentialIntentToActivationAnchor(
+    input.value,
+    input.registry,
+    input.lease,
+    issuedAt,
+    credentialHandoffActivationAnchorHash(barrier),
+  );
+}
+
 export async function admitCredentialIntent(
   root: string,
   value: unknown,
@@ -1393,43 +1457,117 @@ export async function admitCredentialIntent(
     return await transitionBrowserTaskState<CredentialEnclaveTicket>(
       root,
       input.lease.scope,
-      async (state) => {
-        const gate = await readHandoffGate(root, input.lease.scope);
-        const barrier = await readBarrier(
-          barrierPath(root, input.lease.scope, input.lease.leaseEpoch),
-        );
-        const activeToolCalls = await countActiveToolCalls(
+      async (state) => ({
+        value: await credentialTicketFromLockedHandoff(
           root,
-          input.lease.scope,
-        );
-        if (
-          !state ||
-          !matchesCredentialAdmissionState(state, input.lease, input.host) ||
-          gate.kind !== "KNOWN" ||
-          gate.status !== "ACTIVE" ||
-          gate.generation !== input.lease.leaseEpoch ||
-          !matchesActiveLeaseBarrier(barrier, state, input.lease) ||
-          barrier.hostProfileBindingHash !==
-            expectedHost.hostProfileBindingHash ||
-          barrier.hostProfileIdHash !== expectedHost.hostProfileIdHash ||
-          activeToolCalls !== 0
-        ) {
-          throw new CredentialAdmissionError("INVALID_HANDOFF");
-        }
-        return {
-          value: bindCredentialIntentToActivationAnchor(
-            input.value,
-            input.registry,
-            input.lease,
-            issuedAt,
-            credentialHandoffActivationAnchorHash(barrier),
-          ),
-        };
-      },
+          input,
+          expectedHost,
+          state,
+          issuedAt,
+        ),
+      }),
     );
   } catch (error) {
     if (error instanceof CredentialAdmissionError) throw error;
     throw new CredentialAdmissionError("INVALID_HANDOFF");
+  }
+}
+
+const failedCredentialInputAttempt =
+  (): CredentialInputAttemptPreparationResult => ({
+    activation: "INACTIVE",
+    authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+    credentialProtection: "INACTIVE",
+    kind: "FAILED_SAFE",
+  });
+
+/**
+ * Atomically mints one fixture ticket and moves the global gate to PREPARING.
+ * PREPARING is only a local blocking fact, never a credential lease or authority.
+ */
+export async function prepareCredentialInputAttempt(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  value: CredentialInputAttemptPreparationInput,
+): Promise<CredentialInputAttemptPreparationResult> {
+  try {
+    if (
+      !credentialFenceRoot ||
+      !handoffRoot ||
+      path.resolve(credentialFenceRoot) === path.resolve(handoffRoot)
+    ) {
+      return failedCredentialInputAttempt();
+    }
+    const candidate: unknown = structuredClone(value);
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      Object.keys(candidate).sort().join(",") !==
+        "hookDefinitionHash,host,intent,lease,registry,trustRootHash"
+    ) {
+      return failedCredentialInputAttempt();
+    }
+    const input = candidate as CredentialInputAttemptPreparationInput;
+    if (
+      !HASH.test(input.hookDefinitionHash) ||
+      !HASH.test(input.trustRootHash) ||
+      !Array.isArray(input.registry) ||
+      !exactCredentialSuspensionLease(input.lease) ||
+      !input.host ||
+      typeof input.host !== "object" ||
+      Object.keys(input.host).sort().join(",") !==
+        "profileBindingHash,profileId"
+    ) {
+      return failedCredentialInputAttempt();
+    }
+    const expectedHost = persistedHostBinding(input.host);
+    const admissionInput = {
+      host: input.host,
+      lease: input.lease,
+      registry: input.registry,
+      value: input.intent,
+    };
+    return await withCredentialToolFenceLock(credentialFenceRoot, () =>
+      transitionBrowserTaskState(
+        handoffRoot,
+        input.lease.scope,
+        async (state) => {
+          const observedAt = Date.now();
+          const ticket = await credentialTicketFromLockedHandoff(
+            handoffRoot,
+            admissionInput,
+            expectedHost,
+            state,
+            observedAt,
+          );
+          const binding: FixtureCredentialExecutionBinding = {
+            hookDefinitionHash: input.hookDefinitionHash,
+            hostProfileHash: input.host.profileBindingHash,
+            ticket,
+            trustRootHash: input.trustRootHash,
+          };
+          const generation = await prepareCredentialExecutionGateLocked(
+            credentialFenceRoot,
+            binding,
+            observedAt,
+          );
+          return {
+            value: {
+              activation: "INACTIVE",
+              authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+              binding,
+              credentialProtection: "INACTIVE",
+              gate: "PREPARING",
+              generation,
+              kind: "PREPARED_FIXTURE_NON_AUTHORIZING",
+            } as const,
+          };
+        },
+      ),
+    );
+  } catch {
+    return failedCredentialInputAttempt();
   }
 }
 
