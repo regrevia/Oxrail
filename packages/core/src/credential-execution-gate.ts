@@ -946,6 +946,19 @@ async function withCredentialExecutionGateFileLock<Result>(
 }
 
 /**
+ * Package-internal read used only while the coordinator holds the global fence
+ * and the matching Handoff task lock; it also recovers a dead gate file lock.
+ */
+export async function readCredentialExecutionGateLocked(
+  root: string,
+): Promise<Extract<CredentialExecutionGateSnapshot, { kind: "KNOWN" }>> {
+  return withCredentialExecutionGateFileLock(root, async (current) => ({
+    ...current,
+    kind: "KNOWN",
+  }));
+}
+
+/**
  * Advance the global fixture ledger. ACTIVE is a conservative blocking fact;
  * it never proves protection, launches a helper, or authorizes secret use.
  */
@@ -990,6 +1003,62 @@ export async function prepareCredentialExecutionGateLocked(
       throw new CredentialExecutionGateError("INVALID_TRANSITION");
     }
     return generation;
+  });
+}
+
+/**
+ * Package-internal ACTIVATE entry; the coordinator must hold the global fence
+ * and the matching Handoff task lock for the complete final snapshot + commit.
+ */
+export async function activateCredentialExecutionGateLocked(
+  root: string,
+  binding: FixtureCredentialExecutionBinding,
+  generation: number,
+  quiescenceReceiptHash: string,
+  minimumObservedAt: number,
+): Promise<number> {
+  if (
+    !root ||
+    !Number.isSafeInteger(generation) ||
+    generation <= 0 ||
+    !HASH.test(quiescenceReceiptHash) ||
+    !Number.isSafeInteger(minimumObservedAt) ||
+    minimumObservedAt < 0
+  ) {
+    throw new CredentialExecutionGateError("INVALID_INPUT");
+  }
+  credentialExecutionBinding(binding);
+  return withCredentialExecutionGateFileLock(root, async (current) => {
+    const observedAt = Date.now();
+    if (!Number.isSafeInteger(observedAt) || observedAt < minimumObservedAt) {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    const event = {
+      binding,
+      generation,
+      kind: "ACTIVATE",
+      observedAt,
+      quiescenceReceiptHash,
+    } as const;
+    const parsed = validateTransition(root, event);
+    const result = await applyCredentialExecutionGateTransition(
+      root,
+      event,
+      current,
+      parsed,
+    );
+    if (result !== "APPLIED") {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    const committedAt = Date.now();
+    if (
+      !Number.isSafeInteger(committedAt) ||
+      committedAt < observedAt ||
+      committedAt > parsed.ticket.handoff.expiresAt
+    ) {
+      throw new CredentialExecutionGateError("INVALID_TRANSITION");
+    }
+    return observedAt;
   });
 }
 

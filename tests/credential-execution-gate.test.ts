@@ -23,6 +23,7 @@ import { withCredentialToolFenceLock } from "../packages/core/src/credential-too
 import * as toolCallJournal from "../packages/core/src/tool-call.js";
 
 import {
+  activateCredentialExecutionGateLocked,
   CredentialExecutionGateError,
   compareCredentialExecutionGates,
   credentialExecutionGateBlockStatus,
@@ -274,6 +275,59 @@ describe("credential execution gate", () => {
     await expect(
       transitionCredentialExecutionGate(root, event("PREPARE", 2, 60)),
     ).resolves.toBe("APPLIED");
+  });
+
+  it("fails closed before and after an uncertain locked ACTIVATE clock", async () => {
+    const beforeCommit = await initializedRoot();
+    const afterCommit = await initializedRoot();
+    await transitionCredentialExecutionGate(
+      beforeCommit,
+      event("PREPARE", 1, 20),
+    );
+    await transitionCredentialExecutionGate(
+      afterCommit,
+      event("PREPARE", 1, 20),
+    );
+    const clock = vi.spyOn(Date, "now");
+    clock
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(19);
+    await expect(
+      withCredentialToolFenceLock(beforeCommit, () =>
+        activateCredentialExecutionGateLocked(
+          beforeCommit,
+          binding,
+          1,
+          hash("a"),
+          20,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(readCredentialExecutionGate(beforeCommit)).resolves.toEqual(
+      expect.objectContaining({ state: "PREPARING" }),
+    );
+
+    clock
+      .mockReset()
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(29);
+    await expect(
+      withCredentialToolFenceLock(afterCommit, () =>
+        activateCredentialExecutionGateLocked(
+          afterCommit,
+          binding,
+          1,
+          hash("a"),
+          20,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+    await expect(readCredentialExecutionGate(afterCommit)).resolves.toEqual(
+      expect.objectContaining({ state: "ACTIVE" }),
+    );
   });
 
   it("serializes PREPARE behind an in-flight global Pre registration", async () => {

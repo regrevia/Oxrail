@@ -1,23 +1,24 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as core from "../packages/core/src/index.js";
+import * as executionGate from "../packages/core/src/credential-execution-gate.js";
 import {
   activatePreparedHandoff,
-  admitCredentialIntent,
+  commitPreparedCredentialFixtureGate,
   createBrowserTaskState,
   credentialToolFencePre,
   handoffScopeBindingHash,
   initializeCredentialExecutionGate,
   observePreparedCredentialHostSuspension,
+  prepareCredentialInputAttempt,
   prepareHandoffBarrier,
   prepareHandoffLease,
   readBrowserTaskState,
   readCredentialExecutionGate,
-  transitionCredentialExecutionGate,
   writeBrowserTaskState,
   type CredentialHostSuspensionQuery,
   type FixtureCredentialExecutionBinding,
@@ -124,27 +125,27 @@ async function fixture(): Promise<SuspensionFixture> {
     () => 1_200,
   );
   if (activated.kind !== "ACTIVE") throw new Error("fixture activation failed");
-  const ticket = await admitCredentialIntent(
-    handoffRoot,
-    { schemaVersion: 1, credentialUseId: registryEntry.credentialUseId },
-    [registryEntry],
-    activated.lease,
-    host,
-    () => 2_000,
-  );
-  const binding: FixtureCredentialExecutionBinding = {
-    hookDefinitionHash: "6".repeat(64),
-    hostProfileHash: host.profileBindingHash,
-    ticket,
-    trustRootHash: "8".repeat(64),
-  };
   await initializeCredentialExecutionGate(credentialRoot, 1_500);
-  await transitionCredentialExecutionGate(credentialRoot, {
-    binding,
-    generation: 1,
-    kind: "PREPARE",
-    observedAt: 2_000,
-  });
+  const prepared = await prepareCredentialInputAttempt(
+    credentialRoot,
+    handoffRoot,
+    {
+      hookDefinitionHash: "6".repeat(64),
+      host,
+      intent: {
+        schemaVersion: 1,
+        credentialUseId: registryEntry.credentialUseId,
+      },
+      lease: activated.lease,
+      registry: [registryEntry],
+      trustRootHash: "8".repeat(64),
+    },
+  );
+  if (prepared.kind !== "PREPARED_FIXTURE_NON_AUTHORIZING") {
+    throw new Error("fixture preparation failed");
+  }
+  const { binding } = prepared;
+  const { ticket } = binding;
   return {
     binding,
     credentialRoot,
@@ -226,6 +227,15 @@ describe("credential Host suspension observation", () => {
       false,
     );
     expect(Object.hasOwn(core, "observeCredentialToolFenceLocked")).toBe(false);
+    expect(Object.hasOwn(core, "activateCredentialExecutionGateLocked")).toBe(
+      false,
+    );
+    expect(Object.hasOwn(core, "readCredentialExecutionGateLocked")).toBe(
+      false,
+    );
+    expect(Object.hasOwn(core, "transitionCredentialExecutionGate")).toBe(
+      false,
+    );
   });
 
   it("matches one exact receipt without activating or exposing control identity", async () => {
@@ -277,6 +287,289 @@ describe("credential Host suspension observation", () => {
     });
     expect(await allFiles(value.credentialRoot)).toEqual(beforeCredential);
     expect(await allFiles(value.handoffRoot)).toEqual(beforeHandoff);
+  });
+
+  it("commits only an inactive fixture gate under the final locked snapshot", async () => {
+    const value = await fixture();
+    const beforeHandoff = await allFiles(value.handoffRoot);
+    let observedQuery: CredentialHostSuspensionQuery | undefined;
+    let duringObservation:
+      | Awaited<ReturnType<typeof credentialToolFencePre>>
+      | undefined;
+    let observedReceipt: CredentialHostSuspensionReceipt | undefined;
+    const result = await commitPreparedCredentialFixtureGate(
+      value.credentialRoot,
+      value.handoffRoot,
+      inputFor(value),
+      async (query) => {
+        observedQuery = query;
+        duringObservation = await credentialToolFencePre(value.credentialRoot, {
+          sessionId: "during-activation-session",
+          toolUseId: "during-activation-call",
+        });
+        observedReceipt = receiptFor(query);
+        return JSON.stringify(observedReceipt);
+      },
+    );
+
+    expect(duringObservation).toBe("BLOCKED");
+    expect(result).toEqual({
+      activation: "INACTIVE",
+      authorization: "NOT_AUTHORIZED",
+      authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      credentialInputLease: "NOT_ESTABLISHED",
+      credentialProtection: "INACTIVE",
+      gate: "ACTIVE",
+      generation: 1,
+      hostSuspension: "UNVERIFIED",
+      kind: "FIXTURE_GATE_COMMITTED_NON_AUTHORIZING",
+      receiptDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    if (result.kind !== "FIXTURE_GATE_COMMITTED_NON_AUTHORIZING") {
+      throw new Error("fixture gate was not committed");
+    }
+    expect(result.receiptDigest).toBe(
+      deterministicDigest(
+        "oxrail-credential-host-suspension-receipt-v1",
+        observedReceipt,
+      ),
+    );
+    const operationDigest = deterministicDigest(
+      "oxrail-credential-execution-gate-v1",
+      value.binding,
+    );
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({
+      expiresAt: value.lease.expiresAt,
+      generation: 1,
+      kind: "KNOWN",
+      operationDigest,
+      outcome: "ACTIVATED",
+      receiptDigest: deterministicDigest(
+        "oxrail-credential-quiescence-receipt-v1",
+        {
+          generation: 1,
+          operationDigest,
+          quiescenceReceiptHash: result.receiptDigest,
+        },
+      ),
+      state: "ACTIVE",
+      updatedAt: 2_000,
+    });
+    await expect(
+      credentialToolFencePre(value.credentialRoot, {
+        sessionId: "after-activation-session",
+        toolUseId: "after-activation-call",
+      }),
+    ).resolves.toBe("BLOCKED");
+    expect(await allFiles(value.handoffRoot)).toEqual(beforeHandoff);
+
+    const serialized = JSON.stringify({ observedQuery, result });
+    for (const forbidden of [
+      value.binding.ticket.ticketId,
+      value.binding.ticket.handoff.activationAnchorHash,
+      value.lease.handoffId,
+      value.lease.nonce,
+      scope.sessionId,
+      scope.taskId,
+      scope.documentBinding,
+      origin,
+      canary,
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it("recovers a dead gate lock before taking the suspension snapshot", async () => {
+    const value = await fixture();
+    await writeFile(
+      path.join(
+        value.credentialRoot,
+        "credential-execution-gate",
+        ".current.lock",
+      ),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: 2_147_483_647,
+        createdAt: 1,
+        nonce: "22222222-2222-4222-8222-222222222222",
+      })}\n`,
+      { mode: 0o600 },
+    );
+
+    await expect(
+      commitPreparedCredentialFixtureGate(
+        value.credentialRoot,
+        value.handoffRoot,
+        inputFor(value),
+        async (query) => wireReceiptFor(query),
+      ),
+    ).resolves.toMatchObject({
+      gate: "ACTIVE",
+      kind: "FIXTURE_GATE_COMMITTED_NON_AUTHORIZING",
+    });
+  });
+
+  it("does not reactivate after cleanup completes during Host observation", async () => {
+    const value = await fixture();
+    const result = await commitPreparedCredentialFixtureGate(
+      value.credentialRoot,
+      value.handoffRoot,
+      inputFor(value),
+      async (query) => {
+        await executionGate.transitionCredentialExecutionGate(
+          value.credentialRoot,
+          {
+            binding: value.binding,
+            generation: 1,
+            kind: "ABORT_PREPARING",
+            observedAt: 2_001,
+            quiescenceReceiptHash: "a".repeat(64),
+          },
+        );
+        await executionGate.transitionCredentialExecutionGate(
+          value.credentialRoot,
+          {
+            binding: value.binding,
+            cleanupEvidenceHash: "b".repeat(64),
+            generation: 1,
+            kind: "FINISH_CLEANUP",
+            observedAt: 2_002,
+          },
+        );
+        return wireReceiptFor(query);
+      },
+    );
+
+    expect(result).toEqual({
+      activation: "INACTIVE",
+      authorization: "NOT_AUTHORIZED",
+      authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      credentialInputLease: "NOT_ESTABLISHED",
+      credentialProtection: "INACTIVE",
+      hostSuspension: "UNVERIFIED",
+      kind: "FAILED_SAFE",
+    });
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({ state: "OPEN" });
+  });
+
+  it("does not apply a stale receipt to a new preparation generation", async () => {
+    const value = await fixture();
+    let nextOperationDigest: string | undefined;
+    const result = await commitPreparedCredentialFixtureGate(
+      value.credentialRoot,
+      value.handoffRoot,
+      inputFor(value),
+      async (query) => {
+        await executionGate.transitionCredentialExecutionGate(
+          value.credentialRoot,
+          {
+            binding: value.binding,
+            generation: 1,
+            kind: "ABORT_PREPARING",
+            observedAt: 2_001,
+            quiescenceReceiptHash: "a".repeat(64),
+          },
+        );
+        await executionGate.transitionCredentialExecutionGate(
+          value.credentialRoot,
+          {
+            binding: value.binding,
+            cleanupEvidenceHash: "b".repeat(64),
+            generation: 1,
+            kind: "FINISH_CLEANUP",
+            observedAt: 2_002,
+          },
+        );
+        vi.mocked(Date.now).mockReturnValue(2_003);
+        const next = await prepareCredentialInputAttempt(
+          value.credentialRoot,
+          value.handoffRoot,
+          {
+            hookDefinitionHash: "6".repeat(64),
+            host,
+            intent: {
+              schemaVersion: 1,
+              credentialUseId: registryEntry.credentialUseId,
+            },
+            lease: value.lease,
+            registry: [registryEntry],
+            trustRootHash: "8".repeat(64),
+          },
+        );
+        expect(next).toMatchObject({
+          gate: "PREPARING",
+          generation: 2,
+          kind: "PREPARED_FIXTURE_NON_AUTHORIZING",
+        });
+        if (next.kind !== "PREPARED_FIXTURE_NON_AUTHORIZING") {
+          throw new Error("next fixture preparation failed");
+        }
+        nextOperationDigest = deterministicDigest(
+          "oxrail-credential-execution-gate-v1",
+          next.binding,
+        );
+        await expect(
+          credentialToolFencePre(value.credentialRoot, {
+            sessionId: "next-generation-session",
+            toolUseId: "next-generation-call",
+          }),
+        ).resolves.toBe("BLOCKED");
+        return wireReceiptFor(query);
+      },
+    );
+
+    expect(result.kind).toBe("FAILED_SAFE");
+    expect(nextOperationDigest).toMatch(/^[a-f0-9]{64}$/);
+    await expect(
+      readCredentialExecutionGate(value.credentialRoot),
+    ).resolves.toMatchObject({
+      generation: 2,
+      operationDigest: nextOperationDigest,
+      state: "PREPARING",
+    });
+  });
+
+  it("fails closed on both sides of the final commit deadline", async () => {
+    const beforeCommit = await fixture();
+    vi.mocked(performance.now)
+      .mockReset()
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValue(1_101);
+    await expect(
+      commitPreparedCredentialFixtureGate(
+        beforeCommit.credentialRoot,
+        beforeCommit.handoffRoot,
+        inputFor(beforeCommit),
+        async (query) => wireReceiptFor(query),
+      ),
+    ).resolves.toMatchObject({ kind: "FAILED_SAFE" });
+    await expect(
+      readCredentialExecutionGate(beforeCommit.credentialRoot),
+    ).resolves.toMatchObject({ state: "PREPARING" });
+
+    const afterCommit = await fixture();
+    vi.mocked(performance.now)
+      .mockReset()
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValue(1_101);
+    await expect(
+      commitPreparedCredentialFixtureGate(
+        afterCommit.credentialRoot,
+        afterCommit.handoffRoot,
+        inputFor(afterCommit),
+        async (query) => wireReceiptFor(query),
+      ),
+    ).resolves.toMatchObject({ kind: "FAILED_SAFE" });
+    await expect(
+      readCredentialExecutionGate(afterCommit.credentialRoot),
+    ).resolves.toMatchObject({ state: "ACTIVE" });
   });
 
   it.each([
@@ -670,20 +963,26 @@ describe("credential Host suspension observation", () => {
       value.handoffRoot,
       inputFor(value),
       async (query) => {
-        await transitionCredentialExecutionGate(value.credentialRoot, {
-          binding: value.binding,
-          generation: 1,
-          kind: "ABORT_PREPARING",
-          observedAt: 2_001,
-          quiescenceReceiptHash: "a".repeat(64),
-        });
-        await transitionCredentialExecutionGate(value.credentialRoot, {
-          binding: value.binding,
-          cleanupEvidenceHash: "b".repeat(64),
-          generation: 1,
-          kind: "FINISH_CLEANUP",
-          observedAt: 2_002,
-        });
+        await executionGate.transitionCredentialExecutionGate(
+          value.credentialRoot,
+          {
+            binding: value.binding,
+            generation: 1,
+            kind: "ABORT_PREPARING",
+            observedAt: 2_001,
+            quiescenceReceiptHash: "a".repeat(64),
+          },
+        );
+        await executionGate.transitionCredentialExecutionGate(
+          value.credentialRoot,
+          {
+            binding: value.binding,
+            cleanupEvidenceHash: "b".repeat(64),
+            generation: 1,
+            kind: "FINISH_CLEANUP",
+            observedAt: 2_002,
+          },
+        );
         pre = await credentialToolFencePre(value.credentialRoot, {
           sessionId: "incoming-session",
           toolUseId: "incoming-call",

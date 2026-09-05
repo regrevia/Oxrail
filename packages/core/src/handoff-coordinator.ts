@@ -31,9 +31,11 @@ import {
   CredentialAdmissionError,
 } from "./credential-admission.js";
 import {
+  activateCredentialExecutionGateLocked,
   credentialExecutionBinding,
   prepareCredentialExecutionGateLocked,
   readCredentialExecutionGate,
+  readCredentialExecutionGateLocked,
   type FixtureCredentialExecutionBinding,
 } from "./credential-execution-gate.js";
 import { observeCredentialToolFenceLocked } from "./credential-tool-fence.js";
@@ -274,6 +276,26 @@ export type CredentialHostSuspensionObservationResult =
       receiptDigest: string;
     })
   | (CredentialHostSuspensionResultBase & {
+      kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY";
+    });
+
+type CredentialFixtureGateCommitBase = {
+  activation: "INACTIVE";
+  authorization: "NOT_AUTHORIZED";
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  credentialInputLease: "NOT_ESTABLISHED";
+  credentialProtection: "INACTIVE";
+  hostSuspension: "UNVERIFIED";
+};
+
+export type CredentialFixtureGateCommitResult =
+  | (CredentialFixtureGateCommitBase & {
+      gate: "ACTIVE";
+      generation: number;
+      kind: "FIXTURE_GATE_COMMITTED_NON_AUTHORIZING";
+      receiptDigest: string;
+    })
+  | (CredentialFixtureGateCommitBase & {
       kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY";
     });
 
@@ -1026,6 +1048,18 @@ const credentialSuspensionResult = (
   kind,
 });
 
+const credentialFixtureGateCommitResult = (
+  kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY",
+): CredentialFixtureGateCommitResult => ({
+  activation: "INACTIVE",
+  authorization: "NOT_AUTHORIZED",
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+  credentialInputLease: "NOT_ESTABLISHED",
+  credentialProtection: "INACTIVE",
+  hostSuspension: "UNVERIFIED",
+  kind,
+});
+
 function parseBoundedCredentialSuspensionReceipt(
   value: CredentialHostSuspensionReceiptWire | undefined,
 ): CredentialHostSuspensionReceipt | undefined {
@@ -1583,27 +1617,29 @@ interface CredentialHostSuspensionLockedSnapshot {
   wallObservedAt: number;
 }
 
-async function credentialHostSuspensionSnapshotLocked(
+async function withCredentialHostSuspensionSnapshotLocked<Result>(
   credentialFenceRoot: string,
   handoffRoot: string,
   input: CredentialHostSuspensionObservationInput,
   operation: ReturnType<typeof credentialExecutionBinding>,
   expectedHost: PersistedHostBinding,
-): Promise<CredentialHostSuspensionLockedSnapshot | undefined> {
-  const gate = await readCredentialExecutionGate(credentialFenceRoot);
-  if (
-    gate.kind !== "KNOWN" ||
-    gate.state !== "PREPARING" ||
-    gate.generation !== input.generation ||
-    gate.operationDigest !== operation.digest ||
-    gate.expiresAt !== operation.ticket.handoff.expiresAt
-  ) {
-    return;
-  }
+  visit: (
+    snapshot: CredentialHostSuspensionLockedSnapshot,
+  ) => Result | Promise<Result>,
+): Promise<Result | undefined> {
   return transitionBrowserTaskState(
     handoffRoot,
     input.lease.scope,
     async (state) => {
+      const gate = await readCredentialExecutionGateLocked(credentialFenceRoot);
+      if (
+        gate.state !== "PREPARING" ||
+        gate.generation !== input.generation ||
+        gate.operationDigest !== operation.digest ||
+        gate.expiresAt !== operation.ticket.handoff.expiresAt
+      ) {
+        return { value: undefined };
+      }
       const handoffGate = await readHandoffGate(handoffRoot, input.lease.scope);
       const barrier = await readBarrier(
         barrierPath(handoffRoot, input.lease.scope, input.lease.leaseEpoch),
@@ -1694,49 +1730,108 @@ async function credentialHostSuspensionSnapshotLocked(
         toolFenceSnapshotHash: toolFence.snapshotHash,
         verifierContextBindingHash,
       };
-      return {
-        value: {
-          attemptKey: deterministicDigest(
-            "oxrail-credential-host-suspension-attempt-v1",
-            {
-              admissionGeneration: barrier.leaseEpoch,
-              credentialFenceRootHash: deterministicDigest(
-                "oxrail-credential-fence-root-v1",
-                path.resolve(credentialFenceRoot),
-              ),
-              credentialGateGeneration: gate.generation,
-              handoffActivationBindingHash,
-              operationDigest: operation.digest,
-            },
-          ),
-          context,
-          snapshotHash: deterministicDigest(
-            "oxrail-credential-host-suspension-locked-snapshot-v1",
-            {
-              activationAnchorHash,
-              barrier,
-              gate,
-              state,
-              toolFenceSnapshotHash: toolFence.snapshotHash,
-            },
-          ),
-          wallObservedAt: observedAt,
-        },
+      const snapshot: CredentialHostSuspensionLockedSnapshot = {
+        attemptKey: deterministicDigest(
+          "oxrail-credential-host-suspension-attempt-v1",
+          {
+            admissionGeneration: barrier.leaseEpoch,
+            credentialFenceRootHash: deterministicDigest(
+              "oxrail-credential-fence-root-v1",
+              path.resolve(credentialFenceRoot),
+            ),
+            credentialGateGeneration: gate.generation,
+            handoffActivationBindingHash,
+            operationDigest: operation.digest,
+          },
+        ),
+        context,
+        snapshotHash: deterministicDigest(
+          "oxrail-credential-host-suspension-locked-snapshot-v1",
+          {
+            activationAnchorHash,
+            barrier,
+            gate,
+            state,
+            toolFenceSnapshotHash: toolFence.snapshotHash,
+          },
+        ),
+        wallObservedAt: observedAt,
       };
+      return { value: await visit(snapshot) };
     },
   );
 }
 
-/**
- * Observes one fixture Host suspension claim between two exact locked reads.
- * A structural match remains non-authorizing and cannot show UI.
- */
-export async function observePreparedCredentialHostSuspension(
+const credentialHostSuspensionSnapshotLocked = (
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  input: CredentialHostSuspensionObservationInput,
+  operation: ReturnType<typeof credentialExecutionBinding>,
+  expectedHost: PersistedHostBinding,
+): Promise<CredentialHostSuspensionLockedSnapshot | undefined> =>
+  withCredentialHostSuspensionSnapshotLocked(
+    credentialFenceRoot,
+    handoffRoot,
+    input,
+    operation,
+    expectedHost,
+    (snapshot) => snapshot,
+  );
+
+function matchesFinalCredentialHostSuspensionSnapshot(
+  initial: CredentialHostSuspensionLockedSnapshot,
+  final: CredentialHostSuspensionLockedSnapshot,
+  finalizedAt: number,
+  afterObservation: number,
+  deadline: number,
+): boolean {
+  return (
+    Number.isSafeInteger(finalizedAt) &&
+    finalizedAt >= afterObservation &&
+    finalizedAt <= deadline &&
+    final.wallObservedAt >= initial.wallObservedAt &&
+    final.attemptKey === initial.attemptKey &&
+    final.snapshotHash === initial.snapshotHash &&
+    deterministicDigest(
+      "oxrail-credential-host-suspension-query-context-v1",
+      final.context,
+    ) ===
+      deterministicDigest(
+        "oxrail-credential-host-suspension-query-context-v1",
+        initial.context,
+      )
+  );
+}
+
+type CredentialHostSuspensionMode = "COMMIT_FIXTURE_GATE" | "OBSERVE_ONLY";
+
+async function runPreparedCredentialHostSuspension(
   credentialFenceRoot: string,
   handoffRoot: string,
   value: CredentialHostSuspensionObservationInput,
   observeHostSuspension: ObserveCredentialHostSuspension,
-): Promise<CredentialHostSuspensionObservationResult> {
+  mode: "OBSERVE_ONLY",
+): Promise<CredentialHostSuspensionObservationResult>;
+async function runPreparedCredentialHostSuspension(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  value: CredentialHostSuspensionObservationInput,
+  observeHostSuspension: ObserveCredentialHostSuspension,
+  mode: "COMMIT_FIXTURE_GATE",
+): Promise<CredentialFixtureGateCommitResult>;
+async function runPreparedCredentialHostSuspension(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  value: CredentialHostSuspensionObservationInput,
+  observeHostSuspension: ObserveCredentialHostSuspension,
+  mode: CredentialHostSuspensionMode,
+): Promise<
+  CredentialHostSuspensionObservationResult | CredentialFixtureGateCommitResult
+> {
+  const failed = (kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY") =>
+    mode === "OBSERVE_ONLY"
+      ? credentialSuspensionResult(kind)
+      : credentialFixtureGateCommitResult(kind);
   try {
     if (
       !credentialFenceRoot ||
@@ -1744,7 +1839,7 @@ export async function observePreparedCredentialHostSuspension(
       path.resolve(credentialFenceRoot) === path.resolve(handoffRoot) ||
       typeof observeHostSuspension !== "function"
     ) {
-      return credentialSuspensionResult("FAILED_SAFE");
+      return failed("FAILED_SAFE");
     }
     const input = structuredClone(value);
     if (
@@ -1761,7 +1856,7 @@ export async function observePreparedCredentialHostSuspension(
       !HASH.test(input.promptContextHash) ||
       !exactCredentialSuspensionLease(input.lease)
     ) {
-      return credentialSuspensionResult("FAILED_SAFE");
+      return failed("FAILED_SAFE");
     }
     const operation = credentialExecutionBinding(input.binding);
     const expectedHost = persistedHostBinding(input.host);
@@ -1777,7 +1872,7 @@ export async function observePreparedCredentialHostSuspension(
         operation.ticket,
       )
     ) {
-      return credentialSuspensionResult("FAILED_SAFE");
+      return failed("FAILED_SAFE");
     }
 
     const prepared = await withCredentialToolFenceLock(
@@ -1816,7 +1911,7 @@ export async function observePreparedCredentialHostSuspension(
       },
     );
     if (prepared.kind !== "READY") {
-      return credentialSuspensionResult(prepared.kind);
+      return failed(prepared.kind);
     }
 
     const beforeObservation = Math.floor(performance.now());
@@ -1826,7 +1921,7 @@ export async function observePreparedCredentialHostSuspension(
       beforeObservation >
         Number.MAX_SAFE_INTEGER - CREDENTIAL_SUSPENSION_OBSERVER_TIMEOUT_MS
     ) {
-      return credentialSuspensionResult("FAILED_SAFE");
+      return failed("FAILED_SAFE");
     }
     const observed = await observeWithTimeout(
       observeHostSuspension,
@@ -1846,57 +1941,144 @@ export async function observePreparedCredentialHostSuspension(
       observedCredentialSuspensionFences.has(receipt.hostSuspensionFenceHash) ||
       observedCredentialSuspensionFences.size >= MAX_ATTEMPTED_VERIFIER_CONTEXTS
     ) {
-      return credentialSuspensionResult("FAILED_SAFE");
+      return failed("FAILED_SAFE");
     }
     observedCredentialSuspensionFences.add(receipt.hostSuspensionFenceHash);
+    const receiptDigest = deterministicDigest(
+      "oxrail-credential-host-suspension-receipt-v1",
+      receipt,
+    );
 
-    const finalized = await withCredentialToolFenceLock(
+    if (mode === "OBSERVE_ONLY") {
+      const finalized = await withCredentialToolFenceLock(
+        credentialFenceRoot,
+        async () => {
+          const snapshot = await credentialHostSuspensionSnapshotLocked(
+            credentialFenceRoot,
+            handoffRoot,
+            input,
+            operation,
+            expectedHost,
+          );
+          return { snapshot, finalizedAt: Math.floor(performance.now()) };
+        },
+      );
+      if (
+        !finalized.snapshot ||
+        !matchesFinalCredentialHostSuspensionSnapshot(
+          prepared.snapshot,
+          finalized.snapshot,
+          finalized.finalizedAt,
+          afterObservation,
+          deadline,
+        )
+      ) {
+        return failed("FAILED_SAFE");
+      }
+
+      return {
+        activation: "INACTIVE",
+        authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+        hostSuspension: "UNVERIFIED",
+        kind: "STRUCTURE_MATCHED_NON_AUTHORIZING",
+        receiptDigest,
+      };
+    }
+
+    const committed = await withCredentialToolFenceLock(
       credentialFenceRoot,
-      async () => {
-        const snapshot = await credentialHostSuspensionSnapshotLocked(
+      () =>
+        withCredentialHostSuspensionSnapshotLocked(
           credentialFenceRoot,
           handoffRoot,
           input,
           operation,
           expectedHost,
-        );
-        return { snapshot, finalizedAt: Math.floor(performance.now()) };
-      },
+          async (snapshot) => {
+            const beforeCommit = Math.floor(performance.now());
+            if (
+              !matchesFinalCredentialHostSuspensionSnapshot(
+                prepared.snapshot,
+                snapshot,
+                beforeCommit,
+                afterObservation,
+                deadline,
+              )
+            ) {
+              return "REJECTED" as const;
+            }
+            await activateCredentialExecutionGateLocked(
+              credentialFenceRoot,
+              input.binding,
+              input.generation,
+              receiptDigest,
+              snapshot.wallObservedAt,
+            );
+            const afterCommit = Math.floor(performance.now());
+            return Number.isSafeInteger(afterCommit) &&
+              afterCommit >= beforeCommit &&
+              afterCommit <= deadline
+              ? ("COMMITTED" as const)
+              : ("COMMITTED_UNCONFIRMED" as const);
+          },
+        ),
     );
-    const finalSnapshot = finalized.snapshot;
-    if (
-      !finalSnapshot ||
-      !Number.isSafeInteger(finalized.finalizedAt) ||
-      finalized.finalizedAt < afterObservation ||
-      finalized.finalizedAt > deadline ||
-      finalSnapshot.wallObservedAt < prepared.snapshot.wallObservedAt ||
-      finalSnapshot.attemptKey !== prepared.snapshot.attemptKey ||
-      finalSnapshot.snapshotHash !== prepared.snapshot.snapshotHash ||
-      deterministicDigest(
-        "oxrail-credential-host-suspension-query-context-v1",
-        finalSnapshot.context,
-      ) !==
-        deterministicDigest(
-          "oxrail-credential-host-suspension-query-context-v1",
-          prepared.snapshot.context,
-        )
-    ) {
-      return credentialSuspensionResult("FAILED_SAFE");
+    if (committed !== "COMMITTED") {
+      return failed("FAILED_SAFE");
     }
-
     return {
       activation: "INACTIVE",
+      authorization: "NOT_AUTHORIZED",
       authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      credentialInputLease: "NOT_ESTABLISHED",
+      credentialProtection: "INACTIVE",
+      gate: "ACTIVE",
+      generation: input.generation,
       hostSuspension: "UNVERIFIED",
-      kind: "STRUCTURE_MATCHED_NON_AUTHORIZING",
-      receiptDigest: deterministicDigest(
-        "oxrail-credential-host-suspension-receipt-v1",
-        receipt,
-      ),
+      kind: "FIXTURE_GATE_COMMITTED_NON_AUTHORIZING",
+      receiptDigest,
     };
   } catch {
-    return credentialSuspensionResult("FAILED_SAFE");
+    return failed("FAILED_SAFE");
   }
+}
+
+/** Observe one fixture claim without changing the PREPARING gate. */
+export async function observePreparedCredentialHostSuspension(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  value: CredentialHostSuspensionObservationInput,
+  observeHostSuspension: ObserveCredentialHostSuspension,
+): Promise<CredentialHostSuspensionObservationResult> {
+  return runPreparedCredentialHostSuspension(
+    credentialFenceRoot,
+    handoffRoot,
+    value,
+    observeHostSuspension,
+    "OBSERVE_ONLY",
+  );
+}
+
+/**
+ * Terminally consumes the prepared one-shot observation and commits only a
+ * fixture blocking-ledger fact after the final locked snapshot. It is mutually
+ * exclusive with observePreparedCredentialHostSuspension and does not establish
+ * Host suspension, authorization, a credential-input lease, or presentation.
+ * No product adapter may call this until a bounded cleanup/recovery API exists.
+ */
+export async function commitPreparedCredentialFixtureGate(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  value: CredentialHostSuspensionObservationInput,
+  observeHostSuspension: ObserveCredentialHostSuspension,
+): Promise<CredentialFixtureGateCommitResult> {
+  return runPreparedCredentialHostSuspension(
+    credentialFenceRoot,
+    handoffRoot,
+    value,
+    observeHostSuspension,
+    "COMMIT_FIXTURE_GATE",
+  );
 }
 
 /**
