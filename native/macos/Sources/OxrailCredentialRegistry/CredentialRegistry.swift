@@ -120,7 +120,7 @@ package struct EmbeddedCredentialPromptDescriptor: Equatable, Sendable {
     package let pasteboardWarning: String
 }
 
-func credentialRegistryDigest<Value: Encodable>(
+package func credentialRegistryDigest<Value: Encodable>(
     domain: String,
     value: Value
 ) -> String? {

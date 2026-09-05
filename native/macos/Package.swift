@@ -43,7 +43,8 @@ let package = Package(
         ),
         .testTarget(
             name: "OxrailCredentialEnclaveTests",
-            dependencies: ["OxrailCredentialEnclave", "OxrailCredentialRegistry"]
+            dependencies: ["OxrailCredentialEnclave", "OxrailCredentialRegistry"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "OxrailKeychainProbeTests",

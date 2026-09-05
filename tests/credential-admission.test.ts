@@ -23,6 +23,7 @@ import {
 import {
   CredentialProvisionIntentSchema,
   CredentialPublicResultSchema,
+  deterministicDigest,
   type CredentialUseRegistryEntry,
 } from "../packages/protocol/src/index.js";
 
@@ -50,12 +51,15 @@ const registryEntry: CredentialUseRegistryEntry = {
   purposeId: "publish-post",
   consumerId: "fixture.https.publisher",
   grantTtlSeconds: 3_600,
-  generation: 7,
+  generation: 1,
   readiness: "FIXTURE_ONLY",
-  registryVersion: 3,
-  templateRegistryHash: "a".repeat(64),
-  consumerRegistryHash: "b".repeat(64),
-  registryManifestHash: "c".repeat(64),
+  registryVersion: 1,
+  templateRegistryHash:
+    "b01287454e5727a721e941b00e6d5bf2b6a0c89c47cfb3f9edcad5820e970cdd",
+  consumerRegistryHash:
+    "71e4b865818705e073c556f3adea9bb296fe359f0385cb48ec6054862347b1be",
+  registryManifestHash:
+    "2fd54c5c4bf0672d670323d3bb181aa185ebfdec8667baedb69e13222790e4d7",
 };
 const temporaryDirectories: string[] = [];
 
@@ -221,6 +225,22 @@ describe("credential admission", () => {
       host,
       () => now,
     );
+    const goldenTicket = JSON.parse(
+      await readFile(
+        path.join(
+          process.cwd(),
+          "native/macos/Tests/OxrailCredentialEnclaveTests/Fixtures/credential-ticket-v2.json",
+        ),
+        "utf8",
+      ),
+    ) as unknown;
+    expect(ticket).toEqual(goldenTicket);
+    expect(
+      deterministicDigest("oxrail-credential-prompt-context-v1", {
+        observedAt: now,
+        ticket,
+      }),
+    ).toBe("19535252dec48e898f58062f0846d2585d798463b15557654afee5ca8261827b");
 
     expect(ticket).toMatchObject({
       schemaVersion: 2,

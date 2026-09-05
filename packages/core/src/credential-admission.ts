@@ -118,12 +118,18 @@ export function bindCredentialIntentToActivationAnchor(
   if (!/^[a-f0-9]{64}$/.test(activationAnchorHash)) {
     deny("INVALID_HANDOFF");
   }
+  const ticketHandoff = {
+    activationAnchorHash,
+    leaseEpoch: handoff.leaseEpoch,
+    acquiredAt: handoff.acquiredAt,
+    expiresAt: handoff.expiresAt,
+  };
   return CredentialEnclaveTicketSchema.parse({
     schemaVersion: 2,
     authority: "FIXTURE_ONLY_NON_AUTHORIZING",
     ticketId: `oct1_${deterministicDigest(
       "oxrail-credential-fixture-ticket-v2",
-      { activationAnchorHash, entry, issuedAt: now },
+      { entry, handoff: ticketHandoff, issuedAt: now },
     )}`,
     credentialUseId: entry.credentialUseId,
     credentialKind: entry.credentialKind,
@@ -139,11 +145,6 @@ export function bindCredentialIntentToActivationAnchor(
     consumerRegistryHash: entry.consumerRegistryHash,
     registryManifestHash: entry.registryManifestHash,
     issuedAt: now,
-    handoff: {
-      activationAnchorHash,
-      leaseEpoch: handoff.leaseEpoch,
-      acquiredAt: handoff.acquiredAt,
-      expiresAt: handoff.expiresAt,
-    },
+    handoff: ticketHandoff,
   });
 }

@@ -191,8 +191,10 @@ final class CredentialEnclaveTests: XCTestCase {
         let sourceRoot = packageRoot.appendingPathComponent("Sources/OxrailCredentialEnclave")
         let sources = try swiftSources(below: sourceRoot)
         XCTAssertFalse(sources.isEmpty)
+        XCTAssertTrue(sources.contains { $0.contains("func checkpointCredentialPresentation(") })
         for forbidden in [
             "runModal(", "beginSheetModal", "makeKeyAndOrderFront", "orderFront(",
+            "NSApplication.shared", "NSWindow(", "NSPanel(",
             "SecItem", "NSXPCConnection", "NSPasteboard", "URLSession", "URLRequest",
             "CommandLine", "ProcessInfo.processInfo.environment", "FileHandle", "NSLog", "print(",
         ] {
@@ -213,6 +215,12 @@ final class CredentialEnclaveTests: XCTestCase {
         let targetDeclaration = manifest[..<enclaveName].suffix(80)
         XCTAssertTrue(targetDeclaration.contains(".target("))
         XCTAssertFalse(targetDeclaration.contains(".executableTarget("))
+        XCTAssertNil(
+            manifest.range(
+                of: #"\b(path|sources|exclude)\s*:"#,
+                options: .regularExpression
+            )
+        )
     }
 }
 
