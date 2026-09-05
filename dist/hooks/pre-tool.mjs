@@ -12607,6 +12607,34 @@ var CredentialEnclaveTicketSchema = external_exports.strictObject({
     expiresAt: nonNegativeInt
   })
 });
+var credentialSuspensionLane = external_exports.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]);
+var CredentialHostSuspensionReceiptSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  authority: external_exports.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  challengeHash: lowercaseHash,
+  promptContextHash: lowercaseHash,
+  handoffActivationBindingHash: lowercaseHash,
+  admissionGeneration: positiveInt,
+  hostProfileBindingHash: lowercaseHash,
+  browserInstanceBindingHash: lowercaseHash,
+  credentialOperationDigest: lowercaseHash,
+  gateSnapshotHash: lowercaseHash,
+  toolFenceSnapshotHash: lowercaseHash,
+  coverageBindingHash: lowercaseHash,
+  verifierContextBindingHash: lowercaseHash,
+  stateEpoch: positiveInt,
+  hostSuspensionFenceHash: lowercaseHash,
+  lanes: external_exports.strictObject({
+    agentTool: credentialSuspensionLane,
+    browserAction: credentialSuspensionLane,
+    browserObservation: credentialSuspensionLane,
+    shell: credentialSuspensionLane,
+    screenCapture: credentialSuspensionLane,
+    clipboard: credentialSuspensionLane,
+    semanticQuery: credentialSuspensionLane,
+    enclaveProtocol: external_exports.enum(["ALLOWLIST_ONLY", "ACTIVE", "UNKNOWN"])
+  })
+});
 var opaqueCredentialRef = external_exports.string().regex(/^ocref1_[A-Za-z0-9_-]{43}$/, "expected an opaque credential ref");
 var credentialPublicResultBase = {
   schemaVersion: external_exports.literal(1)
@@ -15050,7 +15078,12 @@ async function credentialToolFencePost(root, input) {
 }
 
 // packages/core/src/handoff-coordinator.ts
-import { createHash as createHash6, randomUUID as randomUUID4, timingSafeEqual } from "node:crypto";
+import {
+  createHash as createHash6,
+  randomBytes as randomBytes2,
+  randomUUID as randomUUID4,
+  timingSafeEqual
+} from "node:crypto";
 import {
   chmod as chmod4,
   link as link5,
@@ -15358,6 +15391,7 @@ var MAX_BARRIER_BYTES = 1024;
 var TEMPORARY = /^\.lease-[0-9]+\.[a-f0-9-]{36}\.tmp$/;
 var HASH2 = /^[a-f0-9]{64}$/;
 var PERSISTENT_ID2 = /^oxrail-id:[a-f0-9]{64}$/;
+var MAX_CREDENTIAL_SUSPENSION_RECEIPT_BYTES = 4 * 1024;
 function compareHandoffGates(initial, current) {
   if (initial.kind === "UNKNOWN" || current.kind === "UNKNOWN") {
     return "UNKNOWN";

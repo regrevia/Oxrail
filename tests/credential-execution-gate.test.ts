@@ -32,14 +32,16 @@ import {
   type CredentialExecutionGateEvent,
   type FixtureCredentialExecutionBinding,
 } from "../packages/core/src/credential-execution-gate.js";
-import type { CredentialEnclaveTicket } from "../packages/protocol/src/index.js";
+import {
+  deterministicDigest,
+  type CredentialEnclaveTicket,
+} from "../packages/protocol/src/index.js";
 
 const canary = "oxrail_api_key_canary_must_not_persist";
 const hash = (character: string) => character.repeat(64);
-const ticket: CredentialEnclaveTicket = {
+const ticketBody = {
   schemaVersion: 2,
   authority: "FIXTURE_ONLY_NON_AUTHORIZING",
-  ticketId: `oct1_${hash("1")}`,
   credentialUseId: "fixture.publish.api-key",
   credentialKind: "API_KEY",
   templateId: "fixture.api-key.v1",
@@ -60,6 +62,30 @@ const ticket: CredentialEnclaveTicket = {
     acquiredAt: 5,
     expiresAt: 100,
   },
+} as const;
+const ticket: CredentialEnclaveTicket = {
+  ...ticketBody,
+  ticketId: `oct1_${deterministicDigest("oxrail-credential-fixture-ticket-v2", {
+    entry: {
+      schemaVersion: 1,
+      credentialUseId: ticketBody.credentialUseId,
+      credentialKind: ticketBody.credentialKind,
+      templateId: ticketBody.templateId,
+      serviceId: ticketBody.serviceId,
+      provisioningOrigin: ticketBody.provisioningOrigin,
+      purposeId: ticketBody.purposeId,
+      consumerId: ticketBody.consumerId,
+      grantTtlSeconds: ticketBody.grantTtlSeconds,
+      generation: ticketBody.generation,
+      readiness: "FIXTURE_ONLY",
+      registryVersion: ticketBody.registryVersion,
+      templateRegistryHash: ticketBody.templateRegistryHash,
+      consumerRegistryHash: ticketBody.consumerRegistryHash,
+      registryManifestHash: ticketBody.registryManifestHash,
+    },
+    handoff: ticketBody.handoff,
+    issuedAt: ticketBody.issuedAt,
+  })}`,
 };
 const binding: FixtureCredentialExecutionBinding = {
   hookDefinitionHash: hash("6"),
@@ -414,6 +440,19 @@ describe("credential execution gate", () => {
         event("PREPARE", 1, 20, {
           ...binding,
           ticket: { ...ticket, schemaVersion: 1 } as never,
+        }),
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<CredentialExecutionGateError>>({
+        code: "INVALID_INPUT",
+      }),
+    );
+    await expect(
+      transitionCredentialExecutionGate(
+        root,
+        event("PREPARE", 1, 20, {
+          ...binding,
+          ticket: { ...ticket, ticketId: `oct1_${hash("0")}` },
         }),
       ),
     ).rejects.toEqual(

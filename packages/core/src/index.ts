@@ -3,8 +3,30 @@ export {
   CredentialAdmissionError,
   type CredentialAdmissionErrorCode,
 } from "./credential-admission.js";
-export * from "./credential-execution-gate.js";
-export * from "./credential-tool-fence.js";
+export {
+  CredentialExecutionGateError,
+  compareCredentialExecutionGates,
+  credentialExecutionGateBlockStatus,
+  initializeCredentialExecutionGate,
+  readCredentialExecutionGate,
+  transitionCredentialExecutionGate,
+  type CredentialExecutionGateComparison,
+  type CredentialExecutionGateErrorCode,
+  type CredentialExecutionGateEvent,
+  type CredentialExecutionGateEventKind,
+  type CredentialExecutionGateSnapshot,
+  type CredentialExecutionGateState,
+  type FixtureCredentialExecutionBinding,
+} from "./credential-execution-gate.js";
+export {
+  credentialToolFencePost,
+  credentialToolFencePre,
+  readCredentialToolFenceQuiescence,
+  type CredentialToolFenceCall,
+  type CredentialToolFencePostResult,
+  type CredentialToolFencePreResult,
+  type CredentialToolFenceQuiescence,
+} from "./credential-tool-fence.js";
 export * from "./handoff.js";
 export * from "./handoff-coordinator.js";
 export * from "./local-digest.js";

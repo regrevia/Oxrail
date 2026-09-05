@@ -7,6 +7,7 @@ import {
   deterministicDigest,
   type CredentialEnclaveTicket,
 } from "../../protocol/src/index.js";
+import { hasValidFixtureCredentialTicketId } from "./credential-admission.js";
 import { BrowserTaskStateStoreError, readBoundedPrivateFile } from "./store.js";
 import { withCredentialToolFenceLock } from "./credential-tool-fence-lock.js";
 
@@ -687,7 +688,10 @@ export function compareCredentialExecutionGates(
     : "CHANGED";
 }
 
-function parseOperationBinding(binding: FixtureCredentialExecutionBinding): {
+/** Package-internal parser shared by the locked credential coordinator. */
+export function credentialExecutionBinding(
+  binding: FixtureCredentialExecutionBinding,
+): {
   digest: string;
   ticket: CredentialEnclaveTicket;
 } {
@@ -706,6 +710,9 @@ function parseOperationBinding(binding: FixtureCredentialExecutionBinding): {
   try {
     ticket = CredentialEnclaveTicketSchema.parse(binding.ticket);
   } catch {
+    throw new CredentialExecutionGateError("INVALID_INPUT");
+  }
+  if (!hasValidFixtureCredentialTicketId(ticket)) {
     throw new CredentialExecutionGateError("INVALID_INPUT");
   }
   return {
@@ -774,7 +781,7 @@ function cleanupEvidenceDigest(
 function validateTransition(
   root: string,
   event: CredentialExecutionGateEvent,
-): ReturnType<typeof parseOperationBinding> {
+): ReturnType<typeof credentialExecutionBinding> {
   if (
     !root ||
     !event ||
@@ -793,7 +800,7 @@ function validateTransition(
   ) {
     throw new CredentialExecutionGateError("INVALID_INPUT");
   }
-  const parsed = parseOperationBinding(event.binding);
+  const parsed = credentialExecutionBinding(event.binding);
   if (
     parsed.ticket.issuedAt < parsed.ticket.handoff.acquiredAt ||
     parsed.ticket.issuedAt > parsed.ticket.handoff.expiresAt ||

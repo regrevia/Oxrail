@@ -85,6 +85,47 @@ function validateActiveHandoff(
   }
 }
 
+const fixtureTicketEntry = (ticket: CredentialEnclaveTicket) => ({
+  schemaVersion: 1 as const,
+  credentialUseId: ticket.credentialUseId,
+  credentialKind: ticket.credentialKind,
+  templateId: ticket.templateId,
+  serviceId: ticket.serviceId,
+  provisioningOrigin: ticket.provisioningOrigin,
+  purposeId: ticket.purposeId,
+  consumerId: ticket.consumerId,
+  grantTtlSeconds: ticket.grantTtlSeconds,
+  generation: ticket.generation,
+  readiness: "FIXTURE_ONLY" as const,
+  registryVersion: ticket.registryVersion,
+  templateRegistryHash: ticket.templateRegistryHash,
+  consumerRegistryHash: ticket.consumerRegistryHash,
+  registryManifestHash: ticket.registryManifestHash,
+});
+
+const fixtureCredentialTicketIdentifier = (
+  entry: CredentialUseRegistryEntry,
+  handoff: CredentialEnclaveTicket["handoff"],
+  issuedAt: number,
+) =>
+  `oct1_${deterministicDigest("oxrail-credential-fixture-ticket-v2", {
+    entry,
+    handoff,
+    issuedAt,
+  })}`;
+
+/** Package-internal integrity check; this unkeyed digest is not authority. */
+export function hasValidFixtureCredentialTicketId(
+  ticket: CredentialEnclaveTicket,
+): boolean {
+  const expected = fixtureCredentialTicketIdentifier(
+    fixtureTicketEntry(ticket),
+    ticket.handoff,
+    ticket.issuedAt,
+  );
+  return ticket.ticketId === expected;
+}
+
 /** Package-internal builder; only the locked coordinator may supply the anchor. */
 export function bindCredentialIntentToActivationAnchor(
   value: unknown,
@@ -127,10 +168,7 @@ export function bindCredentialIntentToActivationAnchor(
   return CredentialEnclaveTicketSchema.parse({
     schemaVersion: 2,
     authority: "FIXTURE_ONLY_NON_AUTHORIZING",
-    ticketId: `oct1_${deterministicDigest(
-      "oxrail-credential-fixture-ticket-v2",
-      { entry, handoff: ticketHandoff, issuedAt: now },
-    )}`,
+    ticketId: fixtureCredentialTicketIdentifier(entry, ticketHandoff, now),
     credentialUseId: entry.credentialUseId,
     credentialKind: entry.credentialKind,
     templateId: entry.templateId,

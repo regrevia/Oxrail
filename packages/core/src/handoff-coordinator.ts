@@ -1,4 +1,9 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import {
   chmod,
   link,
@@ -12,10 +17,12 @@ import {
 import path from "node:path";
 
 import {
+  CredentialHostSuspensionReceiptSchema,
   HandoffCurrentTabReceiptSchema,
   deterministicDigest,
   type BrowserTaskState,
   type CredentialEnclaveTicket,
+  type CredentialHostSuspensionReceipt,
   type CredentialUseRegistryEntry,
   type HandoffCurrentTabReceipt,
 } from "../../protocol/src/index.js";
@@ -23,6 +30,13 @@ import {
   bindCredentialIntentToActivationAnchor,
   CredentialAdmissionError,
 } from "./credential-admission.js";
+import {
+  credentialExecutionBinding,
+  readCredentialExecutionGate,
+  type FixtureCredentialExecutionBinding,
+} from "./credential-execution-gate.js";
+import { observeCredentialToolFenceLocked } from "./credential-tool-fence.js";
+import { withCredentialToolFenceLock } from "./credential-tool-fence-lock.js";
 import {
   evaluateCompletionCandidate,
   type CompletionCandidate,
@@ -56,11 +70,17 @@ const HASH = /^[a-f0-9]{64}$/;
 const PERSISTENT_ID = /^oxrail-id:[a-f0-9]{64}$/;
 const SAFE_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const COMPLETION_OBSERVER_TIMEOUT_MS = 1_000;
+const CREDENTIAL_SUSPENSION_OBSERVER_TIMEOUT_MS = 1_000;
+const MAX_CREDENTIAL_SUSPENSION_RECEIPT_BYTES = 4 * 1024;
 const MAX_ATTEMPTED_VERIFIER_CONTEXTS = 256;
 const FIXTURE_ORIGIN = "http://127.0.0.1:4173";
 // ponytail: process-local fixture ceiling; replace with the authenticated
 // challenge-consumption ledger before enabling a production Host adapter.
 const attemptedCompletionPairs = new Map<string, number>();
+// ponytail: process-local fixture ceiling; replace with a launcher-owned,
+// authenticated challenge ledger before enabling the production Host adapter.
+const attemptedCredentialSuspensions = new Set<string>();
+const observedCredentialSuspensionFences = new Set<string>();
 
 type PersistedHandoffBarrierState = "ACTIVE" | "CANCELLED" | "PREPARING";
 
@@ -182,6 +202,56 @@ export type ObserveHandoffCurrentTab = (
   | undefined
   | Promise<HandoffCurrentTabReceipt | undefined>;
 
+export interface CredentialHostSuspensionObservationInput {
+  binding: FixtureCredentialExecutionBinding;
+  generation: number;
+  host: HandoffHostBinding;
+  lease: HandoffLease;
+  promptContextHash: string;
+}
+
+export interface CredentialHostSuspensionQuery {
+  admissionGeneration: number;
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  browserInstanceBindingHash: string;
+  challengeHash: string;
+  coverageBindingHash: string;
+  credentialOperationDigest: string;
+  gateSnapshotHash: string;
+  handoffActivationBindingHash: string;
+  hostProfileBindingHash: string;
+  promptContextHash: string;
+  schemaVersion: 1;
+  stateEpoch: number;
+  toolFenceSnapshotHash: string;
+  verifierContextBindingHash: string;
+}
+
+export type CredentialHostSuspensionReceiptWire = string | Uint8Array;
+
+export type ObserveCredentialHostSuspension = (
+  query: CredentialHostSuspensionQuery,
+  signal: AbortSignal,
+) =>
+  | CredentialHostSuspensionReceiptWire
+  | undefined
+  | Promise<CredentialHostSuspensionReceiptWire | undefined>;
+
+type CredentialHostSuspensionResultBase = {
+  activation: "INACTIVE";
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  hostSuspension: "UNVERIFIED";
+};
+
+export type CredentialHostSuspensionObservationResult =
+  | (CredentialHostSuspensionResultBase & {
+      kind: "STRUCTURE_MATCHED_NON_AUTHORIZING";
+      receiptDigest: string;
+    })
+  | (CredentialHostSuspensionResultBase & {
+      kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY";
+    });
+
 export type HandoffCompletionAdmissionResult = {
   activation: "INACTIVE";
   authority: "FIXTURE_ONLY_NON_AUTHORIZING";
@@ -239,6 +309,38 @@ const safeTaskScope = (scope: { sessionId: string; taskId: string }) =>
   !scope.sessionId.includes("\0") &&
   scope.taskId.length > 0 &&
   !scope.taskId.includes("\0");
+
+const exactCredentialSuspensionLease = (lease: HandoffLease): boolean =>
+  Boolean(lease) &&
+  typeof lease === "object" &&
+  Object.keys(lease).sort().join(",") ===
+    "acquiredAt,expiresAt,handoffId,holder,leaseEpoch,nonce,schemaVersion,scope,state" &&
+  lease.schemaVersion === 1 &&
+  lease.holder === "USER" &&
+  lease.state === "ACTIVE" &&
+  typeof lease.handoffId === "string" &&
+  lease.handoffId.length > 0 &&
+  lease.handoffId.length <= 4_096 &&
+  typeof lease.nonce === "string" &&
+  /^[A-Za-z0-9_-]{32,4096}$/.test(lease.nonce) &&
+  Number.isSafeInteger(lease.leaseEpoch) &&
+  lease.leaseEpoch > 0 &&
+  Number.isSafeInteger(lease.acquiredAt) &&
+  lease.acquiredAt >= 0 &&
+  Number.isSafeInteger(lease.expiresAt) &&
+  lease.expiresAt > lease.acquiredAt &&
+  Boolean(lease.scope) &&
+  typeof lease.scope === "object" &&
+  Object.keys(lease.scope).sort().join(",") ===
+    "documentBinding,sessionId,tabId,taskId,topOrigin" &&
+  safeTaskScope(lease.scope) &&
+  lease.scope.sessionId.length <= 4_096 &&
+  lease.scope.taskId.length <= 4_096 &&
+  typeof lease.scope.documentBinding === "string" &&
+  lease.scope.documentBinding.length > 0 &&
+  lease.scope.documentBinding.length <= 4_096 &&
+  Number.isSafeInteger(lease.scope.tabId) &&
+  lease.scope.tabId >= 0;
 
 const barrierDirectory = (
   root: string,
@@ -862,11 +964,14 @@ function completionQuery(
   };
 }
 
-async function observeWithTimeout(
-  observe: ObserveHandoffCurrentTab,
-  query: HandoffCurrentTabQuery,
+async function observeWithTimeout<Query, Receipt>(
+  observe: (
+    query: Query,
+    signal: AbortSignal,
+  ) => Receipt | undefined | Promise<Receipt | undefined>,
+  query: Query,
   timeoutMs: number,
-): Promise<HandoffCurrentTabReceipt | undefined> {
+): Promise<Receipt | undefined> {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -885,6 +990,150 @@ async function observeWithTimeout(
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+const credentialSuspensionResult = (
+  kind: "FAILED_SAFE" | "FIXTURE_ONLY_REPLAY",
+): CredentialHostSuspensionObservationResult => ({
+  activation: "INACTIVE",
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+  hostSuspension: "UNVERIFIED",
+  kind,
+});
+
+function parseBoundedCredentialSuspensionReceipt(
+  value: CredentialHostSuspensionReceiptWire | undefined,
+): CredentialHostSuspensionReceipt | undefined {
+  try {
+    if (value === undefined) return;
+    if (typeof value !== "string" && !(value instanceof Uint8Array)) return;
+    if (
+      (typeof value === "string" &&
+        (value.length > MAX_CREDENTIAL_SUSPENSION_RECEIPT_BYTES ||
+          Buffer.byteLength(value) >
+            MAX_CREDENTIAL_SUSPENSION_RECEIPT_BYTES)) ||
+      (value instanceof Uint8Array &&
+        value.byteLength > MAX_CREDENTIAL_SUSPENSION_RECEIPT_BYTES)
+    ) {
+      return;
+    }
+    const serialized =
+      typeof value === "string"
+        ? value
+        : new TextDecoder("utf-8", { fatal: true }).decode(value);
+    const parsed = CredentialHostSuspensionReceiptSchema.safeParse(
+      JSON.parse(serialized),
+    );
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return;
+  }
+}
+
+function matchesCredentialSuspensionReceipt(
+  receipt: CredentialHostSuspensionReceipt,
+  query: CredentialHostSuspensionQuery,
+): boolean {
+  const echoedHashes = [
+    query.browserInstanceBindingHash,
+    query.challengeHash,
+    query.coverageBindingHash,
+    query.credentialOperationDigest,
+    query.gateSnapshotHash,
+    query.handoffActivationBindingHash,
+    query.hostProfileBindingHash,
+    query.promptContextHash,
+    query.toolFenceSnapshotHash,
+    query.verifierContextBindingHash,
+  ];
+  return (
+    receipt.authority === query.authority &&
+    receipt.admissionGeneration === query.admissionGeneration &&
+    receipt.stateEpoch === query.stateEpoch &&
+    sameHash(
+      receipt.browserInstanceBindingHash,
+      query.browserInstanceBindingHash,
+    ) &&
+    sameHash(receipt.challengeHash, query.challengeHash) &&
+    sameHash(receipt.coverageBindingHash, query.coverageBindingHash) &&
+    sameHash(
+      receipt.credentialOperationDigest,
+      query.credentialOperationDigest,
+    ) &&
+    sameHash(receipt.gateSnapshotHash, query.gateSnapshotHash) &&
+    sameHash(
+      receipt.handoffActivationBindingHash,
+      query.handoffActivationBindingHash,
+    ) &&
+    sameHash(receipt.hostProfileBindingHash, query.hostProfileBindingHash) &&
+    sameHash(receipt.promptContextHash, query.promptContextHash) &&
+    sameHash(receipt.toolFenceSnapshotHash, query.toolFenceSnapshotHash) &&
+    sameHash(
+      receipt.verifierContextBindingHash,
+      query.verifierContextBindingHash,
+    ) &&
+    HASH.test(receipt.hostSuspensionFenceHash) &&
+    echoedHashes.every(
+      (echoed) => !sameHash(receipt.hostSuspensionFenceHash, echoed),
+    ) &&
+    receipt.lanes.agentTool === "SUSPENDED" &&
+    receipt.lanes.browserAction === "SUSPENDED" &&
+    receipt.lanes.browserObservation === "SUSPENDED" &&
+    receipt.lanes.shell === "SUSPENDED" &&
+    receipt.lanes.screenCapture === "SUSPENDED" &&
+    receipt.lanes.clipboard === "SUSPENDED" &&
+    receipt.lanes.semanticQuery === "SUSPENDED" &&
+    receipt.lanes.enclaveProtocol === "ALLOWLIST_ONLY"
+  );
+}
+
+function promptAliasesCredentialControlIdentity(
+  promptContextHash: string,
+  input: CredentialHostSuspensionObservationInput,
+  ticket: CredentialEnclaveTicket,
+  barrier?: PersistedHandoffBarrier,
+): boolean {
+  const values = [
+    input.binding.hookDefinitionHash,
+    input.binding.hostProfileHash,
+    input.binding.trustRootHash,
+    input.host.profileBindingHash,
+    input.host.profileId,
+    input.lease.handoffId,
+    input.lease.nonce,
+    input.lease.scope.sessionId,
+    input.lease.scope.taskId,
+    input.lease.scope.topOrigin,
+    input.lease.scope.documentBinding,
+    ticket.authority,
+    ticket.ticketId,
+    ticket.credentialUseId,
+    ticket.credentialKind,
+    ticket.templateId,
+    ticket.serviceId,
+    ticket.provisioningOrigin,
+    ticket.purposeId,
+    ticket.consumerId,
+    ticket.templateRegistryHash,
+    ticket.consumerRegistryHash,
+    ticket.registryManifestHash,
+    ticket.handoff.activationAnchorHash,
+    barrier?.browserInstanceBindingHash,
+    barrier?.handoffId,
+    barrier?.hostProfileBindingHash,
+    barrier?.hostProfileIdHash,
+    barrier?.nativeActionFenceHash,
+    barrier?.nonceDigest,
+    barrier?.scopeDigest,
+    barrier?.tabBindingReceiptHash,
+    barrier?.taskBindingDigest,
+  ];
+  return values.some(
+    (value) =>
+      value === promptContextHash ||
+      value?.endsWith(`_${promptContextHash}`) ||
+      value?.endsWith(`:${promptContextHash}`),
+  );
 }
 
 function matchesCurrentTabReceipt(
@@ -1181,6 +1430,334 @@ export async function admitCredentialIntent(
   } catch (error) {
     if (error instanceof CredentialAdmissionError) throw error;
     throw new CredentialAdmissionError("INVALID_HANDOFF");
+  }
+}
+
+type CredentialHostSuspensionQueryContext = Omit<
+  CredentialHostSuspensionQuery,
+  "challengeHash"
+>;
+
+interface CredentialHostSuspensionLockedSnapshot {
+  attemptKey: string;
+  context: CredentialHostSuspensionQueryContext;
+  snapshotHash: string;
+  wallObservedAt: number;
+}
+
+async function credentialHostSuspensionSnapshotLocked(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  input: CredentialHostSuspensionObservationInput,
+  operation: ReturnType<typeof credentialExecutionBinding>,
+  expectedHost: PersistedHostBinding,
+): Promise<CredentialHostSuspensionLockedSnapshot | undefined> {
+  const gate = await readCredentialExecutionGate(credentialFenceRoot);
+  if (
+    gate.kind !== "KNOWN" ||
+    gate.state !== "PREPARING" ||
+    gate.generation !== input.generation ||
+    gate.operationDigest !== operation.digest ||
+    gate.expiresAt !== operation.ticket.handoff.expiresAt
+  ) {
+    return;
+  }
+  return transitionBrowserTaskState(
+    handoffRoot,
+    input.lease.scope,
+    async (state) => {
+      const handoffGate = await readHandoffGate(handoffRoot, input.lease.scope);
+      const barrier = await readBarrier(
+        barrierPath(handoffRoot, input.lease.scope, input.lease.leaseEpoch),
+      );
+      const activeToolCalls = await countActiveToolCalls(
+        handoffRoot,
+        input.lease.scope,
+      );
+      const toolFence = await observeCredentialToolFenceLocked(
+        credentialFenceRoot,
+        gate,
+      );
+      const activationAnchorHash =
+        credentialHandoffActivationAnchorHash(barrier);
+      const observedAt = Date.now();
+      if (
+        !state ||
+        !matchesCredentialAdmissionState(state, input.lease, input.host) ||
+        handoffGate.kind !== "KNOWN" ||
+        handoffGate.status !== "ACTIVE" ||
+        handoffGate.generation !== input.lease.leaseEpoch ||
+        !matchesActiveLeaseBarrier(barrier, state, input.lease) ||
+        barrier.hostProfileBindingHash !==
+          expectedHost.hostProfileBindingHash ||
+        barrier.hostProfileIdHash !== expectedHost.hostProfileIdHash ||
+        activeToolCalls !== 0 ||
+        toolFence.kind !== "QUIESCENT" ||
+        promptAliasesCredentialControlIdentity(
+          input.promptContextHash,
+          input,
+          operation.ticket,
+          barrier,
+        ) ||
+        !sameHash(
+          operation.ticket.handoff.activationAnchorHash,
+          activationAnchorHash,
+        ) ||
+        state.stateVersion <= 0 ||
+        !Number.isSafeInteger(observedAt) ||
+        observedAt < operation.ticket.issuedAt ||
+        observedAt > operation.ticket.handoff.expiresAt
+      ) {
+        return { value: undefined };
+      }
+
+      const coverageBindingHash = deterministicDigest(
+        "oxrail-credential-local-coverage-binding-v1",
+        {
+          hookDefinitionHash: input.binding.hookDefinitionHash,
+          hostProfileHash: input.binding.hostProfileHash,
+          trustRootHash: input.binding.trustRootHash,
+        },
+      );
+      const handoffActivationBindingHash = deterministicDigest(
+        "oxrail-credential-handoff-activation-binding-v1",
+        { activationAnchorHash, admissionGeneration: barrier.leaseEpoch },
+      );
+      const gateSnapshotHash = deterministicDigest(
+        "oxrail-credential-gate-snapshot-v1",
+        gate,
+      );
+      const verifierContextBindingHash = deterministicDigest(
+        "oxrail-credential-host-suspension-context-v1",
+        {
+          admissionGeneration: barrier.leaseEpoch,
+          browserInstanceBindingHash: barrier.browserInstanceBindingHash!,
+          coverageBindingHash,
+          gateSnapshotHash,
+          handoffActivationBindingHash,
+          hostProfileBindingHash: barrier.hostProfileBindingHash,
+          promptContextHash: input.promptContextHash,
+          stateEpoch: state.stateVersion,
+          toolFenceSnapshotHash: toolFence.snapshotHash,
+        },
+      );
+      const context: CredentialHostSuspensionQueryContext = {
+        admissionGeneration: barrier.leaseEpoch,
+        authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+        browserInstanceBindingHash: barrier.browserInstanceBindingHash!,
+        coverageBindingHash,
+        credentialOperationDigest: operation.digest,
+        gateSnapshotHash,
+        handoffActivationBindingHash,
+        hostProfileBindingHash: barrier.hostProfileBindingHash,
+        promptContextHash: input.promptContextHash,
+        schemaVersion: 1,
+        stateEpoch: state.stateVersion,
+        toolFenceSnapshotHash: toolFence.snapshotHash,
+        verifierContextBindingHash,
+      };
+      return {
+        value: {
+          attemptKey: deterministicDigest(
+            "oxrail-credential-host-suspension-attempt-v1",
+            {
+              admissionGeneration: barrier.leaseEpoch,
+              credentialFenceRootHash: deterministicDigest(
+                "oxrail-credential-fence-root-v1",
+                path.resolve(credentialFenceRoot),
+              ),
+              credentialGateGeneration: gate.generation,
+              handoffActivationBindingHash,
+              operationDigest: operation.digest,
+            },
+          ),
+          context,
+          snapshotHash: deterministicDigest(
+            "oxrail-credential-host-suspension-locked-snapshot-v1",
+            {
+              activationAnchorHash,
+              barrier,
+              gate,
+              state,
+              toolFenceSnapshotHash: toolFence.snapshotHash,
+            },
+          ),
+          wallObservedAt: observedAt,
+        },
+      };
+    },
+  );
+}
+
+/**
+ * Observes one fixture Host suspension claim between two exact locked reads.
+ * A structural match remains non-authorizing and cannot show UI.
+ */
+export async function observePreparedCredentialHostSuspension(
+  credentialFenceRoot: string,
+  handoffRoot: string,
+  value: CredentialHostSuspensionObservationInput,
+  observeHostSuspension: ObserveCredentialHostSuspension,
+): Promise<CredentialHostSuspensionObservationResult> {
+  try {
+    if (
+      !credentialFenceRoot ||
+      !handoffRoot ||
+      path.resolve(credentialFenceRoot) === path.resolve(handoffRoot) ||
+      typeof observeHostSuspension !== "function"
+    ) {
+      return credentialSuspensionResult("FAILED_SAFE");
+    }
+    const input = structuredClone(value);
+    if (
+      !input ||
+      typeof input !== "object" ||
+      Object.keys(input).sort().join(",") !==
+        "binding,generation,host,lease,promptContextHash" ||
+      !input.host ||
+      typeof input.host !== "object" ||
+      Object.keys(input.host).sort().join(",") !==
+        "profileBindingHash,profileId" ||
+      !Number.isSafeInteger(input.generation) ||
+      input.generation <= 0 ||
+      !HASH.test(input.promptContextHash) ||
+      !exactCredentialSuspensionLease(input.lease)
+    ) {
+      return credentialSuspensionResult("FAILED_SAFE");
+    }
+    const operation = credentialExecutionBinding(input.binding);
+    const expectedHost = persistedHostBinding(input.host);
+    if (
+      !sameHash(input.binding.hostProfileHash, input.host.profileBindingHash) ||
+      operation.ticket.provisioningOrigin !== input.lease.scope.topOrigin ||
+      operation.ticket.handoff.leaseEpoch !== input.lease.leaseEpoch ||
+      operation.ticket.handoff.acquiredAt !== input.lease.acquiredAt ||
+      operation.ticket.handoff.expiresAt !== input.lease.expiresAt ||
+      promptAliasesCredentialControlIdentity(
+        input.promptContextHash,
+        input,
+        operation.ticket,
+      )
+    ) {
+      return credentialSuspensionResult("FAILED_SAFE");
+    }
+
+    const prepared = await withCredentialToolFenceLock(
+      credentialFenceRoot,
+      async () => {
+        const snapshot = await credentialHostSuspensionSnapshotLocked(
+          credentialFenceRoot,
+          handoffRoot,
+          input,
+          operation,
+          expectedHost,
+        );
+        if (!snapshot) return { kind: "FAILED_SAFE" as const };
+        if (attemptedCredentialSuspensions.has(snapshot.attemptKey)) {
+          return { kind: "FIXTURE_ONLY_REPLAY" as const };
+        }
+        if (
+          attemptedCredentialSuspensions.size >= MAX_ATTEMPTED_VERIFIER_CONTEXTS
+        ) {
+          return { kind: "FAILED_SAFE" as const };
+        }
+        const challengeHash = createHash("sha256")
+          .update("oxrail-credential-host-suspension-challenge-v1\0")
+          .update(randomBytes(32))
+          .update(snapshot.attemptKey, "ascii")
+          .digest("hex");
+        attemptedCredentialSuspensions.add(snapshot.attemptKey);
+        return {
+          kind: "READY" as const,
+          query: Object.freeze<CredentialHostSuspensionQuery>({
+            ...snapshot.context,
+            challengeHash,
+          }),
+          snapshot,
+        };
+      },
+    );
+    if (prepared.kind !== "READY") {
+      return credentialSuspensionResult(prepared.kind);
+    }
+
+    const beforeObservation = Math.floor(performance.now());
+    if (
+      !Number.isSafeInteger(beforeObservation) ||
+      beforeObservation < 0 ||
+      beforeObservation >
+        Number.MAX_SAFE_INTEGER - CREDENTIAL_SUSPENSION_OBSERVER_TIMEOUT_MS
+    ) {
+      return credentialSuspensionResult("FAILED_SAFE");
+    }
+    const observed = await observeWithTimeout(
+      observeHostSuspension,
+      prepared.query,
+      CREDENTIAL_SUSPENSION_OBSERVER_TIMEOUT_MS,
+    );
+    const deadline =
+      beforeObservation + CREDENTIAL_SUSPENSION_OBSERVER_TIMEOUT_MS;
+    const afterObservation = Math.floor(performance.now());
+    const receipt = parseBoundedCredentialSuspensionReceipt(observed);
+    if (
+      !Number.isSafeInteger(afterObservation) ||
+      afterObservation < beforeObservation ||
+      afterObservation > deadline ||
+      !receipt ||
+      !matchesCredentialSuspensionReceipt(receipt, prepared.query) ||
+      observedCredentialSuspensionFences.has(receipt.hostSuspensionFenceHash) ||
+      observedCredentialSuspensionFences.size >= MAX_ATTEMPTED_VERIFIER_CONTEXTS
+    ) {
+      return credentialSuspensionResult("FAILED_SAFE");
+    }
+    observedCredentialSuspensionFences.add(receipt.hostSuspensionFenceHash);
+
+    const finalized = await withCredentialToolFenceLock(
+      credentialFenceRoot,
+      async () => {
+        const snapshot = await credentialHostSuspensionSnapshotLocked(
+          credentialFenceRoot,
+          handoffRoot,
+          input,
+          operation,
+          expectedHost,
+        );
+        return { snapshot, finalizedAt: Math.floor(performance.now()) };
+      },
+    );
+    const finalSnapshot = finalized.snapshot;
+    if (
+      !finalSnapshot ||
+      !Number.isSafeInteger(finalized.finalizedAt) ||
+      finalized.finalizedAt < afterObservation ||
+      finalized.finalizedAt > deadline ||
+      finalSnapshot.wallObservedAt < prepared.snapshot.wallObservedAt ||
+      finalSnapshot.attemptKey !== prepared.snapshot.attemptKey ||
+      finalSnapshot.snapshotHash !== prepared.snapshot.snapshotHash ||
+      deterministicDigest(
+        "oxrail-credential-host-suspension-query-context-v1",
+        finalSnapshot.context,
+      ) !==
+        deterministicDigest(
+          "oxrail-credential-host-suspension-query-context-v1",
+          prepared.snapshot.context,
+        )
+    ) {
+      return credentialSuspensionResult("FAILED_SAFE");
+    }
+
+    return {
+      activation: "INACTIVE",
+      authority: "FIXTURE_ONLY_NON_AUTHORIZING",
+      hostSuspension: "UNVERIFIED",
+      kind: "STRUCTURE_MATCHED_NON_AUTHORIZING",
+      receiptDigest: deterministicDigest(
+        "oxrail-credential-host-suspension-receipt-v1",
+        receipt,
+      ),
+    };
+  } catch {
+    return credentialSuspensionResult("FAILED_SAFE");
   }
 }
 

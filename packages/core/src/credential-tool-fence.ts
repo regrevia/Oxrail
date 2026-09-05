@@ -54,6 +54,10 @@ export type CredentialToolFencePostResult = "BYPASS" | "COMPLETED" | "UNKNOWN";
 
 export type CredentialToolFenceQuiescence = "PENDING" | "QUIESCENT" | "UNKNOWN";
 
+export type CredentialToolFenceLockedObservation =
+  | { kind: "PENDING" | "UNKNOWN" }
+  | { kind: "QUIESCENT"; snapshotHash: string };
+
 const validId = (value: unknown): value is string =>
   typeof value === "string" &&
   value.length > 0 &&
@@ -135,6 +139,66 @@ async function globalJournalIsKnownEmpty(root: string): Promise<boolean> {
     active.completedToolUseIds.length === 0 &&
     active.pendingToolUseIds.length === 0
   );
+}
+
+/**
+ * Package-internal observation. The caller must already hold the global
+ * credential fence mutex; the result is only a local fixture fact.
+ */
+export async function observeCredentialToolFenceLocked(
+  root: string,
+  expected: CredentialExecutionGateSnapshot,
+): Promise<CredentialToolFenceLockedObservation> {
+  if (expected.kind !== "KNOWN" || expected.state !== "PREPARING") {
+    return { kind: "UNKNOWN" };
+  }
+  const locked = await readCredentialExecutionGate(root);
+  if (
+    locked.kind !== "KNOWN" ||
+    locked.state !== "PREPARING" ||
+    !sameSnapshot(expected, locked)
+  ) {
+    return { kind: "UNKNOWN" };
+  }
+  const journal = await inspectToolCallJournal(
+    root,
+    CREDENTIAL_TOOL_FENCE_SCOPE,
+  );
+  const physicalCount = await countActiveToolCalls(
+    root,
+    CREDENTIAL_TOOL_FENCE_SCOPE,
+  );
+  const current = await readCredentialExecutionGate(root);
+  if (
+    current.kind !== "KNOWN" ||
+    current.state !== "PREPARING" ||
+    !sameSnapshot(expected, current) ||
+    journal.kind !== "KNOWN" ||
+    physicalCount === "UNKNOWN"
+  ) {
+    return { kind: "UNKNOWN" };
+  }
+  if (
+    journal.legacyPending ||
+    journal.pendingToolUseIds.length > 0 ||
+    journal.completedToolUseIds.length > 0 ||
+    physicalCount !== 0
+  ) {
+    return { kind: "PENDING" };
+  }
+  return {
+    kind: "QUIESCENT",
+    snapshotHash: deterministicDigest(
+      "oxrail-credential-tool-fence-empty-snapshot-v1",
+      {
+        bindingDigest: BINDING_DIGEST,
+        completedCount: 0,
+        legacyPending: false,
+        pendingCount: 0,
+        physicalCount: 0,
+      },
+    ),
+  };
 }
 
 async function runtimeRootIsMissing(root: string): Promise<boolean> {
@@ -243,32 +307,10 @@ export async function readCredentialToolFenceQuiescence(
     if (initial.kind !== "KNOWN" || initial.state !== "PREPARING") {
       return "UNKNOWN";
     }
-    return await withCredentialToolFenceLock(root, async () => {
-      const locked = await readCredentialExecutionGate(root);
-      if (
-        locked.kind !== "KNOWN" ||
-        locked.state !== "PREPARING" ||
-        !sameSnapshot(initial, locked)
-      ) {
-        return "UNKNOWN";
-      }
-      const active = await inspectToolCallJournal(
-        root,
-        CREDENTIAL_TOOL_FENCE_SCOPE,
-      );
-      const current = await readCredentialExecutionGate(root);
-      if (
-        current.kind !== "KNOWN" ||
-        current.state !== "PREPARING" ||
-        !sameSnapshot(initial, current) ||
-        active.kind === "UNKNOWN"
-      ) {
-        return "UNKNOWN";
-      }
-      return active.legacyPending || active.pendingToolUseIds.length > 0
-        ? "PENDING"
-        : "QUIESCENT";
-    });
+    return await withCredentialToolFenceLock(
+      root,
+      async () => (await observeCredentialToolFenceLocked(root, initial)).kind,
+    );
   } catch {
     return "UNKNOWN";
   }

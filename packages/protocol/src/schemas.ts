@@ -712,6 +712,43 @@ export type CredentialEnclaveTicket = z.infer<
   typeof CredentialEnclaveTicketSchema
 >;
 
+const credentialSuspensionLane = z.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]);
+
+/**
+ * Runtime-only fixture receipt for one Host-wide suspension observation.
+ * Shape validation is deliberately non-authorizing; provenance is external.
+ */
+export const CredentialHostSuspensionReceiptSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  authority: z.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  challengeHash: lowercaseHash,
+  promptContextHash: lowercaseHash,
+  handoffActivationBindingHash: lowercaseHash,
+  admissionGeneration: positiveInt,
+  hostProfileBindingHash: lowercaseHash,
+  browserInstanceBindingHash: lowercaseHash,
+  credentialOperationDigest: lowercaseHash,
+  gateSnapshotHash: lowercaseHash,
+  toolFenceSnapshotHash: lowercaseHash,
+  coverageBindingHash: lowercaseHash,
+  verifierContextBindingHash: lowercaseHash,
+  stateEpoch: positiveInt,
+  hostSuspensionFenceHash: lowercaseHash,
+  lanes: z.strictObject({
+    agentTool: credentialSuspensionLane,
+    browserAction: credentialSuspensionLane,
+    browserObservation: credentialSuspensionLane,
+    shell: credentialSuspensionLane,
+    screenCapture: credentialSuspensionLane,
+    clipboard: credentialSuspensionLane,
+    semanticQuery: credentialSuspensionLane,
+    enclaveProtocol: z.enum(["ALLOWLIST_ONLY", "ACTIVE", "UNKNOWN"]),
+  }),
+});
+export type CredentialHostSuspensionReceipt = z.infer<
+  typeof CredentialHostSuspensionReceiptSchema
+>;
+
 const opaqueCredentialRef = z
   .string()
   .regex(/^ocref1_[A-Za-z0-9_-]{43}$/, "expected an opaque credential ref");

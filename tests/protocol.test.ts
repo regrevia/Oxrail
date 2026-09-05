@@ -13,6 +13,7 @@ import {
 } from "../packages/host-openai/src/profile.js";
 import {
   BrowserTaskStateSchema,
+  CredentialHostSuspensionReceiptSchema,
   HandoffCurrentTabReceiptSchema,
   HandoffCompletionSignalSchema,
   HandoffRequestSchema,
@@ -141,6 +142,34 @@ const handoffCurrentTabReceipt = () => ({
   navigationState: "IDLE" as const,
   redirectState: "CONTINUOUSLY_ALLOWED" as const,
   sensitivePhase: "CLEARED" as const,
+});
+
+const credentialHostSuspensionReceipt = () => ({
+  schemaVersion: 1 as const,
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING" as const,
+  challengeHash: "1".repeat(64),
+  promptContextHash: "2".repeat(64),
+  handoffActivationBindingHash: "3".repeat(64),
+  admissionGeneration: 2,
+  hostProfileBindingHash: "4".repeat(64),
+  browserInstanceBindingHash: "5".repeat(64),
+  credentialOperationDigest: "6".repeat(64),
+  gateSnapshotHash: "7".repeat(64),
+  toolFenceSnapshotHash: "8".repeat(64),
+  coverageBindingHash: "9".repeat(64),
+  verifierContextBindingHash: "a".repeat(64),
+  stateEpoch: 3,
+  hostSuspensionFenceHash: "b".repeat(64),
+  lanes: {
+    agentTool: "SUSPENDED" as const,
+    browserAction: "SUSPENDED" as const,
+    browserObservation: "SUSPENDED" as const,
+    shell: "SUSPENDED" as const,
+    screenCapture: "SUSPENDED" as const,
+    clipboard: "SUSPENDED" as const,
+    semanticQuery: "SUSPENDED" as const,
+    enclaveProtocol: "ALLOWLIST_ONLY" as const,
+  },
 });
 
 const handoffResult = () => ({
@@ -977,6 +1006,30 @@ describe("versioned protocol", () => {
       expect(HandoffCurrentTabReceiptSchema.safeParse(invalid).success).toBe(
         false,
       );
+    }
+  });
+
+  it("accepts only strict, timestamp-free credential suspension receipts", () => {
+    const receipt = credentialHostSuspensionReceipt();
+    expect(CredentialHostSuspensionReceiptSchema.parse(receipt)).toEqual(
+      receipt,
+    );
+
+    for (const invalid of [
+      { ...receipt, challengeHash: "A".repeat(64) },
+      { ...receipt, admissionGeneration: 0 },
+      { ...receipt, stateEpoch: Number.MAX_SAFE_INTEGER + 1 },
+      { ...receipt, observedAt: 1_000 },
+      { ...receipt, tabId: 17 },
+      { ...receipt, secret: "content-canary" },
+      {
+        ...receipt,
+        lanes: { ...receipt.lanes, pageContent: "content-canary" },
+      },
+    ]) {
+      expect(
+        CredentialHostSuspensionReceiptSchema.safeParse(invalid).success,
+      ).toBe(false);
     }
   });
 

@@ -12613,6 +12613,34 @@ var CredentialEnclaveTicketSchema = external_exports.strictObject({
     expiresAt: nonNegativeInt
   })
 });
+var credentialSuspensionLane = external_exports.enum(["SUSPENDED", "ACTIVE", "UNKNOWN"]);
+var CredentialHostSuspensionReceiptSchema = external_exports.strictObject({
+  schemaVersion: external_exports.literal(1),
+  authority: external_exports.literal("FIXTURE_ONLY_NON_AUTHORIZING"),
+  challengeHash: lowercaseHash,
+  promptContextHash: lowercaseHash,
+  handoffActivationBindingHash: lowercaseHash,
+  admissionGeneration: positiveInt,
+  hostProfileBindingHash: lowercaseHash,
+  browserInstanceBindingHash: lowercaseHash,
+  credentialOperationDigest: lowercaseHash,
+  gateSnapshotHash: lowercaseHash,
+  toolFenceSnapshotHash: lowercaseHash,
+  coverageBindingHash: lowercaseHash,
+  verifierContextBindingHash: lowercaseHash,
+  stateEpoch: positiveInt,
+  hostSuspensionFenceHash: lowercaseHash,
+  lanes: external_exports.strictObject({
+    agentTool: credentialSuspensionLane,
+    browserAction: credentialSuspensionLane,
+    browserObservation: credentialSuspensionLane,
+    shell: credentialSuspensionLane,
+    screenCapture: credentialSuspensionLane,
+    clipboard: credentialSuspensionLane,
+    semanticQuery: credentialSuspensionLane,
+    enclaveProtocol: external_exports.enum(["ALLOWLIST_ONLY", "ACTIVE", "UNKNOWN"])
+  })
+});
 var opaqueCredentialRef = external_exports.string().regex(/^ocref1_[A-Za-z0-9_-]{43}$/, "expected an opaque credential ref");
 var credentialPublicResultBase = {
   schemaVersion: external_exports.literal(1)
@@ -13695,6 +13723,9 @@ function deriveHostMode(profile) {
   if (profile.action.control === "MICRO_ACTION") return "MICRO_ACTION_GUARD";
   return "TRANSACTION_GUARD";
 }
+
+// packages/core/src/handoff-coordinator.ts
+var MAX_CREDENTIAL_SUSPENSION_RECEIPT_BYTES = 4 * 1024;
 
 // packages/evidence/src/gate.ts
 var digest = (contents) => createHash2("sha256").update(contents).digest("hex");
