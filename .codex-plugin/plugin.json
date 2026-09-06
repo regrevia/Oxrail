@@ -1,6 +1,6 @@
 {
   "name": "oxrail",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Gate-first guidance and lifecycle hooks for native Computer Use.",
   "author": {
     "name": "regrevia",

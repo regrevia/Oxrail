@@ -29,7 +29,7 @@ Native Interaction Fidelity and real-host benchmark evidence are still in progre
 
 Requires a current Codex CLI with plugin marketplace support and Node.js 20 or newer.
 `main` is the latest accepted stable line; ongoing development happens on `dev` and reaches `main` only after a milestone gate passes.
-The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the immutable `v0.1.0-alpha.1` development preview; it is not an accepted stable release.
+The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the immutable `v0.1.0-alpha.2` development preview; it is not an accepted stable release.
 
 ```bash
 codex plugin marketplace add regrevia/Oxrail
@@ -88,6 +88,20 @@ Reuse a freshly exported inventory with doctor so any enforcement capability is 
 
 Installed Skill commands and Hooks share the permission-restricted `~/.oxrail` state directory. This avoids relying on Hook-only environment variables when an agent invokes doctor from the Skill.
 
+### Try the macOS private-input loop
+
+The `dev` preview includes a deliberately fixture-only credential-input demonstration for macOS 13 or newer. Xcode Command Line Tools (including Swift) must be installed; the first run builds a small native helper in `~/.oxrail/credential-demo/`.
+
+After installing the `dev` plugin and starting a new session, ask:
+
+```text
+Use Oxrail's macOS credential-input trial. Open the native prompt, then verify, consume, and revoke the returned opaque reference.
+```
+
+In the native window, enter only a synthetic value such as `oxrail_test_0123456789abcdef`. Do not paste a real API key into chat, a terminal, or this preview. The model receives only a validated `ocref1_…` reference; the native process stores the synthetic value in a device-only macOS Keychain item, clears an exactly matching system pasteboard value after a successful save, verifies local retrieval without returning the value, and then revokes it.
+
+This is a UX and isolation trial, not production Credential protection: it accepts no real credentials, performs no network request, is not connected to the Chrome/Handoff route, and must display `Credential protection: INACTIVE (fixture-only trial)`. Third-party clipboard managers remain outside its boundary.
+
 ## Setup verification
 
 `oxrail doctor` reports each item independently. Its first three checks are deliberately package-level file checks, not claims about a private host registry:
@@ -140,7 +154,7 @@ Handoff protection: INACTIVE
 
 `BYPASSED` is fail-open for the native browser capability, not proof of Oxrail protection. Safety and Handoff are shown as `ACTIVE` only when their required capabilities are verified and currently effective. Host-native approvals and safety controls remain authoritative.
 
-The current `0.1.0-alpha.1` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
+The current `0.1.0-alpha.2` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. The macOS synthetic credential-input trial does not change that status. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
 
 ## What v0.1 is testing
 

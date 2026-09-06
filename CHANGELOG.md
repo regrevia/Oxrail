@@ -6,6 +6,10 @@ All notable project changes are documented here. The normative specification his
 
 - Real-host compatibility and benchmark evidence remain in progress.
 
+## [0.1.0-alpha.2] - 2026-09-06
+
+- Added a macOS-only, fixture-only private-input trial: a native secure field accepts only `oxrail_test_…` values, stores them as device-only Keychain items behind opaque references, clears an exactly matching system pasteboard value, proves local retrieval without exposing the value, and supports explicit revocation. It performs no network request and leaves Credential protection `INACTIVE`.
+
 ## [0.1.0-alpha.1] - 2026-09-05
 
 - Published the current `dev` foundations as an immutable macOS trial build; the public adapter remains passive-only and all unproven Safety, Handoff, and Credential capabilities remain explicitly `INACTIVE`.

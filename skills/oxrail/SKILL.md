@@ -48,7 +48,29 @@ Do not issue a real browser action merely to validate installation. The alpha li
 
 Treat Safety and Handoff as active only when doctor explicitly reports `ACTIVE`. When either is `INACTIVE`, state that clearly before any step that would otherwise rely on that protection.
 
-The current `0.1.0-alpha.1` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, or Credential enforcement from internal fixture foundations.
+The current `0.1.0-alpha.2` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, or Credential enforcement from internal fixture foundations.
+
+## macOS credential-input trial
+
+When the user explicitly asks to try Oxrail's credential input, run this Skill-relative command:
+
+```bash
+node scripts/credential.mjs prompt
+```
+
+The command opens a native `NSSecureTextField`. For this preview, instruct the user to enter only a synthetic value beginning with `oxrail_test_` followed by at least 16 letters or digits. Never ask for, accept, or pass a credential through chat, argv, stdin, environment variables, or a file. Never use this preview with a real credential.
+
+The only successful output is an opaque `ocref1_…` reference. With that exact reference, the fixed local checks are:
+
+```bash
+node scripts/credential.mjs status <credentialRef>
+node scripts/credential.mjs consume <credentialRef>
+node scripts/credential.mjs revoke <credentialRef>
+```
+
+`consume` proves that the native process can retrieve the matching synthetic Keychain item without returning its value; it does not call a website or API. Pasting into the secure field triggers best-effort exact-match clearing of the macOS system pasteboard, but third-party clipboard history is outside this preview's protection.
+
+Always report `Credential protection: INACTIVE (fixture-only trial)`. This demonstration is not the spec's G15 consumer path, is not connected to Chrome/Handoff, and does not authorize real secret use.
 
 ## During native browser work
 

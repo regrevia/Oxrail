@@ -28,6 +28,15 @@ jobs:
           persist-credentials: false
       - run: swift test
       - run: swift build -c release
+      - name: Reject non-explicit credential demo use
+        run: |
+          if output="$(.build/release/oxrail-credential-demo)"; then
+            exit 1
+          else
+            status=$?
+          fi
+          test "$status" -eq 64
+          test "$output" = '{"schemaVersion":1,"status":"ERROR","errorCode":"SCOPE_MISMATCH"}'
       - name: Require explicit opt-in
         run: |
           if output="$(.build/release/oxrail-keychain-probe)"; then

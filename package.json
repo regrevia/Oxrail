@@ -1,6 +1,6 @@
 {
   "name": "oxrail",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.18.3",
@@ -11,6 +11,7 @@
     "build": "node scripts/build.mjs",
     "bootstrap": "node dist/bootstrap.mjs",
     "clean": "node scripts/clean.mjs",
+    "credential:demo": "node skills/oxrail/scripts/credential.mjs",
     "doctor": "node dist/doctor.mjs",
     "fixture:serve": "node benchmarks/harness/server.mjs",
     "format:check": "prettier --check .",

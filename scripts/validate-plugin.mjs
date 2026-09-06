@@ -41,6 +41,8 @@ for (const field of ["skills", "composerIcon", "logo"]) {
 }
 if (!(await exists("hooks/hooks.json")))
   fail("default hooks/hooks.json is missing");
+if (!(await exists("skills/oxrail/scripts/credential.mjs")))
+  fail("macOS credential demo launcher is missing");
 const hooks = await load("hooks/hooks.json");
 const expectedBuildStamp = ` --oxrail-build ${manifest.version}`;
 for (const event of [

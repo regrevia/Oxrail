@@ -30,18 +30,18 @@ public struct CredentialEnclaveObservation: Equatable, Sendable {
     }
 }
 
-enum CredentialPromptBoundaryError: String, Equatable {
+package enum CredentialPromptBoundaryError: String, Equatable {
     case internalError = "INTERNAL_ERROR"
     case unavailable = "UNAVAILABLE"
 }
 
-enum CredentialPromptBoundaryResult: Equatable {
+package enum CredentialPromptBoundaryResult: Equatable {
     case stored(credentialRef: String)
     case cancelled
     case error(CredentialPromptBoundaryError)
 }
 
-protocol CredentialSecretSink: AnyObject {
+package protocol CredentialSecretSink: AnyObject {
     func store(_ secret: Data, scope: CredentialReferenceScope) -> String?
 }
 
@@ -50,16 +50,16 @@ private final class UnavailableCredentialSecretSink: CredentialSecretSink {
 }
 
 @MainActor
-final class CredentialPromptSurface {
-    static let maximumSecretBytes = 16_384
+package final class CredentialPromptSurface {
+    package static let maximumSecretBytes = 16_384
 
-    let alert: NSAlert
-    let secureField: NSSecureTextField
-    let scope: CredentialReferenceScope
+    package let alert: NSAlert
+    package let secureField: NSSecureTextField
+    package let scope: CredentialReferenceScope
 
     private let sink: any CredentialSecretSink
 
-    init?(credentialUseId: String, sink: any CredentialSecretSink) {
+    package init?(credentialUseId: String, sink: any CredentialSecretSink) {
         guard let descriptor = embeddedCredentialPromptDescriptor(for: credentialUseId) else {
             return nil
         }
@@ -91,7 +91,7 @@ final class CredentialPromptSurface {
         alert.addButton(withTitle: descriptor.cancelLabel)
     }
 
-    func submit() -> CredentialPromptBoundaryResult {
+    package func submit() -> CredentialPromptBoundaryResult {
         var candidate = secureField.stringValue
         secureField.stringValue = ""
         defer { candidate.removeAll(keepingCapacity: false) }
@@ -114,7 +114,7 @@ final class CredentialPromptSurface {
         return .stored(credentialRef: credentialRef)
     }
 
-    func cancel() -> CredentialPromptBoundaryResult {
+    package func cancel() -> CredentialPromptBoundaryResult {
         secureField.stringValue = ""
         return .cancelled
     }
