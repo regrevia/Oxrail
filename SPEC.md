@@ -1,10 +1,10 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.23
+# Oxrail — 唯一实现规范（SPEC）v1.0.24
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
 
 **文档状态：** 当前唯一参照版本（Authoritative）  
-**生效日期：** 2026-09-05
+**生效日期：** 2026-09-08
 **证据截止日期：** 2026-09-05
 **规范文件名：** `OXRAIL_SPEC.md`  
 **机器索引：** `OXRAIL_SPEC_INDEX.json`（与规范同版本生成）  
@@ -48,9 +48,9 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.23
+  spec_version: 1.0.24
   status: AUTHORITATIVE
-  effective_date: 2026-09-05
+  effective_date: 2026-09-08
   evidence_cutoff: 2026-09-05
   previous_versions:
     - OXRAIL_SPEC_v0.1_review-draft.md
@@ -58,8 +58,8 @@ spec:
     - OXRAIL_SPEC_v0.2.0_CANONICAL.md
     - OXRAIL_SPEC_v0.3_partial.backup.md
   owner: Oxrail maintainers
-  section_count: 51
-  work_package_count: 99
+  section_count: 52
+  work_package_count: 107
   companion_files:
     - OXRAIL_SPEC_INDEX.json
     - OXRAIL_SPEC.sha256
@@ -12010,6 +12010,11 @@ NIF and Handoff terminology consistent
 
 ## 50.11 当前变更记录
 
+### v1.0.24 — 2026-09-08
+
+- 合并产品 Skill 与内部 Lab 分离实施合同到 SEC-51；新增 WP-LAB-000 至 WP-LAB-007 和 TEST-LAB-001 至 TEST-LAB-020，保留历史 ID 与证据。
+- 产品安装白名单、独立监控、干净 Native baseline、缺失指标和真实宿主验收按该合同执行；本次规范更新不代表新能力已实现。
+
 ### v1.0.23 — 2026-09-05
 
 - 新增 Core `cleanupCredentialFixtureGate()`，只为从未连接 presenter、Keychain、pasteboard、consumer 或 secret 外部效果的 non-product fixture 提供无可信 cleanup verifier 的狭窄本地 ledger reset；所有结果仍固定 `NOT_AUTHORIZED / INACTIVE`；
@@ -12220,3 +12225,468 @@ Oxrail 的成立条件不是“能写一个漂亮 Skill”，也不是“能把�
 
 > **Strong agent. Short leash.**  
 > **Native hands. Oxrail rails.**
+
+
+<a id="sec-51"></a>
+# 51. 产品 Skill 与内部 Lab 分离实施合同
+
+版本：1.0 · 2026-09-08
+目标分支：从当前 `dev` 建立功能分支，不直接改 `main`。
+性质：这是实施合同，不是已实现功能清单，也不是已通过的测试报告。
+
+### 0. 开工指令
+
+按本文顺序实施。你负责代码、测试和迁移，不重新选择产品方向。先完成 WP-LAB-000 至 WP-LAB-002，再继续其余工作包。每个工作包独立提交、独立输出测试结果；不得用一个巨大提交混合迁移、采集、实验和发布。
+
+先记录当前 commit、工作区状态和现有测试结果。不覆盖用户未提交的修改。仓库若比本交接书新，保留语义等价的新实现；路径调整写入迁移表，不借机扩张范围。发现宿主接口不存在时，输出明确的 `BLOCKED` 及最小缺失能力，继续可独立完成的工作包；不得伪造 API、扩大权限、改弱测试或改换宿主后声称原宿主通过。
+
+交接书批准的是产品/实验边界和本地实现；不授权自动信任 Hooks、读取真实凭据、上传实验数据、发布版本或推送远程分支。
+
+### 1. 已固定的产品决策
+
+#### 1.1 两个独立交付物
+
+**Oxrail 产品**：对外的 Skill 安装入口，以及提供真实功能所必需的产品运行组件。可能包含宿主适配、Guard、Handoff、必要权限验证与状态恢复。它不包含实验调度器、监控采集器、轨迹记录器、实验报告器和凭据输入 Demo。
+
+**Oxrail Lab**：内部开发者单独安装、显式启动的实验工具。能在完全不安装 Oxrail 产品时监测宿主暴露的浏览器事件；也能在安装 Oxrail 时，用同一采集链路测量。Lab 关闭、卸载、崩溃或数据目录不可用，不应影响产品正常能力，也不能解除产品的安全锁。
+
+“Skill 是产品入口”不等于“只靠 SKILL.md 就有浏览器隔离权限”。Skill-only 能力必须按真实宿主支持标注；不得为满足轻量安装而删除实际安全组件，再继续宣称安全 Handoff。
+
+#### 1.2 不是把实验功能默认关掉，而是从用户发布包中移除
+
+产品发布包中不得出现 Lab 模块、Lab 入口、实验配置、报告模板、采集服务、Demo 可执行入口或实验用原始数据。仅设置 `LAB_ENABLED=false`、使用 `.gitignore`、`.npmignore`，或不展示按钮，不算分离完成。
+
+产品不主动查找 Lab、不连接 Lab、不创建 Lab 数据目录；不存在可通过环境变量把普通发布包变成实验版的隐藏入口。
+
+同仓库开发可以保留；独立安装、依赖、构建、权限、存储、配置和发布必须成立。源码公开时，“内部使用”是分发和启用约束，不是依靠 `private: true` 实现的访问控制。
+
+#### 1.3 三类数据必须区别对待
+
+| 类型 | 所属 | 保留原则 |
+|---|---|---|
+| 交接锁、租约、待完成调用、恢复/幂等状态、当前宿主能力验证标记 | 产品运行状态 | 仅功能必需字段，按作用域和生命周期清理；不能因 Lab 关闭而消失 |
+| 逐次工具事件、实验耗时、比较结果、实验清单和实验报告 | Lab | 仅内部显式启用后采集，独立存储 |
+| 密码、验证码、Cookie、令牌、剪贴板、键盘输入、原始页面/截图/响应 | 不进入 Lab 记录 | 本轮没有真实秘密采集模式；测试也不能把秘密写入轨迹 |
+
+给 Agent 提供生产语义观察的组件与 LabMonitor 不是同一个模块。生产 Handoff 的登录完成检测、标签页恢复也不是实验功能，不能一起搬走。
+
+#### 1.4 对照实验的执行轴与监控轴相互独立
+
+| 执行环境 | 监控 OFF | 监控 ON |
+|---|---|---|
+| Native Tuned，Oxrail 完全不加载 | 原生无监控校准 | 原生监控组 |
+| 相同原生配置 + 指定 Oxrail 能力 | 产品无监控校准 | 产品监控组 |
+
+主要比较先用两个监控 ON 的组；OFF 组用来评估监控扰动。OFF 时不启动逐事件采集器，也不注册 Lab 监控 Hook；外部控制器可以保留任务边界与受控 fixture 的最终结果，但这些不冒充完整轨迹。
+
+`Oxrail BYPASSED` 不是 Native baseline。产品 Skill、系统提示、Hook、自动发现路径和原会话残留都可能影响对照。切换实验组必须创建新任务/新隔离会话，不支持在同一任务中途切换。
+
+### 2. 本轮范围与暂缓事项
+
+本轮交付：产品清包、内部 Demo 迁移、独立 Lab、一个真实宿主的旁路采集适配、干净基线、同配置配对实验、隐私和发布验收。
+
+第一个宿主适配器固定为 `codex-local-hook-v1`。CLI 与桌面端必须分别登记版本和能力；只把真实验证过的具体入口标为支持。不能由 Codex 的 Hook 文档推出 ChatGPT Work、网页端或私有内置浏览器也支持相同事件。
+
+首轮真实浏览器路径优先复用现有 Chrome 路线。不要同时把两组的浏览器从 Chrome/内置互换；“浏览器路由策略是否更好”另建实验，不能与本轮 Oxrail 净增益混为一项。
+
+本轮不开发通用浏览器录像扩展、任意站点登录检测、Electron 镜像输入、新浏览器驱动、模型轮询等待、云端实验平台或漂亮 Dashboard。已有测试 fixture/harness 优先复用，不能为了采集改用 Playwright/CDP 代替真实宿主执行任务。
+
+### 3. 目标目录与依赖规则
+
+采用最小迁移，不重写整个仓库：
+
+```text
+skills/oxrail/                    # 产品 Skill；删除实验指令与实验入口
+hooks/                           # 产品 Hooks
+packages/core/                    # 产品功能与安全状态机
+packages/host-openai/             # 产品宿主适配
+packages/handoff-extension/       # 产品交接能力，不承担 Lab 日志
+packages/protocol/                # 现有协议；只复用无运行副作用的必要类型
+native/macos/                    # 留下可复用产品库；不带 fixture 可执行入口
+lab/
+  package.json                   # 内部独立包，private: true
+  README.md
+  plugin/                        # 独立 Lab Hook 安装根，不提供 oxrail Skill
+  hooks/                         # Lab 自己的 Pre/Post 观察入口
+  protocol/                      # 独立监控事件和实验 manifest schema
+  monitor/                       # 白名单转换、关联、持久化、健康状态
+  adapters/codex-local-hook/      # 不 import 产品 Hook/Guard 的采集适配器
+  controller/                    # 准备实验、绑定会话、开始/停止，非浏览器驱动
+  reports/                       # 事后统计与报告
+  evidence/                      # 从 packages/evidence 迁入的内部工具
+  native/macos/                  # 内部 Demo 与探针可执行目标
+  scripts/credential.mjs          # 原 Skill 中的试验入口迁至此处
+  configs/
+  tests/
+benchmarks/                      # 现有受控 fixture/harness；开发专用
+packages/native-fidelity/        # 本轮保留路径，明确为开发测试专用
+scripts/build-product.mjs
+scripts/build-lab.mjs
+scripts/package-product.mjs
+scripts/validate-boundaries.mjs
+scripts/validate-product-artifact.mjs
+dist/product/
+lab/dist/
+release/oxrail/                  # 干净的实际产品安装根
+```
+
+依赖规则：产品入口禁止直接或传递依赖 `lab/**`、`benchmarks/**`、`packages/native-fidelity/**` 及迁移前的 `packages/evidence/**`。Lab 基础采集器禁止依赖产品的 Hook、Guard、runtime-state 或 `~/.oxrail`。Lab 可以把产品作为被测试对象启动；这不等于 Lab 采集器需要产品才能运行。
+
+共享只限无 I/O、无自动初始化的协议/验证纯函数；不要共享数据目录、进程、权限清单或运行状态机。必要的产品能力验证器仍属于产品，不得因为名称里有 evidence 就搬到 Lab 后让产品运行时再调用它。
+
+构建入口必须生成依赖清单。使用编译器/打包器依赖图检查传递依赖，并补充安装态运行测试；不能只 grep import 文本就宣布依赖隔离成立。
+
+### 4. 固定工作包
+
+<a id="wp-lab-000"></a>
+#### WP-LAB-000 — 合同与现状冻结
+
+**依赖**：无。
+
+读取仓库 `AGENTS.md` 和规范相关的安装、状态、权限、实验、Trace、发布章节。把本交接书中的新边界合并进 `spec/OXRAIL_SPEC.md`，同步 `SPEC.md`、版本/变更说明、索引与 checksum。保留已有稳定 REQ/WP/TEST ID；新增本轮 ID，不重命名历史基线，也不重写历史实验结果。
+
+新增 `docs/adr/ADR-LAB-001.md`，只记录本交接书已固定的决策，不重新比较方案。新增字段级 `docs/lab-state-inventory.md`：逐项列出现有落盘数据的路径、用途、读者、产品是否必需、清理时机和迁移目标。
+
+特别审计 `packages/host-openai/src/state.ts` 和 `hook.ts`。安装验证的近期标记与安全恢复状态保留；历史浏览器操作流水不得以“诊断”名义继续放在产品中。不要为了零文件口号破坏现有状态机。
+
+**验收**：规范校验通过；迁移表无“待定”条目；记录迁移前检查结果；本工作包不改变浏览器行为、不宣称新能力激活。
+
+<a id="wp-lab-001"></a>
+#### WP-LAB-001 — 产品构建与发布隔离
+
+**依赖**：000。
+
+把混合 `scripts/build.mjs` 拆成产品、Lab 两个构建入口。`pnpm build` 默认只构建产品；新增 `build:lab`、`build:all`，CI 显式选择。开发用证据检查、schema 生成等工具不得作为用户安装时的运行依赖。
+
+产品打包采用文件白名单，构造 `release/oxrail/`。该安装根只包含产品 manifest、Skill、产品 Hook、运行所需 dist、图标、必要用户文档、LICENSE 和最小 package 元数据。源目录可采用 `dist/product/`；安装根继续保持 Hook 所需的 `dist/hooks/...` 等路径，所有 wrapper 与 hash 计算按最终安装布局验证。不得携带旧的混合 dist 文件。
+
+新增 `product-files.json` 与 bundle dependency manifest。构建产物清单中不得有实验命令、录制入口、Demo 或测试依赖。`skills/oxrail/SKILL.md` 不再含凭据试验、pilot 或实验操作指南；相对链接全部在安装根可解析。
+
+更新 `scripts/validate-plugin.mjs`，增加对 staged 安装根的验证，不能只检查完整源码仓库。
+
+当前 marketplace 引用的是仓库 URL + ref；本轮为后续发布生成**产品安装根专用、不可变发布树/ref 的准备产物**，不得继续把整份开发源码标签当产品包。不得用 npm 的 files 字段代替实际插件安装检查。只输出发布 dry-run 和改动清单，不自行 push/tag/publish。
+
+如果实际安装器不能保持该白名单安装根，发布任务标为 `BLOCKED`，写明复制了哪些不应发布的文件；不要靠隐藏文件名通过验收。
+
+**验收**：只复制 `release/oxrail/` 到新临时目录后，产品脚本可运行并诚实报告能力；该目录没有 Lab、fixture Demo、实验命令和实验记录器。删除开发仓库及 Lab 不影响安装包启动。未知能力仍为 INACTIVE，不将启动成功视为 Guard/Handoff 已激活。
+
+<a id="wp-lab-002"></a>
+#### WP-LAB-002 — 内部工具、Demo 与配置迁移
+
+**依赖**：001。
+
+将 `packages/evidence/src/*` 的 pilot、记录、报告/验证等开发工具迁入 `lab/evidence/`，更新测试和根目录开发命令。若发现产品必需的纯验证逻辑，先将该部分留在产品/纯协议模块，再迁移实验层；产品不得反向引用 Lab。
+
+将 `skills/oxrail/scripts/credential.mjs` 迁入 `lab/scripts/credential.mjs`，删除公开 Skill 的试验章节和公开安装根中的相应入口。
+
+拆分 `native/macos/Package.swift`：将 Demo 和探针的可执行目标及相应试验目标迁到 `lab/native/macos/`；可复用的身份、注册表、隔离库留在产品源目录，由 Lab 显式依赖。只在需要时补充库 product 导出，不把 fixture 可执行目标重新引入产品包。不要整体搬走安全库。
+
+Lab 缓存、Demo 编译输出及实验数据统一进入 `~/.oxrail-lab/`。禁止新实验数据写入 `~/.oxrail/`。旧 Demo 数据只提供显式迁移/清理命令，不自动删除 Keychain 条目或产品安全状态；只处理已确认属于旧 fixture 的资源。
+
+内部 Demo 继续仅接受规定的测试值，继续显示 fixture-only、protection INACTIVE。移动目录不代表完成了安全认证或 Chrome 登录功能。
+
+Lab 配置只由操作员在内部入口显式启用。产品没有启用 Lab 的环境变量或命令；项目网页、任务输入或仓库 AGENTS.md 不能替操作员授权开始监控。
+
+**验收**：无 Lab 的产品包不会编译 Swift Demo、打开试验窗口或创建实验目录；内部 Lab 独立可启动 Demo。在不支持的平台记录 SKIPPED/UNAVAILABLE，而不是伪造 macOS 测试通过。
+
+<a id="wp-lab-003"></a>
+#### WP-LAB-003 — 安全事件协议和独立采集器
+
+**依赖**：002。
+
+实现第 5 节事件协议、源头白名单转换、事件关联和持久化。先做可运行的本地文件/IPC 采集，不上云服务。
+
+默认使用本用户私有的本地 IPC；限制输入大小、schema 版本、session/run 绑定和事件速率。采集端只接收 SafeEvent，不接收原始工具 payload。跨进程协议使用独立实验会话授权，不把网站凭据用作 IPC 身份。
+
+只允许固定枚举、计数、非敏感版本信息与经处理的关联 ID。异常日志不得 stringify 原始输入、原始验证错误或含输入的 stack。队列、临时文件、崩溃输出、stdout/stderr 与正常 trace 适用同样限制。
+
+采集器使用有界队列。慢盘、IPC 断开、数据满、畸形事件时丢弃受影响的实验事件、标记不完整；不能阻塞浏览器或改变审批。无法知道具体丢失量时填写 UNKNOWN，不伪造 0。
+
+默认实验数据保留 7 天，启动时清理过期 Lab run，并提供明确 scoped purge。所有数据本地保存，无自动上传。删除范围严格限制在 Lab 数据根。
+
+**验收**：产品完全未安装时 Lab 能处理受控宿主事件 fixture；秘密诱饵不出现在任何新增输出面；并发、重复、乱序、缺失 Post、超大输入和磁盘错误均有测试。此阶段 fixture 测试通过不能标为真实宿主监控通过。
+
+<a id="wp-lab-004"></a>
+#### WP-LAB-004 — 独立宿主 Hook 适配与纯原生监测
+
+**依赖**：003。
+
+创建独立的 Lab Hook 安装根和定义。不得调用或包装产品 `handleHookEvent()`，不得读取产品 profile 才能分类浏览器工具，不得靠 Oxrail 事件上报才能采到 baseline。
+
+使用当前宿主导出的精确工具 inventory 和已验证 schema。首版不读取全量 transcript 文件，不解析不透明脚本去臆造内部点击数，不自动递归发现额外工具路径。
+
+每次 Lab Hook 只做最小元数据投影和有界提交；正常、错误和过载路径都返回宿主支持的中性结果，例如经合同验证的 `{}`。禁止输出 `permissionDecision: allow`、`deny`、`systemMessage`、`additionalContext` 或修改后的输入/结果；尤其不能为了“永不干扰”强制 allow 而跳过原生审批。
+
+Hook 必须由人正常审阅、信任。监控 OFF 时不注册/执行 Lab Hook；不能让每次工具调用启动一个随即返回的 Lab 进程，却称其为无监控。
+
+探测具体版本的 Pre/Post 覆盖、拒绝时的回调行为、Hook 顺序、并发/子代理 ID、批处理和在途工具。Pre 事件表示请求被观察到，不自动表示动作已经执行；缺 Post 不能自动算作拒绝或成功。
+
+首个真实验收环境不加载 Oxrail，使用干净任务目录和新会话。完成一次受控原生浏览器任务，Lab 获得请求/结果元数据或明确列出未覆盖范围。
+
+能力报告至少包含 `SUPPORTED / PARTIAL / UNSUPPORTED`、适用 host/build/browser tuple、source、可见工具路径、granularity、已知盲区和证据时间。分母未知时不报告“覆盖率 100%”。
+
+**验收**：独立 Lab 可在没有 Oxrail 文件、Skill、Hook、进程及数据目录的运行环境观测真实事件。杀死 collector 不取消原生动作、不自动重试、不新增模型上下文；宿主或权限不满足时明确 BLOCKED，绝不补造事件。
+
+<a id="wp-lab-005"></a>
+#### WP-LAB-005 — 干净基线与配对实验控制器
+
+**依赖**：004。
+
+实现第 6 节运行合同。控制器只准备、校验、绑定/启动宿主任务和在测量区间外重置受控 fixture；浏览器任务中的 click/type/navigation 仍由原生宿主执行。
+
+复用现有 `benchmarks/harness/paired.mjs`、fixture/reset 机制和 pilot receipt 能力。保留历史固定 Luna pilot 的任务、模型和 arm 定义；新通用实验使用新 schema/config，不把历史模型硬编码变成所有实验的全局限制，也不回写旧结果。
+
+每个 arm 新建隔离的宿主上下文和相同初始浏览器状态。baseline 的实际 Skill 搜索路径、Hooks、启动配置、插件清单中没有 Oxrail；任务目录与父目录不得自动发现本仓库 AGENTS.md、Skill 或实验说明。实验计划/报告不提供给执行任务的 Agent。
+
+隔离证据必须来自有效配置、宿主提供的清单或启动过程实证。不得只在 manifest 写 `oxrail_loaded=false` 就算通过。不能证实隔离时，允许运行探索性诊断，但正式比较状态为 `BASELINE_ISOLATION_UNPROVEN`。
+
+支持两种控制方式并明确区分：`prepare/begin/end` 是固定的人工启动宿主流程；只有存在且验证过公开启动能力的 adapter 才可实现自动 `run`。自动入口不可用时返回 `HOST_AUTOSTART_UNSUPPORTED`，保留可执行的 prepare/begin/end 流程，不编造桌面私有启动 API。
+
+使用 seed 固定配对顺序，AB/BA 随机化。比较期间固定宿主、模型设置、浏览器入口、网站/fixture版本、提示词、原生优化和监控配置。变体选择写进操作员 manifest，不把“这是对照组/实验组”加入任务提示词。
+
+记录 `requested_variant` 与 `effective_mode`。要求 Guard 的 arm 如果实际只有 ADVISORY/BYPASSED，则为 `TREATMENT_NOT_ACTIVE`，不能作为 Guard 成绩；可另开诚实标注的 Skill-only 实验。
+
+**验收**：对照污染、版本不匹配、状态未重置、监控配置不一致、运行中切组和未激活治疗均被检测；失败/超时不被删除。真实测试缺少宿主控制能力时，保留已实现的控制器/手工协议，但不得声称无人值守实验已完成。
+
+<a id="wp-lab-006"></a>
+#### WP-LAB-006 — 指标、Handoff 元数据与报告
+
+**依赖**：005。
+
+实现第 7 节指标和质量标记。主指标由共同的宿主/fixture采集链生成，不能 baseline 用屏幕估计、Oxrail 组用内部精确计数后直接比较。
+
+产品已有非敏感状态可由 Lab 的可选、只读产品适配器作为补充信息读取；采集器不需要这些状态才能工作，产品不因 Lab 加入而改变安装包。第一版不为完整诊断而添加新的产品轨迹记录器。不可得的 Guard/Handoff细节为 null，不以截图或循环轮询补齐。
+
+登录实验只用受控 fixture 和测试秘密。Lab 不捕获输入内容、不采集输入长度/按键节奏，不记录登录截图、DOM、剪贴板或网络载荷。只能记录第 7 节允许的非敏感阶段边界；Lab 绝不授予/撤销用户租约或发布 resume。
+
+报告必须同时展示质量、成功率、失败原因、总耗时和样本数，不能把更早失败说成更快。监控开销独立评估，不直接从每个结果机械减去一个常数。
+
+**验收**：无 Token 来源的报告显示不可得；缺 Post 和未知粒度不生成虚假的 0；登录输入的诱饵不出现在所有 Lab 输出中；collector崩溃不会解除产品 Handoff锁。
+
+<a id="wp-lab-007"></a>
+#### WP-LAB-007 — 独立性与发布总验收
+
+**依赖**：001—006。
+
+补齐第 8 节自动验收。真实宿主部分分别标注已跑、失败、未跑及原因。历史 evidence 保持不可变；新的迁移证据写入新 run。
+
+执行产品独立安装、Lab-only 原生任务、同配置配对任务及四象限扰动校准。至少 3 个无真实秘密的受控任务，各做 3 对作为闭环 smoke；此数量只用于功能验收，不能支撑统计显著性或“节省 X%”宣传。
+
+产品包与内部 Lab 包分别产出。普通用户文档只讲产品，内部实验文档只放 Lab；兼容性表按真实宿主 tuple 更新。
+
+**验收**：所有软件可自动测试项通过；外部宿主未验证项不得标记 ACCEPTED。工作包完成后提交 IN_REVIEW，独立审核之前不能自称正式发布已获批准。
+
+### 5. 数据与采集合同
+
+#### 5.1 事件只表达实际可见信息
+
+以下是待实现接口形状，不是既有 API：
+
+```ts
+type Source = 'HOST_HOOK' | 'HOST_TRACE' | 'FIXTURE' | 'PRODUCT_STATUS';
+type Granularity = 'TOOL_INVOCATION' | 'TRANSACTION' | 'PRIMITIVE' | 'UNKNOWN';
+type EventKind =
+  | 'TOOL_REQUEST_OBSERVED'
+  | 'TOOL_RESULT_OBSERVED'
+  | 'TOOL_DENIAL_CONFIRMED'
+  | 'HANDOFF_PHASE_OBSERVED'
+  | 'POSTCONDITION_OBSERVED'
+  | 'SOURCE_HEALTH';
+
+type Quality = 'MEASURED' | 'ESTIMATED' | 'UNAVAILABLE';
+interface Metric {
+  value: number | null;
+  quality: Quality;
+  source: Source | null;
+  basis: string;          // schema定义的受控枚举，不接收任意文本
+  missingReason: string | null; // 同样是受控枚举
+}
+
+interface SafeEvent {
+  schemaVersion: 1;
+  eventId: string;        // 本地随机ID；重投递保留同一ID
+  runId: string;
+  pairId: string | null;
+  source: Source;
+  sourceClockId: string;
+  sourceSequence: number;
+  observedMonotonicMs: number | null;
+  receivedMonotonicMs: number;
+  sessionRef: string;     // 仅伪名化宿主关联ID
+  callRef: string | null;
+  actor: 'AGENT' | 'HUMAN' | 'UNKNOWN';
+  kind: EventKind;
+  toolAlias: string | null; // 精确inventory映射出的受控别名
+  granularity: Granularity;
+  outcome: 'SUCCESS' | 'FAILURE' | 'DENIED' | 'UNKNOWN';
+  metrics: Record<string, Metric>; // 运行时仅接受预先登记的指标键
+}
+```
+
+运行时 schema 必须严格拒绝未知字段和任意文本容器，不允许 `raw`、`message`、`details`、`payload` 等逃生字段。类型定义中的 string/Record 不代表可接受任意字符串/键。
+
+原始宿主 payload 可能不可避免地进入宿主传给 Hook 的内存；只在该源适配器内短暂进行白名单投影，立即丢弃。它不进入 IPC、collector、queue或磁盘。不能声称控制了宿主自己已有的日志行为，产品/Lab保证仅覆盖自己控制的输出面。
+
+关联键至少包括 run、source、host-session、tool-call；处理同 session 的子代理/并发。宿主未提供 actor/子代理身份则用 UNKNOWN。不要仅按工具名或时间邻近合并事件。
+
+时间差只能在同一可靠时钟域内相减。跨进程/跨重启时无共同单调时钟，就使用 collector 接收时间并标为近似，不能假装是精确浏览器执行耗时。
+
+Post重复只能幂等更新一次。Pre存在但Post缺失，在结束时记为 INCOMPLETE/UNKNOWN；有宿主明确拒绝事件才算 DENIED。
+
+#### 5.2 隐私负面清单
+
+不读取/记录密码、OTP、Cookie、Authorization、auth.json、剪贴板、按键、输入值、完整 URL 查询/fragment、截图像素、DOM/AX正文、响应正文和任意脚本内容；也不对秘密值保留 hash。普通 hash 不等于秘密被安全删除。
+
+允许的伪名化只针对非内容的宿主关联 ID；必要时用每次实验的独立 HMAC key，并随 retention 清理。不为真实用户输入计算“输入一致性 hash”。受控 fixture 的原生输入一致性测试单列，不能推广到真实秘密。
+
+关键检测不是“采集后打码”，而是“未许可字段从来不进入 Lab 存储链”。
+
+#### 5.3 信任边界
+
+Lab 的实验计划和结果应在执行 Agent 的可访问工作区之外；仅放到另一个目录不构成强隔离。正式实验要验证宿主 sandbox/权限确实阻止 Agent 读取操作员数据；做不到就写明隔离未证明。
+
+传输认证和schema检查只能防止未授权/畸形输入，不能证明宿主已发出所有事件。页面fixture事件可能受网页影响，不作为独立的安全隔离证明。收集不到越界操作，不等于证明没有越界操作。
+
+### 6. 实验运行合同与待实现 CLI
+
+Lab 使用自己的配置，最小示例：
+
+```json
+{
+  "schema_version": 1,
+  "experiment_id": "lab-separation-smoke-v1",
+  "host_adapter": "codex-local-hook-v1",
+  "browser_path": "chrome-extension",
+  "execution": "native",
+  "requested_variant": "NATIVE_TUNED",
+  "monitor": { "enabled": true, "profile": "metadata-v1" },
+  "session_isolation": "fresh",
+  "recording": { "local_only": true, "retention_days": 7 },
+  "seed": "lab-separation-smoke-v1",
+  "repetitions_per_task": 3
+}
+```
+
+`execution` 仅为 native/oxrail；真实能力和规范 variant 另行记录。B1/B2/B3/B6 等已有规范名和 native-fidelity 消融名不能混用。历史 pilot schema 通过显式映射兼容，不就地改写。
+
+每个 run manifest 必须包含：源码/产品构建ID、host/build/model与可确认设置、browser/version/path、任务提示词hash、fixture版本及reset回执、原生配置指纹、实际 Skill/Hook清单证据、Lab版本与监控配置hash、requested/effective variant、isolation状态、coverage、时钟来源、退出状态和缺失原因。
+
+实验选择由操作员完成；对执行 Agent 仅提交同一任务提示词。fixture reset 和安装验证发生在计时区间外。若比较端到端冷启动，另建 cold-start 任务并明确把 doctor/安装检查计入，不能只替 Oxrail 排除开销。
+
+待实现命令（现在不能当作已存在命令使用）：
+
+```bash
+pnpm build                  # 仅产品
+pnpm build:lab
+pnpm package:product
+pnpm test:product
+pnpm test:lab
+pnpm validate:boundaries
+pnpm validate:product-artifact
+
+pnpm lab doctor --host-inventory <exact-host-inventory.json>
+pnpm lab prepare --config <experiment.json>
+pnpm lab begin --run <run-id> --binding <verified-session-binding.json>
+pnpm lab end --run <run-id> --result <controlled-postcondition.json>
+pnpm lab report --experiment <experiment-id>
+pnpm lab purge --older-than-days 7
+```
+
+begin/end 仅控制实验状态和非敏感元数据，不操纵产品租约。人工启动宿主仍要按报告提供的清单加载正确配置；绑定文件本身不是隔离证据，必须包含可核实的来源。自动启动入口只在 adapter 实测支持后新增。
+
+### 7. 指标合同
+
+| 指标 | 接受的来源/定义 | 不允许的替代 |
+|---|---|---|
+| 工具请求次数 | 真实观察到的Pre/请求事件 | 当作已执行点击数 |
+| 工具完成次数 | 有结果/完成证据的调用 | 缺Post算成功 |
+| 浏览器primitive次数 | 宿主显式primitive trace或受控fixture明确证据 | 将一个复合工具调用拆成猜测点击数 |
+| Hook观察间隔 | 配对Pre/Post的同钟域间隔 | 宣称纯浏览器执行耗时 |
+| 工具执行耗时 | 宿主确有执行开始/结束时间戳 | 把排队、Hook启动、模型等待都算浏览器耗时 |
+| 任务总耗时 | 固定任务边界 | 扣掉失败、等待或Oxrail自身成本 |
+| 成功/失败 | 同一受控后置条件检查 | 仅采信Agent自述成功 |
+| Token | 可归属该run的宿主正式用量；按字段区分输入/输出/缓存/推理 | DOM可见文字估计=模型总Token；日总量差=该run用量 |
+| 观察载荷大小/估算Token | 非敏感受控载荷的同阶段统计，并记录算法 | 清洗后的样本代表原始上下文，或推断隐藏推理量 |
+| 冗余/重试 | 相同粒度下已有可靠结果/目标证据 | 仅工具名重复就认定无效动作 |
+| 监控开销 | ON/OFF配对校准，分每调用与端到端 | 假定旁路为零开销 |
+
+允许的 Handoff 时间边界：认证需求确认、隔离确认、窗口呈现、认证结果确认、布局恢复、允许续跑、首个后续原生动作。来源没有提供的边界为 null。
+
+分别报告“用户交互区间”“验证/窗口恢复区间”“允许续跑到下一动作区间”，不要把全部等待都说成 Oxrail或模型的延迟。Lab不记录每次输入/提交，不因需要时间点采集凭据。
+
+数据质量单独列出：missing Pre/Post、重复、乱序、源断连、队列溢出、未覆盖工具路径、未知粒度、未知执行组、时钟可靠性。至少一个主指标不可比时，该指标不给百分比收益。
+
+监控 Hook 是宿主关键路径上的额外工作，必须测量。沿用仓库相关开销门槛作为发布检查，不编造已达到数值；补充监控ON/OFF的实測结果。不得把局部处理耗时当完整Hook启动开销。
+
+报告结构固定为：环境与隔离 → 实际variant/coverage → 成功率/失败原因 → 时间/调用/Token可得性 → 监控扰动 → 数据缺失 → 结论适用边界。保存失败run；成功子集的速度对比必须同时给出失败率，不隐藏更早失败。
+
+### 8. 自动验收矩阵
+
+| 测试ID | 操作 | 必须满足 |
+|---|---|---|
+| TEST-LAB-001 | 扫描产品依赖图和安装产物 | 无Lab、benchmark、Demo运行依赖及实验CLI |
+| TEST-LAB-002 | 只保留产品安装根运行 | 不寻找Lab，不创建Lab数据目录，能力状态诚实 |
+| TEST-LAB-003 | 设置遗留实验环境变量运行产品 | 不能启动实验采集或Demo |
+| TEST-LAB-004 | 完全没有Oxrail时启动Lab | 可采集受控宿主事件；真实主机项单独记录 |
+| TEST-LAB-005 | 检查baseline的新会话/配置 | 没有产品Skill/Hook/任务上下文残留；无法证明则BLOCKED |
+| TEST-LAB-006 | 监控OFF启动新会话 | 无Lab监控Hook/collector；不冒充有详细轨迹 |
+| TEST-LAB-007 | 对Lab适配器投递各类合法/非法事件 | 不返回allow/deny/模型上下文、不改写原调用 |
+| TEST-LAB-008 | collector退出、断链、慢盘、满盘 | 不影响浏览器权限或动作；报告数据不完整 |
+| TEST-LAB-009 | 重复/乱序/缺失Pre/Post、并发子代理 | 幂等、正确关联、不伪造执行与完成 |
+| TEST-LAB-010 | 复合工具只暴露事务事件 | 不输出逐点击或逐键精确统计 |
+| TEST-LAB-011 | 宿主不提供Token/用量混合多个run | 值为null并有原因，不输出假精确总量 |
+| TEST-LAB-012 | 秘密诱饵藏入输入/URL/header/异常字段 | trace、IPC持久化、日志、临时/崩溃文件零泄漏 |
+| TEST-LAB-013 | 登录fixture期间采集 | 只有许可阶段元数据，无截图/输入值/键盘/剪贴板 |
+| TEST-LAB-014 | 持有Handoff租约时关闭/删除Lab | 产品安全锁不解除、不绕过验证恢复Agent |
+| TEST-LAB-015 | A/B任一环境字段/初态/监控hash不一致 | 比较拒绝或标不可比，不自动忽略 |
+| TEST-LAB-016 | Guard请求实际为ADVISORY/BYPASSED | TREATMENT_NOT_ACTIVE，不计为Guard成绩 |
+| TEST-LAB-017 | 真实宿主四象限smoke | 有实际证据的分别通过；未跑不能PASS |
+| TEST-LAB-018 | 实际插件安装及源目录移除 | 安装根无实验残留且路径/hash正确 |
+| TEST-LAB-019 | 尝试由任务Agent读实验计划/报告 | 正式隔离路径应拒绝；否则标隔离未证明 |
+| TEST-LAB-020 | Lab purge与旧Demo迁移 | 不越界删除产品状态、Keychain或历史release evidence |
+
+复用项目现有测试工具。软件验收前先运行窄测试，再跑更新后的 `pnpm check`；发布类变更还运行 `pnpm release:gate`。跨平台/真实宿主测试不可执行时，列为未执行并写出原因；不得把SKIPPED算成PASS。
+
+### 9. 开发 Agent 每包交付格式
+
+```text
+WP:
+Base commit / Result commit:
+Status: IN_REVIEW | BLOCKED
+Changed files:
+What works now:
+Commands actually run + exit codes:
+Tests not run + reason:
+Real-host evidence: present / absent
+Capability status and coverage:
+Artifact dependency / privacy check:
+Known blockers:
+Next eligible WP:
+```
+
+无证据时不使用“已支持所有原生浏览器”“完全无开销”“100%监控”“自动安全续跑已完成”等描述。不得通过写mock结果、改小断言或把Unsupported改成Supported来完成工作包。
+
+### 10. 最终完成定义
+
+普通用户只安装 Oxrail 产品；产品没有实验与记录功能，但保有真正运行所需的安全状态。内部开发者可以独立启动 Lab，在没有 Oxrail 的新环境和安装 Oxrail 的新环境下使用同一观测体系。支持范围、记录粒度、Token来源和监控扰动都明确，秘密不进入实验数据链。Lab 不接管浏览器、不决定产品的安全交接，不污染任务提示词，不把不完整数据冒充完整比较。
+
+这条闭环通过以后，后续 Chrome适配、内置浏览器路由策略和安全弹窗优化才使用它做证据驱动的比较；不要在测量体系建立前持续增加无法归因的功能。
+
+### 11. 审阅依据与复核入口
+
+本方案基于 2026-09-08 可读取的 `dev` 源码与官方Hooks文档；未在本次规划中运行项目或真实宿主。开始实现时记录实际HEAD，不能把本文件当作新版本兼容性证明。
+
+已核对：公开 Skill含credential trial；build混合产品与pilot/evidence入口；marketplace使用仓库URL/ref；产品Hook含旁路提示和运行状态；已有pilot具备配对计划/回执基础，但prepare/record不是独立通用监控器。以下链接只作复核入口：
+
+```text
+[S1] https://raw.githubusercontent.com/regrevia/Oxrail/dev/skills/oxrail/SKILL.md
+[S2] https://raw.githubusercontent.com/regrevia/Oxrail/dev/scripts/build.mjs
+[S3] https://raw.githubusercontent.com/regrevia/Oxrail/dev/packages/host-openai/src/hook.ts
+[S4] https://raw.githubusercontent.com/regrevia/Oxrail/dev/packages/host-openai/src/state.ts
+[S5] https://raw.githubusercontent.com/regrevia/Oxrail/dev/packages/evidence/src/pilot.ts
+[S6] https://raw.githubusercontent.com/regrevia/Oxrail/dev/.agents/plugins/marketplace.json
+[S7] https://raw.githubusercontent.com/regrevia/Oxrail/dev/native/macos/Package.swift
+[S8] https://raw.githubusercontent.com/regrevia/Oxrail/dev/spec/OXRAIL_SPEC.md
+[S9] https://raw.githubusercontent.com/regrevia/Oxrail/dev/AGENTS.md
+[S10] https://learn.chatgpt.com/docs/hooks
+```

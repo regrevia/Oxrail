@@ -4,6 +4,8 @@ All notable project changes are documented here. The normative specification his
 
 ## [Unreleased]
 
+- Spec 1.0.24 incorporates the approved product/Lab separation contract, eight sequential work packages, and twenty acceptance cases. This documentation change does not activate Host capabilities.
+
 - Real-host compatibility and benchmark evidence remain in progress.
 
 ## [0.1.0-alpha.2] - 2026-09-06

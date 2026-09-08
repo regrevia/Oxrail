@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-05",
+  "generated_at": "2026-09-08",
   "canonical_file": "OXRAIL_SPEC.md",
-  "spec_version": "1.0.23",
-  "spec_sha256": "2f9e997fcd859709c8fcb7acd6a86f7cbc309e383583f704107139f42153b480",
+  "spec_version": "1.0.24",
+  "spec_sha256": "74a4a63a852ca9432467d11bb6273d74f3547c09de81a22033d62c66aafeb773",
   "counts": {
     "sections": 51,
     "requirements": 125,
@@ -632,7 +632,7 @@
       "title": "文档实时维护、变更与归档协议",
       "anchor": "sec-50",
       "start_line": 11858,
-      "end_line": 12223,
+      "end_line": 12229,
       "keywords": [
         "living-spec",
         "maintenance",
@@ -640,6 +640,12 @@
         "archive",
         "agent-retrieval"
       ]
+    },
+    "SEC-51": {
+      "anchor": "sec-51",
+      "title": "产品 Skill 与内部 Lab 分离实施合同",
+      "start_line": 12230,
+      "end_line": 12693
     }
   },
   "requirements": {
@@ -2066,7 +2072,7 @@
       "locations": [
         186,
         10570,
-        12164
+        12169
       ]
     },
     "REQ-CRED-002": {
@@ -2346,7 +2352,7 @@
         4422,
         8442,
         9987,
-        12157
+        12162
       ]
     },
     "REQ-SEC-002": {
@@ -4783,7 +4789,7 @@
         7952,
         8217,
         8818,
-        12175
+        12180
       ]
     },
     "REQ-HOST-008": {
@@ -4999,7 +5005,7 @@
         137,
         8217,
         10570,
-        12164
+        12169
       ]
     }
   },
@@ -5217,7 +5223,7 @@
         10570,
         10601,
         10655,
-        12164
+        12169
       ]
     }
   },
@@ -5734,7 +5740,7 @@
       "locations": [
         7019,
         10621,
-        12164
+        12169
       ]
     },
     "KILL-K30": {
@@ -9649,7 +9655,7 @@
       "title": "V1.0 final acceptance",
       "anchor": "wp-rls-100",
       "start_line": 11791,
-      "end_line": 12223,
+      "end_line": 12340,
       "milestone": "V1.0",
       "priority": "P0",
       "status": "PLANNED",
@@ -9687,6 +9693,89 @@
       "blockers": [
         "No partial override: remove failing surface/capability or do not release."
       ]
+    },
+    "WP-LAB-000": {
+      "anchor": "wp-lab-000",
+      "title": "合同与现状冻结",
+      "status": "READY",
+      "depends_on": [],
+      "start_line": 12341,
+      "end_line": 12353
+    },
+    "WP-LAB-001": {
+      "anchor": "wp-lab-001",
+      "title": "产品构建与发布隔离",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-000"
+      ],
+      "start_line": 12354,
+      "end_line": 12372
+    },
+    "WP-LAB-002": {
+      "anchor": "wp-lab-002",
+      "title": "内部工具、Demo 与配置迁移",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-001"
+      ],
+      "start_line": 12373,
+      "end_line": 12391
+    },
+    "WP-LAB-003": {
+      "anchor": "wp-lab-003",
+      "title": "安全事件协议和独立采集器",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-002"
+      ],
+      "start_line": 12392,
+      "end_line": 12408
+    },
+    "WP-LAB-004": {
+      "anchor": "wp-lab-004",
+      "title": "独立宿主 Hook 适配与纯原生监测",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-003"
+      ],
+      "start_line": 12409,
+      "end_line": 12429
+    },
+    "WP-LAB-005": {
+      "anchor": "wp-lab-005",
+      "title": "干净基线与配对实验控制器",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-004"
+      ],
+      "start_line": 12430,
+      "end_line": 12450
+    },
+    "WP-LAB-006": {
+      "anchor": "wp-lab-006",
+      "title": "指标、Handoff 元数据与报告",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-005"
+      ],
+      "start_line": 12451,
+      "end_line": 12465
+    },
+    "WP-LAB-007": {
+      "anchor": "wp-lab-007",
+      "title": "独立性与发布总验收",
+      "status": "READY",
+      "depends_on": [
+        "WP-LAB-001",
+        "WP-LAB-002",
+        "WP-LAB-003",
+        "WP-LAB-004",
+        "WP-LAB-005",
+        "WP-LAB-006"
+      ],
+      "start_line": 12466,
+      "end_line": 12693
     }
   },
   "milestones": {
@@ -11126,7 +11215,7 @@
       "locations": [
         6273,
         10602,
-        12164
+        12169
       ],
       "sections": [
         "SEC-35",
@@ -11214,7 +11303,7 @@
         9578,
         9749,
         9793,
-        12066
+        12071
       ],
       "sections": [
         "SEC-35",
@@ -11942,7 +12031,7 @@
       "locations": [
         6364,
         10602,
-        12164
+        12169
       ],
       "sections": [
         "SEC-36",
@@ -12055,7 +12144,7 @@
         6373,
         10608,
         10665,
-        12059
+        12064
       ],
       "sections": [
         "SEC-36",
@@ -12071,7 +12160,7 @@
         6374,
         10609,
         10666,
-        12053
+        12058
       ],
       "sections": [
         "SEC-36",
@@ -12087,7 +12176,7 @@
         6375,
         10610,
         10667,
-        12047
+        12052
       ],
       "sections": [
         "SEC-36",
@@ -12103,7 +12192,7 @@
         6376,
         10611,
         10668,
-        12041
+        12046
       ],
       "sections": [
         "SEC-36",
@@ -12119,7 +12208,7 @@
         6377,
         10612,
         10669,
-        12035
+        12040
       ],
       "sections": [
         "SEC-36",
@@ -12135,7 +12224,7 @@
         6378,
         10613,
         10670,
-        12029
+        12034
       ],
       "sections": [
         "SEC-36",
@@ -12151,7 +12240,7 @@
         6379,
         10614,
         10671,
-        12023
+        12028
       ],
       "sections": [
         "SEC-36",
@@ -12167,7 +12256,7 @@
         6380,
         10615,
         10672,
-        12017
+        12022
       ],
       "sections": [
         "SEC-36",
@@ -12360,7 +12449,7 @@
         7979,
         8250,
         8847,
-        12175
+        12180
       ],
       "sections": [
         "SEC-10",
@@ -12473,6 +12562,148 @@
       ],
       "work_packages": [
         "WP-NIF-005"
+      ]
+    },
+    "TEST-LAB-001": {
+      "title": "扫描产品依赖图和安装产物",
+      "expected": "无Lab、benchmark、Demo运行依赖及实验CLI",
+      "locations": [
+        12015,
+        12627
+      ]
+    },
+    "TEST-LAB-002": {
+      "title": "只保留产品安装根运行",
+      "expected": "不寻找Lab，不创建Lab数据目录，能力状态诚实",
+      "locations": [
+        12628
+      ]
+    },
+    "TEST-LAB-003": {
+      "title": "设置遗留实验环境变量运行产品",
+      "expected": "不能启动实验采集或Demo",
+      "locations": [
+        12629
+      ]
+    },
+    "TEST-LAB-004": {
+      "title": "完全没有Oxrail时启动Lab",
+      "expected": "可采集受控宿主事件；真实主机项单独记录",
+      "locations": [
+        12630
+      ]
+    },
+    "TEST-LAB-005": {
+      "title": "检查baseline的新会话/配置",
+      "expected": "没有产品Skill/Hook/任务上下文残留；无法证明则BLOCKED",
+      "locations": [
+        12631
+      ]
+    },
+    "TEST-LAB-006": {
+      "title": "监控OFF启动新会话",
+      "expected": "无Lab监控Hook/collector；不冒充有详细轨迹",
+      "locations": [
+        12632
+      ]
+    },
+    "TEST-LAB-007": {
+      "title": "对Lab适配器投递各类合法/非法事件",
+      "expected": "不返回allow/deny/模型上下文、不改写原调用",
+      "locations": [
+        12633
+      ]
+    },
+    "TEST-LAB-008": {
+      "title": "collector退出、断链、慢盘、满盘",
+      "expected": "不影响浏览器权限或动作；报告数据不完整",
+      "locations": [
+        12634
+      ]
+    },
+    "TEST-LAB-009": {
+      "title": "重复/乱序/缺失Pre/Post、并发子代理",
+      "expected": "幂等、正确关联、不伪造执行与完成",
+      "locations": [
+        12635
+      ]
+    },
+    "TEST-LAB-010": {
+      "title": "复合工具只暴露事务事件",
+      "expected": "不输出逐点击或逐键精确统计",
+      "locations": [
+        12636
+      ]
+    },
+    "TEST-LAB-011": {
+      "title": "宿主不提供Token/用量混合多个run",
+      "expected": "值为null并有原因，不输出假精确总量",
+      "locations": [
+        12637
+      ]
+    },
+    "TEST-LAB-012": {
+      "title": "秘密诱饵藏入输入/URL/header/异常字段",
+      "expected": "trace、IPC持久化、日志、临时/崩溃文件零泄漏",
+      "locations": [
+        12638
+      ]
+    },
+    "TEST-LAB-013": {
+      "title": "登录fixture期间采集",
+      "expected": "只有许可阶段元数据，无截图/输入值/键盘/剪贴板",
+      "locations": [
+        12639
+      ]
+    },
+    "TEST-LAB-014": {
+      "title": "持有Handoff租约时关闭/删除Lab",
+      "expected": "产品安全锁不解除、不绕过验证恢复Agent",
+      "locations": [
+        12640
+      ]
+    },
+    "TEST-LAB-015": {
+      "title": "A/B任一环境字段/初态/监控hash不一致",
+      "expected": "比较拒绝或标不可比，不自动忽略",
+      "locations": [
+        12641
+      ]
+    },
+    "TEST-LAB-016": {
+      "title": "Guard请求实际为ADVISORY/BYPASSED",
+      "expected": "TREATMENT_NOT_ACTIVE，不计为Guard成绩",
+      "locations": [
+        12642
+      ]
+    },
+    "TEST-LAB-017": {
+      "title": "真实宿主四象限smoke",
+      "expected": "有实际证据的分别通过；未跑不能PASS",
+      "locations": [
+        12643
+      ]
+    },
+    "TEST-LAB-018": {
+      "title": "实际插件安装及源目录移除",
+      "expected": "安装根无实验残留且路径/hash正确",
+      "locations": [
+        12644
+      ]
+    },
+    "TEST-LAB-019": {
+      "title": "尝试由任务Agent读实验计划/报告",
+      "expected": "正式隔离路径应拒绝；否则标隔离未证明",
+      "locations": [
+        12645
+      ]
+    },
+    "TEST-LAB-020": {
+      "title": "Lab purge与旧Demo迁移",
+      "expected": "不越界删除产品状态、Keychain或历史release evidence",
+      "locations": [
+        12015,
+        12646
       ]
     }
   },
@@ -12655,6 +12886,13 @@
         "SEC-29",
         "SEC-40",
         "SEC-49"
+      ]
+    },
+    "ADR-LAB-001": {
+      "title": "产品与内部 Lab 独立交付",
+      "path": "docs/adr/ADR-LAB-001.md",
+      "locations": [
+        12348
       ]
     }
   },

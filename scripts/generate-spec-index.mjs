@@ -13,6 +13,41 @@ index.spec_sha256 = createHash("sha256")
   .digest("hex");
 index.generated_at = new Date().toISOString().slice(0, 10);
 
+const labStart = lines.indexOf('<a id="sec-51"></a>');
+if (labStart !== -1) {
+  index.sections["SEC-51"] = {
+    anchor: "sec-51",
+    title: "产品 Skill 与内部 Lab 分离实施合同",
+  };
+  for (const line of lines.slice(labStart)) {
+    const work = line.match(/^#### (WP-LAB-(\d{3})) — (.+)$/);
+    if (work) {
+      const number = Number(work[2]);
+      index.work_packages[work[1]] = {
+        anchor: work[1].toLowerCase(),
+        title: work[3],
+        status: "READY",
+        depends_on:
+          number === 0
+            ? []
+            : number === 7
+              ? Array.from(
+                  { length: 6 },
+                  (_, offset) =>
+                    `WP-LAB-${String(offset + 1).padStart(3, "0")}`,
+                )
+              : [`WP-LAB-${String(number - 1).padStart(3, "0")}`],
+      };
+    }
+    const test = line.match(/^\| (TEST-LAB-\d{3}) \| (.+?) \| (.+?) \|$/);
+    if (test) index.tests[test[1]] = { title: test[2], expected: test[3] };
+  }
+  index.architecture_decisions["ADR-LAB-001"] = {
+    title: "产品与内部 Lab 独立交付",
+    path: "docs/adr/ADR-LAB-001.md",
+  };
+}
+
 const locations = (id) =>
   lines.flatMap((line, offset) =>
     new RegExp(
