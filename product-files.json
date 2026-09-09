@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    ".codex-plugin/plugin.json",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    "dist/bootstrap.mjs",
+    "dist/doctor.mjs",
+    "dist/hooks/post-tool.mjs",
+    "dist/hooks/pre-tool.mjs",
+    "dist/product-dependencies.json",
+    "hooks/hooks.json",
+    "icon/oxrail.png",
+    "package.json",
+    "product-files.json",
+    "release-manifest.json",
+    "skills/oxrail/SKILL.md",
+    "skills/oxrail/scripts/bootstrap.mjs",
+    "skills/oxrail/scripts/doctor.mjs",
+    "skills/oxrail/scripts/trial-check.mjs",
+    "skills/oxrail/scripts/verify-install.mjs"
+  ]
+}

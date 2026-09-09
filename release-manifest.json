@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "product": "oxrail",
+  "version": "0.1.0-alpha.5",
+  "immutableRef": "product-v0.1.0-alpha.5",
+  "hashAlgorithm": "sha256",
+  "selfExcluded": "release-manifest.json",
+  "files": {
+    ".codex-plugin/plugin.json": "68c35fbcff4c80c9948f0c6754c8202c4380caca266367b6974c2cd355c59deb",
+    "LICENSE": "b4e22bc8d28d4f3fbd2119ebef6103c789e9cef9b499aabc6276405dd495e676",
+    "README.md": "87638a429cbf467937497dd0d5777c6cc60e3db5faa991d72c9311b2b5bdf497",
+    "SECURITY.md": "1ad43b30336fc9b2e35291ecf3bd67cd9735af28235c1400de6e672c72e41cf9",
+    "dist/bootstrap.mjs": "c9cb1399269b4fb14f711ac54259164ca911dfe2155c72ea1e0e8bf282dbde8e",
+    "dist/doctor.mjs": "ab50290d99ce2168571ed368037c88ab5543a07557f08cf251620968a2afe11c",
+    "dist/hooks/post-tool.mjs": "a54422dffb4cc212c406da7814022fc61f9ee4e3f62fa4d60f8fd79e9a4c91bc",
+    "dist/hooks/pre-tool.mjs": "747eb4906c80907aae0fb5f07e794dabf1b473b203c7281f7f06f5865adb2374",
+    "dist/product-dependencies.json": "d21c0c2c4b12c3b9b10d9c1fef66e666119346316ef0e7285e0a3ddc990263fc",
+    "hooks/hooks.json": "0a01e23e83b5a3f79ddf3e920b4f7e865ec832842cd2eaaf3877913f3f84eb29",
+    "icon/oxrail.png": "a36314bef432e7793186ecc18b7e199ae69c1dafaea08ac6ba07eac72bf3e54b",
+    "package.json": "187e6e7c114928b92049521380efc4d177fa14f466c01d220f549709d13a66c2",
+    "product-files.json": "feae33e39784f1ef19b26fbfdfeaa74dc6f2663f23597a40b5262bf58a7d8137",
+    "skills/oxrail/SKILL.md": "a08cf8a30ab527dc4c3a2e204ff53708e7b88f8c8927928f1c9b100f186fb3eb",
+    "skills/oxrail/scripts/bootstrap.mjs": "11261db641f39dbed7274186aca638eafc56db0aa046469da1a8e9ef2015ab46",
+    "skills/oxrail/scripts/doctor.mjs": "0144067cefad2f5024222c93ecdbb2f1cc03f484f007c8f7bd36e7ef033f41dd",
+    "skills/oxrail/scripts/trial-check.mjs": "705a1ff502370698b52f993b1128198b8985a21fbccae9c1f94503c85b273bc1",
+    "skills/oxrail/scripts/verify-install.mjs": "93ab429e4f150e6a14573a8bae319f3af74e0193b423a0f7330f07d9e3b7eab6"
+  }
+}
