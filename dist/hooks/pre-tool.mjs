@@ -16522,6 +16522,7 @@ async function handleHookEventAfterCredentialFence(value, environment) {
     () => true,
     () => false
   );
+  if (!hookMarkerRecorded) return bypassOutput();
   if (value.hook_event_name === "SessionStart")
     return profileResult.valid ? {} : bypassOutput();
   const toolEvent = value.hook_event_name === "PreToolUse" || value.hook_event_name === "PostToolUse" ? value.hook_event_name : void 0;

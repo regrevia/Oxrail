@@ -88,8 +88,8 @@ describe("WP-LAB-001 product artifact", () => {
     );
     expect(verified.status, verified.stderr).toBe(0);
     expect(JSON.parse(verified.stdout)).toMatchObject({
-      version: "0.1.0-alpha.4",
-      immutableRef: "product-v0.1.0-alpha.4",
+      version: "0.1.0-alpha.5",
+      immutableRef: "product-v0.1.0-alpha.5",
       artifactIntegrity: "PASS",
     });
 
@@ -126,7 +126,7 @@ describe("WP-LAB-001 product artifact", () => {
     );
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
-      version: "0.1.0-alpha.4",
+      version: "0.1.0-alpha.5",
       artifactIntegrity: "PASS",
       stage: "INSTALLED",
       readiness: "HOST_SETUP_REQUIRED",
@@ -134,6 +134,20 @@ describe("WP-LAB-001 product artifact", () => {
       safetyProtection: "INACTIVE",
       handoffProtection: "INACTIVE",
       credentialProtection: "INACTIVE",
+      hostDiagnostics: {
+        hookTrustAuthority: "HOST_UI",
+        hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+        hookExecution: "NOT_OBSERVED",
+        recentHookEvents: [],
+        toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+        inventoryStatus: "BLOCKED",
+        chromeRoute: "BLOCKED",
+        blockerCodes: [
+          "HOOK_EXECUTION_NOT_OBSERVED",
+          "HOST_INVENTORY_EXPORT_UNAVAILABLE",
+          "CHROME_ROUTE_NOT_OBSERVED",
+        ],
+      },
     });
     await expect(readdir(path.join(dataHome, ".oxrail-lab"))).rejects.toThrow();
   });

@@ -1,6 +1,6 @@
-# Oxrail alpha.4 macOS 本机试用
+# Oxrail alpha.5 macOS 本机试用
 
-本文只验证 `product-v0.1.0-alpha.4` 的产品安装完整性、Hook 被动路由和
+本文只验证 `product-v0.1.0-alpha.5` 的产品安装完整性、Hook 被动路由和
 Native Chrome 故障开放行为。它不是 Guard、页面检索过滤、Handoff 或安全凭据
 窗口的通过报告；这些能力在本版必须继续显示 `BYPASSED` 或 `INACTIVE`。
 
@@ -21,7 +21,7 @@ codex plugin add oxrail@oxrail
 ```
 
 若本机已有同名 marketplace/plugin，先使用当前 Codex CLI 提供的列表和更新命令
-确认实际 ref 已变为 `product-v0.1.0-alpha.4`；不要猜测本机缓存目录并手工覆盖。
+确认实际 ref 已变为 `product-v0.1.0-alpha.5`；不要猜测本机缓存目录并手工覆盖。
 安装或更新后开启全新会话。
 
 ## 3. 零浏览器预检
@@ -34,11 +34,14 @@ codex plugin add oxrail@oxrail
 
 预期：
 
-- `version` 为 `0.1.0-alpha.4`；
+- `version` 为 `0.1.0-alpha.5`；
 - `artifactIntegrity` 为 `PASS`；
 - 初次通常为 `HOST_SETUP_REQUIRED`；
 - Optimization 为 `BYPASSED`；Safety、Handoff、Credential 均为 `INACTIVE`；
 - 命令不打开 Chrome、不弹系统窗口、不创建 `~/.oxrail-lab`。
+- `hostDiagnostics.hookTrustQuery` 和 `toolInventoryExport` 均为
+  `UNAVAILABLE_PUBLIC_API`；这表示没有公开机器查询接口，不表示 `/hooks`
+  中的人工作业无效。
 
 任何文件 hash 失败、版本不符或能力错误显示 `ACTIVE` 都应立即停止并记录 FAIL。
 
@@ -46,7 +49,7 @@ codex plugin add oxrail@oxrail
 
 1. 在宿主 `/hooks` 打开 Oxrail 定义，核对命令只指向当前插件根中的
    `dist/hooks/pre-tool.mjs` 和 `post-tool.mjs`，且 build stamp 为
-   `0.1.0-alpha.4`。
+   `0.1.0-alpha.5`。
 2. 由你本人通过宿主 UI 信任当前 hash。Oxrail 不得替你操作或绕过此步骤。
 3. 如果宿主能导出当前工具 inventory，按 Skill 所示 strict JSON 保存；其中
    Browser tool name 必须来自真实导出。运行 bootstrap 后再次运行 doctor。
@@ -56,8 +59,10 @@ codex plugin add oxrail@oxrail
 
 ## 5. 被动真实路由 smoke
 
-在同一个可见 Chrome tab 打开一个公开、无登录页面，然后给 Agent 一个本来就
-需要的只读任务，例如“读取页面标题并返回”。不要为了测试额外制造 click/type。
+在 ChatGPT Desktop 中新建 Codex chat，通过 `@Chrome` 明确选择安装扩展的
+Chrome profile 或当前 tab。在同一个可见 Chrome tab 打开一个公开、无登录页面，
+然后给 Agent 一个本来就需要的只读任务，例如“读取页面标题并返回”。不要为了
+测试额外制造 click/type。
 任务后立刻再次运行 `trial-check.mjs`，保存两次去敏 JSON 和 `/hooks` 中显示的
 当前 hash。
 
@@ -80,6 +85,11 @@ trust、新会话 Skill 加载、inventory 来源、首次自然 Browser 调用�
 两份 doctor JSON；不保存页面正文、完整 URL query、截图、工具原始输入输出、
 session ID 或任何秘密。
 
-若页面检索过滤、快速凭据窗口或自动 Handoff 没有出现，这是 alpha.4 的预期，
+若 `hookExecution=NOT_OBSERVED`，先在同一新会话连续运行两次本地只读命令；
+仍未观察到时记录 `HOOK_EXECUTION_NOT_OBSERVED`，说明当前会话没有投递该插件
+Hook。若本地 Hook 已观察但 Chrome route 仍未观察，记录
+`CHROME_ROUTE_NOT_OBSERVED`；当前 specialized Browser 路径可能绕过默认 Hook。
+
+若页面检索过滤、快速凭据窗口或自动 Handoff 没有出现，这是 alpha.5 的预期，
 记录 `BLOCKED_NOT_PRODUCT_ACTIVE`，不要把宿主自己的登录框或批准弹窗计为 Oxrail
 能力。把去敏结果和精确版本信息反馈到 `dev`，后续才能据此推进真实适配。

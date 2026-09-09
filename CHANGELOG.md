@@ -8,6 +8,16 @@ All notable project changes are documented here. The normative specification his
 
 - Real-host compatibility and benchmark evidence remain in progress.
 
+## [0.1.0-alpha.5] - 2026-09-09
+
+- Separated host-UI Hook trust from recent current-definition execution
+  evidence in doctor output instead of presenting an unavailable trust query as
+  a definitive negative.
+- Added fixed diagnostics for unavailable public tool-inventory export,
+  current Hook delivery, and passive Chrome-route observation; the trial flow
+  now requires explicit `@Chrome` routing and keeps specialized-path bypasses
+  blocked.
+
 ## [0.1.0-alpha.4] - 2026-09-09
 
 - Made installed-artifact verification compatible with a Git clone by ignoring

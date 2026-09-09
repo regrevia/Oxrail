@@ -9,7 +9,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/regrevia/Oxrail.git",
-        "ref": "product-v0.1.0-alpha.4"
+        "ref": "product-v0.1.0-alpha.5"
       },
       "policy": {
         "installation": "AVAILABLE",

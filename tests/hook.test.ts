@@ -1816,6 +1816,29 @@ describe("public Codex hooks", () => {
     expect(result.stdout).not.toContain(canary);
   });
 
+  it("fails open visibly when the current-hash Hook marker cannot be written", async () => {
+    const environment = await setup();
+    const invalidDataRoot = path.join(
+      environment.pluginData,
+      "not-a-directory",
+    );
+    await writeFile(invalidDataRoot, "fixture");
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "UserPromptSubmit",
+          session_id: "marker-write-failure",
+        },
+        { ...environment, pluginData: invalidDataRoot },
+      ),
+    ).resolves.toEqual({
+      systemMessage: expect.stringContaining(
+        "Oxrail optimization unavailable / BYPASSED",
+      ),
+    });
+  });
+
   it("never bypasses host approvals or hook trust", async () => {
     const manifest = JSON.parse(
       await readFile(

@@ -17,10 +17,10 @@ Safety, Handoff, and Credential capabilities report `INACTIVE`.
 Project documentation and the authoritative specification are maintained at
 https://github.com/regrevia/Oxrail.
 
-## Alpha.4 trial check
+## Alpha.5 trial check
 
 This product-only tree is bound to the immutable ref
-`product-v0.1.0-alpha.4`. From the installed plugin root, run:
+`product-v0.1.0-alpha.5`. From the installed plugin root, run:
 
 ```bash
 node skills/oxrail/scripts/trial-check.mjs
@@ -38,6 +38,14 @@ route observation may advance the lifecycle, but this preview still reports
 Optimization `BYPASSED` and Safety, Handoff, and Credential protection
 `INACTIVE`. It does not yet provide retrieval filtering or a secure credential
 window. Do not use real secrets for this trial.
+
+`hostDiagnostics.hookTrustQuery` and `toolInventoryExport` are
+`UNAVAILABLE_PUBLIC_API` because the current public Host documentation exposes
+neither interface. `/hooks` is authoritative for trust. Runtime delivery is a
+separate fact and becomes `OBSERVED_CURRENT_DEFINITION` only after a recent
+current-hash Hook event. Select Chrome explicitly with `@Chrome` in a new Codex
+chat; a specialized Chrome path may still bypass lifecycle Hooks and must then
+remain `BLOCKED`.
 
 ## License
 

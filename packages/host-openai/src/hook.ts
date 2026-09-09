@@ -355,6 +355,11 @@ async function handleHookEventAfterCredentialFence(
     () => false,
   );
 
+  // A Hook that ran but cannot publish even its bounded current-hash marker is
+  // observable only as a failed adapter. Keep the Host action fail-open while
+  // making the Oxrail degradation explicit.
+  if (!hookMarkerRecorded) return bypassOutput();
+
   if (value.hook_event_name === "SessionStart")
     return profileResult.valid ? {} : bypassOutput();
 

@@ -52,6 +52,7 @@ console.log(
       credentialProtection: doctorReport.credentialProtectionActive
         ? "ACTIVE"
         : "INACTIVE",
+      hostDiagnostics: doctorReport.hostDiagnostics,
       notices: doctorReport.notices,
     },
     null,

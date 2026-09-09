@@ -14601,6 +14601,10 @@ async function runDoctor(options) {
     profile && !["disabled", "managed-only"].includes(profile.hooks.policy) && !["disabled", "skipped"].includes(profile.hooks.trustState)
   );
   const hooksTrusted = profileAllowsHooks && Boolean(definitionHash) && (observations.generic.PreToolUse || observations.generic.PostToolUse);
+  const recentHookEvents = HOOK_EVENTS.filter(
+    (event) => observations.generic[event]
+  );
+  const hookExecution = recentHookEvents.length > 0 ? "OBSERVED_CURRENT_DEFINITION" : "NOT_OBSERVED";
   const currentIdentity2 = Boolean(
     profile && matchesCurrentIdentity(profile, options.currentIdentity)
   );
@@ -14686,6 +14690,26 @@ async function runDoctor(options) {
     credentialProtectionActive,
     resultingMode
   });
+  const blockerCodes = [];
+  if (hookExecution === "NOT_OBSERVED") {
+    blockerCodes.push("HOOK_EXECUTION_NOT_OBSERVED");
+  }
+  if (!options.hostInventory) {
+    blockerCodes.push("HOST_INVENTORY_EXPORT_UNAVAILABLE");
+  }
+  if (!observations.persistedBrowserRoute) {
+    blockerCodes.push("CHROME_ROUTE_NOT_OBSERVED");
+  }
+  const hostDiagnostics = {
+    hookTrustAuthority: "HOST_UI",
+    hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+    hookExecution,
+    recentHookEvents,
+    toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+    inventoryStatus: options.hostInventory ? "PROVIDED_AND_VALIDATED" : "BLOCKED",
+    chromeRoute: observations.persistedBrowserRoute ? "OBSERVED_PASSIVE" : options.hostInventory ? "NOT_OBSERVED" : "BLOCKED",
+    blockerCodes
+  };
   const notices = [];
   notices.push(
     "Package/definition checks are local file-presence checks, not host registry queries.",
@@ -14705,7 +14729,8 @@ async function runDoctor(options) {
     notices.push("Oxrail handoff protection is INACTIVE.");
   if (!verification.hooksTrusted) {
     notices.push(
-      "Review and trust the current Oxrail hook definition in the host UI."
+      "The public Host contract has no Hook trust-query API; /hooks is authoritative.",
+      "No recent current-hash Hook execution proves runtime delivery. Confirm the enabled source/hash in /hooks and run a new-session local-tool sanity call."
     );
   } else {
     notices.push(
@@ -14714,7 +14739,8 @@ async function runDoctor(options) {
   }
   if (!options.hostInventory) {
     notices.push(
-      "Current host route inventory is not confirmed; matcher/profile remains unavailable."
+      "No public Host tool-inventory export API is documented; HOST_INVENTORY_EXPORT_UNAVAILABLE keeps matcher/profile BLOCKED.",
+      "For Chrome extension routing, start a new Codex chat and explicitly select the intended Chrome profile/tab with @Chrome."
     );
   }
   if (verification.stage === "VERIFIED" && !currentIdentity2) {
@@ -14748,7 +14774,7 @@ async function runDoctor(options) {
       },
       hooks: {
         ...profile.hooks,
-        trustState: verification.hooksTrusted ? "active" : !profileAllowsHooks ? profile.hooks.trustState : "review-required"
+        trustState: verification.hooksTrusted ? "active" : !profileAllowsHooks ? profile.hooks.trustState : "unknown"
       },
       handoff: {
         ...profile.handoff,
@@ -14804,6 +14830,7 @@ async function runDoctor(options) {
     profileFresh: profileResult.valid && Boolean(options.hostInventory) && currentIdentity2,
     safetyInactiveReasons: reportedSafetyReasons,
     syntheticProbeVerdict,
+    hostDiagnostics,
     ...profile ? { profileId: profile.profileId } : {}
   };
 }
@@ -14822,6 +14849,14 @@ function formatDoctorReport(report2) {
     `Oxrail Skill definition present: ${verdict(report2.skillAvailable)}`,
     `Required Hook definitions present: ${verdict(report2.hooksRegistered)}`,
     `Hooks trusted (recent execution evidence): ${verdict(report2.hooksTrusted)}`,
+    `Hook trust authority: ${report2.hostDiagnostics.hookTrustAuthority}`,
+    `Hook trust query: ${report2.hostDiagnostics.hookTrustQuery}`,
+    `Hook execution: ${report2.hostDiagnostics.hookExecution}`,
+    `Recent Hook events: ${report2.hostDiagnostics.recentHookEvents.join(", ") || "none"}`,
+    `Tool inventory export: ${report2.hostDiagnostics.toolInventoryExport}`,
+    `Inventory status: ${report2.hostDiagnostics.inventoryStatus}`,
+    `Chrome route: ${report2.hostDiagnostics.chromeRoute}`,
+    `Host blockers: ${report2.hostDiagnostics.blockerCodes.join(", ") || "none"}`,
     `PreToolUse available: ${verdict(report2.preToolUseAvailable)}`,
     `PostToolUse available: ${verdict(report2.postToolUseAvailable)}`,
     `Chrome Computer Use detectable: ${verdict(report2.chromeComputerUseDetectable)}`,

@@ -30,8 +30,20 @@ Keep native Computer Use in control. Oxrail is a gate, not a second browser exec
    Doctor's plugin, Skill, and Hook-definition checks are package file checks, not host registry queries. When this command is invoked through the Oxrail Skill, that invocation is the evidence of current-thread Skill availability; a source-checkout doctor run proves only that the definition is present.
 
 2. Read the reported setup state, Oxrail mode, Optimization, Safety, and Handoff fields independently.
-3. If Hook trust is pending, ask the user to open `/hooks`, review the current commands, and trust them through the normal host UI. Never alter or bypass host trust for the user.
+3. Treat `hostDiagnostics.hookTrustAuthority=HOST_UI` literally. The public
+   Host contract has no machine-readable trust query, so
+   `hookTrustQuery=UNAVAILABLE_PUBLIC_API` is not evidence that the user failed
+   to trust the Hook. If current-definition execution is not observed, ask the
+   user to confirm the exact source/hash in `/hooks`; never alter or bypass Host
+   trust.
 4. If the Skill was just installed, tell the user that a new thread/session is required before relying on Skill availability.
+
+If `hookExecution=NOT_OBSERVED`, run two harmless local read-only tool calls in
+the same new session and rerun `trial-check.mjs` immediately. This is only a
+generic Hook sanity test. If local execution becomes observed but an explicitly
+selected `@Chrome` call does not, report `CHROME_ROUTE_NOT_OBSERVED`; the
+specialized Browser route may bypass Codex lifecycle Hooks. Do not guess a tool
+name or synthesize an inventory.
 
 If doctor reports `host profile not found`, use an exact inventory exported by the current host:
 
@@ -58,7 +70,7 @@ Do not issue a real browser action merely to validate installation. The alpha li
 
 Treat Safety and Handoff as active only when doctor explicitly reports `ACTIVE`. When either is `INACTIVE`, state that clearly before any step that would otherwise rely on that protection.
 
-The current `0.1.0-alpha.4` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, Credential enforcement, retrieval acceleration, or page filtering from internal fixture foundations.
+The current `0.1.0-alpha.5` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, Credential enforcement, retrieval acceleration, or page filtering from internal fixture foundations.
 
 ## During native browser work
 

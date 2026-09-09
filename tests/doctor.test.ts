@@ -316,7 +316,21 @@ describe("oxrail doctor", () => {
         .every(({ verdict }) => verdict === "unknown"),
     ).toBe(true);
     const formatted = formatDoctorReport(report);
-    expect(formatted).toContain("Review and trust");
+    expect(formatted).toContain("Hook trust authority: HOST_UI");
+    expect(formatted).toContain("Hook trust query: UNAVAILABLE_PUBLIC_API");
+    expect(report.hostDiagnostics).toEqual({
+      hookTrustAuthority: "HOST_UI",
+      hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+      hookExecution: "NOT_OBSERVED",
+      recentHookEvents: [],
+      toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+      inventoryStatus: "PROVIDED_AND_VALIDATED",
+      chromeRoute: "NOT_OBSERVED",
+      blockerCodes: [
+        "HOOK_EXECUTION_NOT_OBSERVED",
+        "CHROME_ROUTE_NOT_OBSERVED",
+      ],
+    });
     expect(formatted).toContain("Plugin package manifest present: PASS");
     expect(formatted).toContain("Oxrail Skill definition present: PASS");
     expect(formatted).toContain("Required Hook definitions present: PASS");
@@ -385,6 +399,13 @@ describe("oxrail doctor", () => {
     );
     expect(report.safetyProtectionActive).toBe(false);
     expect(report.handoffProtectionActive).toBe(false);
+    expect(report.hostDiagnostics).toMatchObject({
+      hookExecution: "OBSERVED_CURRENT_DEFINITION",
+      recentHookEvents: ["PreToolUse", "PostToolUse"],
+      inventoryStatus: "PROVIDED_AND_VALIDATED",
+      chromeRoute: "NOT_OBSERVED",
+      blockerCodes: ["CHROME_ROUTE_NOT_OBSERVED"],
+    });
   });
 
   it("becomes VERIFIED after both passive browser hook phases are seen", async () => {
@@ -602,6 +623,12 @@ describe("oxrail doctor", () => {
     expect(fresh.stage).toBe("VERIFIED");
     expect(fresh.resultingMode).toBe("ADVISORY_ONLY");
     expect(fresh.optimization).toBe("BYPASSED");
+    expect(fresh.hostDiagnostics).toMatchObject({
+      hookExecution: "OBSERVED_CURRENT_DEFINITION",
+      inventoryStatus: "PROVIDED_AND_VALIDATED",
+      chromeRoute: "OBSERVED_PASSIVE",
+      blockerCodes: [],
+    });
 
     const otherSession = await runDoctor({
       ...environment,
@@ -657,6 +684,42 @@ describe("oxrail doctor", () => {
       firstBrowserHookSeen: true,
       verificationSource: "passive-first-browser-call",
     });
+  });
+
+  it("separates unavailable public inventory export from Hook execution", async () => {
+    const environment = await setup();
+    const sessionId = "no-public-inventory-session";
+    for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
+      await handleHookEvent(
+        {
+          hook_event_name,
+          session_id: sessionId,
+          tool_name: "fixture.safe.probe",
+          tool_use_id: `inventory-${hook_event_name}`,
+        },
+        environment,
+      );
+    }
+
+    const { hostInventory: _hostInventory, ...withoutInventory } = environment;
+    const report = await runDoctor({ ...withoutInventory, sessionId });
+    expect(report.stage).toBe("INSTALLED");
+    expect(report.hostDiagnostics).toEqual({
+      hookTrustAuthority: "HOST_UI",
+      hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+      hookExecution: "OBSERVED_CURRENT_DEFINITION",
+      recentHookEvents: ["PreToolUse", "PostToolUse"],
+      toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+      inventoryStatus: "BLOCKED",
+      chromeRoute: "BLOCKED",
+      blockerCodes: [
+        "HOST_INVENTORY_EXPORT_UNAVAILABLE",
+        "CHROME_ROUTE_NOT_OBSERVED",
+      ],
+    });
+    expect(report.notices).toContain(
+      "No public Host tool-inventory export API is documented; HOST_INVENTORY_EXPORT_UNAVAILABLE keeps matcher/profile BLOCKED.",
+    );
   });
 
   it("uses a harmless host-provided synthetic probe when available", async () => {
