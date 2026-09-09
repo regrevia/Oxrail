@@ -17,6 +17,16 @@ Keep native Computer Use in control. Oxrail is a gate, not a second browser exec
 
    In a source checkout, run `pnpm run doctor` after `pnpm build`.
 
+   For the installed alpha preview, first run the combined artifact and host
+   readiness check:
+
+   ```bash
+   node scripts/trial-check.mjs
+   ```
+
+   Stop if `artifactIntegrity` is not `PASS`. This check is local and does not
+   grant Hook trust or browser permission.
+
    Doctor's plugin, Skill, and Hook-definition checks are package file checks, not host registry queries. When this command is invoked through the Oxrail Skill, that invocation is the evidence of current-thread Skill availability; a source-checkout doctor run proves only that the definition is present.
 
 2. Read the reported setup state, Oxrail mode, Optimization, Safety, and Handoff fields independently.
@@ -48,7 +58,7 @@ Do not issue a real browser action merely to validate installation. The alpha li
 
 Treat Safety and Handoff as active only when doctor explicitly reports `ACTIVE`. When either is `INACTIVE`, state that clearly before any step that would otherwise rely on that protection.
 
-The current `0.1.0-alpha.2` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, or Credential enforcement from internal fixture foundations.
+The current `0.1.0-alpha.3` public runtime adapter is passive-only. A `VERIFIED` route therefore remains `ADVISORY_ONLY` / `BYPASSED`; do not infer Guard, Safety, Handoff, Credential enforcement, retrieval acceleration, or page filtering from internal fixture foundations.
 
 ## During native browser work
 

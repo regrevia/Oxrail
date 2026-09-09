@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -25,6 +26,8 @@ await writeFile(
       scripts: {
         bootstrap: "node dist/bootstrap.mjs",
         doctor: "node dist/doctor.mjs",
+        "verify-install": "node skills/oxrail/scripts/verify-install.mjs",
+        "trial-check": "node skills/oxrail/scripts/trial-check.mjs",
       },
     },
     null,
@@ -40,7 +43,36 @@ await writeFile(
         ...manifest.files.map((entry) => entry.destination),
         "package.json",
         "product-files.json",
+        "release-manifest.json",
       ].sort(),
+    },
+    null,
+    2,
+  )}\n`,
+);
+
+const integrityFiles = [
+  ...manifest.files.map((entry) => entry.destination),
+  "package.json",
+  "product-files.json",
+].sort();
+const hashes = {};
+for (const filename of integrityFiles) {
+  hashes[filename] = createHash("sha256")
+    .update(await readFile(path.join(releaseRoot, filename)))
+    .digest("hex");
+}
+await writeFile(
+  path.join(releaseRoot, "release-manifest.json"),
+  `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      product: "oxrail",
+      version: sourcePackage.version,
+      immutableRef: `product-v${sourcePackage.version}`,
+      hashAlgorithm: "sha256",
+      selfExcluded: "release-manifest.json",
+      files: hashes,
     },
     null,
     2,

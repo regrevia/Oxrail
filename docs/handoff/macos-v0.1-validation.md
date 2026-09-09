@@ -32,17 +32,17 @@
 在固定 commit 的源码 checkout 中运行：
 
 ```bash
-pnpm build
+pnpm build:lab
 pnpm fixture:serve
 ```
 
 然后由用户在用于实验的 Chrome profile 中人工执行：
 
-1. 打开 `chrome://extensions`，启用 Developer mode，选择 Load unpacked，并加载固定 checkout 的 `dist/handoff-control`。不得用策略或脚本静默安装。
+1. 打开 `chrome://extensions`，启用 Developer mode，选择 Load unpacked，并加载固定 checkout 的 `lab/dist/handoff-control`。不得用策略或脚本静默安装。
 2. 在扩展卡片中打开 service-worker inspector；它只用于接收下面的去敏单行 JSON。
 3. 打开 `http://127.0.0.1:4173/`，或 harness 返回的、只含一个 64 位小写十六进制 `reset` 参数的 URL。不要在真实账号、日常 profile 或其它页面运行。
 4. 在该 fixture tab 处于活动状态时，人工点击 Oxrail 扩展按钮一次。按钮是唯一入口；网页、Agent 和外部进程都不能传入 tab ID 或触发 probe。
-5. 在 service-worker inspector 中等待以 `OXRAIL_SAME_TAB_PROBE` 开头的单行 JSON；没有该行即视为未取得结果。扩展不会在其它页面保留 badge/title 状态。只同步该去敏结果和 `dist/handoff-control/build-evidence.json`，不同步浏览器页面、tab/window ID 或截图。
+5. 在 service-worker inspector 中等待以 `OXRAIL_SAME_TAB_PROBE` 开头的单行 JSON；没有该行即视为未取得结果。扩展不会在其它页面保留 badge/title 状态。只同步该去敏结果和 `lab/dist/handoff-control/build-evidence.json`，不同步浏览器页面、tab/window ID 或截图。
 
 成功结果仍必须包含：
 

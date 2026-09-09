@@ -18,6 +18,14 @@
       "source": "skills/oxrail/scripts/doctor.mjs",
       "destination": "skills/oxrail/scripts/doctor.mjs"
     },
+    {
+      "source": "skills/oxrail/scripts/trial-check.mjs",
+      "destination": "skills/oxrail/scripts/trial-check.mjs"
+    },
+    {
+      "source": "skills/oxrail/scripts/verify-install.mjs",
+      "destination": "skills/oxrail/scripts/verify-install.mjs"
+    },
     { "source": "dist/bootstrap.mjs", "destination": "dist/bootstrap.mjs" },
     { "source": "dist/doctor.mjs", "destination": "dist/doctor.mjs" },
     {

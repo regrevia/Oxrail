@@ -82,10 +82,10 @@ if (marketplace) {
   if (
     entry?.source?.source !== "url" ||
     entry?.source?.url !== "https://github.com/regrevia/Oxrail.git" ||
-    entry?.source?.ref !== `v${manifest.version}`
+    entry?.source?.ref !== `product-v${manifest.version}`
   ) {
     fail(
-      "marketplace must install the manifest's immutable GitHub version tag",
+      "marketplace must install the manifest's immutable product-only GitHub ref",
     );
   }
   if (

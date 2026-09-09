@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cp, mkdtemp, readFile, readdir } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -60,6 +60,68 @@ describe("WP-LAB-001 product artifact", () => {
       safetyProtectionActive: false,
       handoffProtectionActive: false,
       credentialProtectionActive: false,
+    });
+    await expect(readdir(path.join(dataHome, ".oxrail-lab"))).rejects.toThrow();
+  });
+
+  it("verifies the exact installed product and rejects mutation", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "oxrail-integrity-"));
+    const installRoot = path.join(temporary, "install");
+    await cp("release/oxrail", installRoot, { recursive: true });
+
+    const verified = spawnSync(
+      process.execPath,
+      ["skills/oxrail/scripts/verify-install.mjs"],
+      { cwd: installRoot, encoding: "utf8" },
+    );
+    expect(verified.status, verified.stderr).toBe(0);
+    expect(JSON.parse(verified.stdout)).toMatchObject({
+      version: "0.1.0-alpha.3",
+      immutableRef: "product-v0.1.0-alpha.3",
+      artifactIntegrity: "PASS",
+    });
+
+    await writeFile(
+      path.join(installRoot, "hooks/hooks.json"),
+      '{"mutated":true}\n',
+    );
+    const rejected = spawnSync(
+      process.execPath,
+      ["skills/oxrail/scripts/verify-install.mjs"],
+      { cwd: installRoot, encoding: "utf8" },
+    );
+    expect(rejected.status).toBe(1);
+    expect(JSON.parse(rejected.stderr)).toMatchObject({
+      artifactIntegrity: "FAIL",
+      code: "HASH_MISMATCH:hooks/hooks.json",
+    });
+  });
+
+  it("provides a single-command trial readiness report", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "oxrail-trial-"));
+    const installRoot = path.join(temporary, "install");
+    const dataHome = path.join(temporary, "home");
+    await cp("release/oxrail", installRoot, { recursive: true });
+
+    const result = spawnSync(
+      process.execPath,
+      ["skills/oxrail/scripts/trial-check.mjs"],
+      {
+        cwd: installRoot,
+        env: { HOME: dataHome, PATH: process.env.PATH },
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      version: "0.1.0-alpha.3",
+      artifactIntegrity: "PASS",
+      stage: "INSTALLED",
+      readiness: "HOST_SETUP_REQUIRED",
+      optimization: "BYPASSED",
+      safetyProtection: "INACTIVE",
+      handoffProtection: "INACTIVE",
+      credentialProtection: "INACTIVE",
     });
     await expect(readdir(path.join(dataHome, ".oxrail-lab"))).rejects.toThrow();
   });

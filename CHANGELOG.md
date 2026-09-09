@@ -8,6 +8,17 @@ All notable project changes are documented here. The normative specification his
 
 - Real-host compatibility and benchmark evidence remain in progress.
 
+## [0.1.0-alpha.3] - 2026-09-09
+
+- Split the user product build and internal Lab into independent artifacts and
+  data roots; the product whitelist excludes recorders, experiments, evidence,
+  probes, benchmarks, demos, and monitoring entry points.
+- Added an immutable product-only preview ref contract, SHA-256 installed-file
+  verification, and a one-command local trial-readiness report.
+- Added the independent Lab safe-event protocol and bounded local collector.
+  No real-host monitoring, retrieval filtering, Handoff, or Credential claim is
+  activated by these foundations.
+
 ## [0.1.0-alpha.2] - 2026-09-06
 
 - Added a macOS-only, fixture-only private-input trial: a native secure field accepts only `oxrail_test_…` values, stores them as device-only Keychain items behind opaque references, clears an exactly matching system pasteboard value, proves local retrieval without exposing the value, and supports explicit revocation. It performs no network request and leaves Credential protection `INACTIVE`.
