@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { cp, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -68,6 +75,11 @@ describe("WP-LAB-001 product artifact", () => {
     const temporary = await mkdtemp(path.join(tmpdir(), "oxrail-integrity-"));
     const installRoot = path.join(temporary, "install");
     await cp("release/oxrail", installRoot, { recursive: true });
+    await mkdir(path.join(installRoot, ".git"));
+    await writeFile(
+      path.join(installRoot, ".git", "HEAD"),
+      "transport metadata\n",
+    );
 
     const verified = spawnSync(
       process.execPath,
@@ -76,8 +88,8 @@ describe("WP-LAB-001 product artifact", () => {
     );
     expect(verified.status, verified.stderr).toBe(0);
     expect(JSON.parse(verified.stdout)).toMatchObject({
-      version: "0.1.0-alpha.3",
-      immutableRef: "product-v0.1.0-alpha.3",
+      version: "0.1.0-alpha.4",
+      immutableRef: "product-v0.1.0-alpha.4",
       artifactIntegrity: "PASS",
     });
 
@@ -114,7 +126,7 @@ describe("WP-LAB-001 product artifact", () => {
     );
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
-      version: "0.1.0-alpha.3",
+      version: "0.1.0-alpha.4",
       artifactIntegrity: "PASS",
       stage: "INSTALLED",
       readiness: "HOST_SETUP_REQUIRED",

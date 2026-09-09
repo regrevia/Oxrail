@@ -8,7 +8,16 @@ All notable project changes are documented here. The normative specification his
 
 - Real-host compatibility and benchmark evidence remain in progress.
 
+## [0.1.0-alpha.4] - 2026-09-09
+
+- Made installed-artifact verification compatible with a Git clone by ignoring
+  only its root transport `.git` directory while continuing to hash and enforce
+  the exact product file allowlist.
+
 ## [0.1.0-alpha.3] - 2026-09-09
+
+- Superseded by alpha.4: the first product-only ref's verifier rejected the
+  root `.git` transport directory present in a normal Git clone.
 
 - Split the user product build and internal Lab into independent artifacts and
   data roots; the product whitelist excludes recorders, experiments, evidence,

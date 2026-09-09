@@ -29,7 +29,7 @@ Native Interaction Fidelity and real-host benchmark evidence are still in progre
 
 Requires a current Codex CLI with plugin marketplace support and Node.js 20 or newer.
 `main` is the latest accepted stable line; ongoing development happens on `dev` and reaches `main` only after a milestone gate passes.
-The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the product-only immutable `product-v0.1.0-alpha.3` development preview; it is not an accepted stable release.
+The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the product-only immutable `product-v0.1.0-alpha.4` development preview; it is not an accepted stable release.
 
 ```bash
 codex plugin marketplace add regrevia/Oxrail
@@ -51,7 +51,7 @@ Then:
 4. Start a new thread/session so the installed Skill is available.
 5. Ask: `Use Oxrail to run setup verification (oxrail doctor).`
 
-For alpha.3, the installed Skill can perform an exact package-integrity and
+For alpha.4, the installed Skill can perform an exact package-integrity and
 readiness check before any Browser action:
 
 ```bash
@@ -152,7 +152,7 @@ Handoff protection: INACTIVE
 
 `BYPASSED` is fail-open for the native browser capability, not proof of Oxrail protection. Safety and Handoff are shown as `ACTIVE` only when their required capabilities are verified and currently effective. Host-native approvals and safety controls remain authoritative.
 
-The current `0.1.0-alpha.3` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Retrieval filtering and the secure credential window are not product-active in this preview. The repository-only macOS Lab fixture does not change that status and is not shipped in the product artifact. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
+The current `0.1.0-alpha.4` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Retrieval filtering and the secure credential window are not product-active in this preview. The repository-only macOS Lab fixture does not change that status and is not shipped in the product artifact. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
 
 ## What v0.1 is testing
 
@@ -176,7 +176,7 @@ Internal evidence tools, controlled probes, and fixture-only credential demos
 live under `lab/`, use `~/.oxrail-lab`, and are not included in the product
 artifact. See `lab/README.md` for development-only commands.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), the [alpha.3 macOS trial](docs/trial/macos-alpha.3.md), the [v0.1 status](docs/status/v0.1.md), the [macOS real-host validation handoff](docs/handoff/macos-v0.1-validation.md), and the [compatibility policy](docs/compatibility/README.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), the [alpha.4 macOS trial](docs/trial/macos-alpha.4.md), the [v0.1 status](docs/status/v0.1.md), the [macOS real-host validation handoff](docs/handoff/macos-v0.1-validation.md), and the [compatibility policy](docs/compatibility/README.md).
 
 ## Official host documentation
 

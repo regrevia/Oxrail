@@ -12,6 +12,7 @@ const readJson = async (filename) =>
 const walk = async (directory, prefix = "") => {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (prefix === "" && entry.name === ".git" && entry.isDirectory()) continue;
     const relative = path.posix.join(prefix, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`SYMLINK_REJECTED:${relative}`);
     if (entry.isDirectory()) {
