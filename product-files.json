@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "source": ".codex-plugin/plugin.json",
+      "destination": ".codex-plugin/plugin.json"
+    },
+    { "source": "hooks/hooks.json", "destination": "hooks/hooks.json" },
+    {
+      "source": "skills/oxrail/SKILL.md",
+      "destination": "skills/oxrail/SKILL.md"
+    },
+    {
+      "source": "skills/oxrail/scripts/bootstrap.mjs",
+      "destination": "skills/oxrail/scripts/bootstrap.mjs"
+    },
+    {
+      "source": "skills/oxrail/scripts/doctor.mjs",
+      "destination": "skills/oxrail/scripts/doctor.mjs"
+    },
+    { "source": "dist/bootstrap.mjs", "destination": "dist/bootstrap.mjs" },
+    { "source": "dist/doctor.mjs", "destination": "dist/doctor.mjs" },
+    {
+      "source": "dist/hooks/pre-tool.mjs",
+      "destination": "dist/hooks/pre-tool.mjs"
+    },
+    {
+      "source": "dist/hooks/post-tool.mjs",
+      "destination": "dist/hooks/post-tool.mjs"
+    },
+    {
+      "source": "dist/product-dependencies.json",
+      "destination": "dist/product-dependencies.json"
+    },
+    { "source": "icon/oxrail.png", "destination": "icon/oxrail.png" },
+    { "source": "docs/product/README.md", "destination": "README.md" },
+    { "source": "SECURITY.md", "destination": "SECURITY.md" },
+    { "source": "LICENSE", "destination": "LICENSE" }
+  ]
+}

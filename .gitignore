@@ -15,3 +15,5 @@ test-results/
 # Host evidence is local until sanitized and explicitly selected for commit.
 evidence/**/raw/
 benchmarks/results/local/
+release/
+lab/dist/

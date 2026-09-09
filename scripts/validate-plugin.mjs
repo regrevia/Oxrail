@@ -1,7 +1,10 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
-const root = process.cwd();
+const rootFlag = process.argv.indexOf("--root");
+const root = path.resolve(
+  rootFlag === -1 ? process.cwd() : (process.argv[rootFlag + 1] ?? ""),
+);
 const load = async (file) =>
   JSON.parse(await readFile(path.join(root, file), "utf8"));
 const exists = async (file) =>
@@ -16,7 +19,10 @@ const fail = (message) => {
 
 const manifest = await load(".codex-plugin/plugin.json");
 const pkg = await load("package.json");
-const marketplace = await load(".agents/plugins/marketplace.json");
+const hasMarketplace = await exists(".agents/plugins/marketplace.json");
+const marketplace = hasMarketplace
+  ? await load(".agents/plugins/marketplace.json")
+  : undefined;
 
 if (manifest.name !== "oxrail") fail("manifest name must be oxrail");
 if (
@@ -41,8 +47,6 @@ for (const field of ["skills", "composerIcon", "logo"]) {
 }
 if (!(await exists("hooks/hooks.json")))
   fail("default hooks/hooks.json is missing");
-if (!(await exists("skills/oxrail/scripts/credential.mjs")))
-  fail("macOS credential demo launcher is missing");
 const hooks = await load("hooks/hooks.json");
 const expectedBuildStamp = ` --oxrail-build ${manifest.version}`;
 for (const event of [
@@ -71,22 +75,26 @@ for (const [event, groups] of Object.entries(hooks.hooks ?? {})) {
     }
   }
 }
-const entry = marketplace.plugins?.find((item) => item.name === "oxrail");
-if (marketplace.name !== "oxrail" || !entry)
-  fail("marketplace does not expose oxrail");
-if (
-  entry?.source?.source !== "url" ||
-  entry?.source?.url !== "https://github.com/regrevia/Oxrail.git" ||
-  entry?.source?.ref !== `v${manifest.version}`
-) {
-  fail("marketplace must install the manifest's immutable GitHub version tag");
-}
-if (
-  !entry?.policy?.installation ||
-  !entry?.policy?.authentication ||
-  !entry?.category
-) {
-  fail("marketplace policy/category fields are incomplete");
+if (marketplace) {
+  const entry = marketplace.plugins?.find((item) => item.name === "oxrail");
+  if (marketplace.name !== "oxrail" || !entry)
+    fail("marketplace does not expose oxrail");
+  if (
+    entry?.source?.source !== "url" ||
+    entry?.source?.url !== "https://github.com/regrevia/Oxrail.git" ||
+    entry?.source?.ref !== `v${manifest.version}`
+  ) {
+    fail(
+      "marketplace must install the manifest's immutable GitHub version tag",
+    );
+  }
+  if (
+    !entry?.policy?.installation ||
+    !entry?.policy?.authentication ||
+    !entry?.category
+  ) {
+    fail("marketplace policy/category fields are incomplete");
+  }
 }
 
 const skill = await readFile(path.join(root, "skills/oxrail/SKILL.md"), "utf8");
