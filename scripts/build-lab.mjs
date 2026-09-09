@@ -29,7 +29,7 @@ for (const filename of probeSources) {
 }
 const probeBuildHash = probeHash.digest("hex");
 
-const result = await build({
+const evidenceResult = await build({
   entryPoints: {
     "verify-evidence": "lab/evidence/src/verify-cli.ts",
     "release-gate": "lab/evidence/src/release-gate-cli.ts",
@@ -37,6 +37,18 @@ const result = await build({
   },
   outdir: outputRoot,
   outExtension: { ".js": ".mjs" },
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  target: "node20",
+  sourcemap: false,
+  legalComments: "none",
+  metafile: true,
+});
+
+const monitorResult = await build({
+  entryPoints: ["lab/monitor/index.ts"],
+  outfile: `${outputRoot}/monitor/index.mjs`,
   bundle: true,
   format: "esm",
   platform: "node",
@@ -88,8 +100,10 @@ await writeFile(
     {
       schemaVersion: 1,
       build: "lab",
-      inputs: Object.keys(result.metafile.inputs).sort(),
-      outputs: Object.keys(result.metafile.outputs).sort(),
+      evidenceInputs: Object.keys(evidenceResult.metafile.inputs).sort(),
+      evidenceOutputs: Object.keys(evidenceResult.metafile.outputs).sort(),
+      monitorInputs: Object.keys(monitorResult.metafile.inputs).sort(),
+      monitorOutputs: Object.keys(monitorResult.metafile.outputs).sort(),
     },
     null,
     2,

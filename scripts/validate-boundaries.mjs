@@ -19,3 +19,23 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log("product dependency boundaries: ok");
+
+const labManifest = JSON.parse(
+  await readFile("lab/dist/lab-dependencies.json", "utf8"),
+);
+const forbiddenMonitorInputs = [
+  "hooks/",
+  "packages/core/",
+  "packages/host-openai/",
+  "packages/handoff-extension/",
+];
+const monitorViolations = labManifest.monitorInputs.filter((input) =>
+  forbiddenMonitorInputs.some((prefix) => input.startsWith(prefix)),
+);
+if (monitorViolations.length > 0) {
+  console.error(
+    `Lab monitor dependency boundary violation:\n${monitorViolations.join("\n")}`,
+  );
+  process.exit(1);
+}
+console.log("Lab monitor dependency boundaries: ok");
