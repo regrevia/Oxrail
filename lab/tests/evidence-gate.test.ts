@@ -9,11 +9,11 @@ import { describe, expect, it } from "vitest";
 import {
   selectAcceptedReleaseManifest,
   validateEvidenceManifestFile,
-} from "../packages/evidence/src/index.js";
+} from "../evidence/src/index.js";
 import {
   EvidenceManifestSchema,
   toolRegistryManifestBinding,
-} from "../packages/protocol/src/index.js";
+} from "../../packages/protocol/src/index.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 

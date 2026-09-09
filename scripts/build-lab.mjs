@@ -10,10 +10,10 @@ const probeSources = [
   "package.json",
   "pnpm-lock.yaml",
   "scripts/build-lab.mjs",
-  "packages/handoff-extension/chrome/manifest.json",
+  "lab/probes/handoff-control/manifest.json",
   "packages/handoff-extension/src/presenter.ts",
-  "packages/handoff-extension/src/probe.ts",
-  "packages/handoff-extension/src/service-worker.ts",
+  "lab/probes/handoff-control/probe.ts",
+  "lab/probes/handoff-control/service-worker.ts",
 ];
 const probeHash = createHash("sha256");
 const hashPart = (value) => {
@@ -31,9 +31,9 @@ const probeBuildHash = probeHash.digest("hex");
 
 const result = await build({
   entryPoints: {
-    "verify-evidence": "packages/evidence/src/verify-cli.ts",
-    "release-gate": "packages/evidence/src/release-gate-cli.ts",
-    pilot: "packages/evidence/src/pilot-cli.ts",
+    "verify-evidence": "lab/evidence/src/verify-cli.ts",
+    "release-gate": "lab/evidence/src/release-gate-cli.ts",
+    pilot: "lab/evidence/src/pilot-cli.ts",
   },
   outdir: outputRoot,
   outExtension: { ".js": ".mjs" },
@@ -47,7 +47,7 @@ const result = await build({
 });
 
 await build({
-  entryPoints: ["packages/handoff-extension/src/service-worker.ts"],
+  entryPoints: ["lab/probes/handoff-control/service-worker.ts"],
   outfile: `${outputRoot}/handoff-control/service-worker.js`,
   bundle: true,
   define: {
@@ -60,7 +60,7 @@ await build({
   legalComments: "none",
 });
 await copyFile(
-  "packages/handoff-extension/chrome/manifest.json",
+  "lab/probes/handoff-control/manifest.json",
   `${outputRoot}/handoff-control/manifest.json`,
 );
 await writeFile(

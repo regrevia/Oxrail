@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const script = path.resolve("skills/oxrail/scripts/credential.mjs");
+const script = path.resolve("lab/scripts/credential.mjs");
 const unavailable = {
   schemaVersion: 1,
   status: "ERROR",

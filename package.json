@@ -13,6 +13,8 @@
     "build:all": "pnpm build && pnpm build:lab",
     "bootstrap": "node dist/bootstrap.mjs",
     "clean": "node scripts/clean.mjs",
+    "lab:credential-demo": "node lab/scripts/credential.mjs",
+    "lab:legacy-demo": "node lab/scripts/legacy-demo.mjs",
     "doctor": "node dist/doctor.mjs",
     "fixture:serve": "node benchmarks/harness/server.mjs",
     "format:check": "prettier --check .",
@@ -22,6 +24,7 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && vitest run",
     "test:product": "pnpm build && vitest run tests/product-artifact.test.ts",
+    "test:lab": "pnpm build:lab && vitest run --config vitest.lab.config.ts",
     "test:fixture": "playwright test tests/native-fixture.spec.ts",
     "validate:spec": "node scripts/validate-spec.mjs",
     "validate:plugin": "node scripts/validate-plugin.mjs",
@@ -30,7 +33,7 @@
     "verify:evidence": "pnpm build:lab && node lab/dist/verify-evidence.mjs",
     "release:gate": "pnpm build:lab && node lab/dist/release-gate.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm package:product && pnpm validate:boundaries && pnpm validate:product-artifact && node scripts/validate-plugin.mjs --root release/oxrail && pnpm validate:plugin && pnpm validate:spec && pnpm verify:evidence && pnpm secret:scan"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:lab && pnpm package:product && pnpm validate:boundaries && pnpm validate:product-artifact && node scripts/validate-plugin.mjs --root release/oxrail && pnpm validate:plugin && pnpm validate:spec && pnpm verify:evidence && pnpm secret:scan"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",

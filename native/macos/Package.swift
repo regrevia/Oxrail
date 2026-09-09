@@ -8,9 +8,7 @@ let package = Package(
     products: [
         .library(name: "OxrailCodeIdentity", targets: ["OxrailCodeIdentity"]),
         .library(name: "OxrailCredentialRegistry", targets: ["OxrailCredentialRegistry"]),
-        .library(name: "OxrailKeychainProbe", targets: ["OxrailKeychainProbe"]),
-        .executable(name: "oxrail-credential-demo", targets: ["OxrailCredentialDemoCLI"]),
-        .executable(name: "oxrail-keychain-probe", targets: ["OxrailKeychainProbeCLI"]),
+        .library(name: "OxrailCredentialEnclave", targets: ["OxrailCredentialEnclave"]),
     ],
     targets: [
         .target(
@@ -26,26 +24,6 @@ let package = Package(
             dependencies: ["OxrailCredentialRegistry"],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
-        .target(
-            name: "OxrailCredentialDemo",
-            dependencies: ["OxrailCredentialEnclave", "OxrailCredentialRegistry"],
-            linkerSettings: [
-                .linkedFramework("AppKit"),
-                .linkedFramework("Security"),
-            ]
-        ),
-        .target(
-            name: "OxrailKeychainProbe",
-            linkerSettings: [.linkedFramework("Security")]
-        ),
-        .executableTarget(
-            name: "OxrailKeychainProbeCLI",
-            dependencies: ["OxrailKeychainProbe"]
-        ),
-        .executableTarget(
-            name: "OxrailCredentialDemoCLI",
-            dependencies: ["OxrailCredentialDemo"]
-        ),
         .testTarget(
             name: "OxrailCodeIdentityTests",
             dependencies: ["OxrailCodeIdentity"]
@@ -58,14 +36,6 @@ let package = Package(
             name: "OxrailCredentialEnclaveTests",
             dependencies: ["OxrailCredentialEnclave", "OxrailCredentialRegistry"],
             resources: [.copy("Fixtures")]
-        ),
-        .testTarget(
-            name: "OxrailCredentialDemoTests",
-            dependencies: ["OxrailCredentialDemo"]
-        ),
-        .testTarget(
-            name: "OxrailKeychainProbeTests",
-            dependencies: ["OxrailKeychainProbe"]
         ),
     ]
 )

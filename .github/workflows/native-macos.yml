@@ -5,10 +5,12 @@ on:
     branches: [main, dev]
     paths:
       - native/macos/**
+      - lab/native/macos/**
       - .github/workflows/native-macos.yml
   pull_request:
     paths:
       - native/macos/**
+      - lab/native/macos/**
       - .github/workflows/native-macos.yml
   workflow_dispatch:
 
@@ -16,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  keychain-round-trip:
+  product-foundations:
     runs-on: macos-14
     timeout-minutes: 10
     defaults:
@@ -28,6 +30,19 @@ jobs:
           persist-credentials: false
       - run: swift test
       - run: swift build -c release
+
+  keychain-round-trip:
+    runs-on: macos-14
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: lab/native/macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: swift build -c release
+      - run: swift test
       - name: Reject non-explicit credential demo use
         run: |
           if output="$(.build/release/oxrail-credential-demo)"; then

@@ -7,7 +7,7 @@ import {
   EvidenceTraceSchema,
   type EvidenceManifest,
   type EvidenceTrace,
-} from "../../protocol/src/index.js";
+} from "../../../packages/protocol/src/index.js";
 
 import { sanitizeForEvidence, sanitizedJson } from "./sanitize.js";
 

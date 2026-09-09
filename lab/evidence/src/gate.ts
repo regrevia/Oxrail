@@ -18,8 +18,8 @@ import {
   type EvidenceManifest,
   type EvidenceTrace,
   type HostProfile,
-} from "../../protocol/src/index.js";
-import { deriveHostMode } from "../../core/src/index.js";
+} from "../../../packages/protocol/src/index.js";
+import { deriveHostMode } from "../../../packages/core/src/index.js";
 
 const digest = (contents: string | Buffer): string =>
   createHash("sha256").update(contents).digest("hex");

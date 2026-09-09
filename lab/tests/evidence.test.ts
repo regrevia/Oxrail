@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   atomicWriteSanitizedJson,
   writeEvidenceTrace,
-} from "../packages/evidence/src/index.js";
+} from "../evidence/src/index.js";
 
 describe("sanitized atomic evidence", () => {
   it("redacts secrets and URL paths before the first byte reaches disk", async () => {

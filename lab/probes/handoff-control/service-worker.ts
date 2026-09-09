@@ -1,4 +1,4 @@
-import type { HandoffChromeApi } from "./presenter.js";
+import type { HandoffChromeApi } from "../../../packages/handoff-extension/src/presenter.js";
 import { runSameTabProbe, type SameTabProbeTarget } from "./probe.js";
 
 declare const __OXRAIL_HANDOFF_PROBE_BUILD_HASH__: string;

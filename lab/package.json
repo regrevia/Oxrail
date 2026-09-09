@@ -1,0 +1,13 @@
+{
+  "name": "@oxrail-lab/tools",
+  "version": "0.1.0-alpha.2",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "credential:demo": "node scripts/credential.mjs",
+    "legacy-demo": "node scripts/legacy-demo.mjs"
+  }
+}

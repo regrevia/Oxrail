@@ -4,12 +4,12 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createResetReceipt } from "../benchmarks/harness/server.mjs";
+import { createResetReceipt } from "../../benchmarks/harness/server.mjs";
 import {
   preparePilot,
   recordPilotReceipt,
   type PilotRunnerInput,
-} from "../packages/evidence/src/pilot.js";
+} from "../evidence/src/pilot.js";
 
 const temporaryDirectories: string[] = [];
 const manifestPath = "benchmarks/manifests/v0.1-luna-pilot.json";

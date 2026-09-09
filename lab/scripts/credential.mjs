@@ -40,20 +40,20 @@ const platform = process.env.OXRAIL_TEST_PLATFORM ?? process.platform;
 if (platform !== "darwin") emit(publicError("UNAVAILABLE"), 1);
 
 process.umask(0o077);
-const skillDirectory = path.dirname(fileURLToPath(import.meta.url));
-const pluginRoot = path.resolve(skillDirectory, "../../..");
-const packageRoot = path.join(pluginRoot, "native", "macos");
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const labRoot = path.resolve(scriptDirectory, "..");
+const packageRoot = path.join(labRoot, "native", "macos");
 let version;
 try {
   version = JSON.parse(
-    readFileSync(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"),
+    readFileSync(path.join(labRoot, "package.json"), "utf8"),
   ).version;
 } catch {
   emit(publicError("UNAVAILABLE"), 1);
 }
 const buildRoot = path.join(
   homedir(),
-  ".oxrail",
+  ".oxrail-lab",
   "credential-demo",
   String(version).replace(/[^A-Za-z0-9._-]/g, "_"),
 );

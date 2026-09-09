@@ -6,7 +6,7 @@ const manifest = JSON.parse(
 const forbidden = [
   "lab/",
   "benchmarks/",
-  "packages/evidence/",
+  "lab/evidence/",
   "packages/native-fidelity/",
 ];
 const violations = manifest.inputs.filter((input) =>

@@ -6,12 +6,12 @@ import type {
   ChromeTabView,
   ChromeWindowView,
   HandoffChromeApi,
-} from "../packages/handoff-extension/src/presenter.js";
+} from "../../packages/handoff-extension/src/presenter.js";
 import {
   runSameTabProbe,
   type SameTabProbeMetadata,
   type SameTabProbeTarget,
-} from "../packages/handoff-extension/src/probe.js";
+} from "../probes/handoff-control/probe.js";
 
 const fixtureUrl = `http://127.0.0.1:4173/?reset=${"f".repeat(64)}`;
 const metadata: SameTabProbeMetadata = {
@@ -445,7 +445,7 @@ describe("manual MV3 same-tab evidence probe", () => {
 
   it("ships a permission-minimal manual-action MV3 manifest", async () => {
     const manifest = JSON.parse(
-      await readFile("packages/handoff-extension/chrome/manifest.json", "utf8"),
+      await readFile("lab/probes/handoff-control/manifest.json", "utf8"),
     ) as Record<string, unknown>;
 
     expect(manifest.manifest_version).toBe(3);
@@ -458,7 +458,7 @@ describe("manual MV3 same-tab evidence probe", () => {
     );
 
     const worker = await readFile(
-      "packages/handoff-extension/src/service-worker.ts",
+      "lab/probes/handoff-control/service-worker.ts",
       "utf8",
     );
     expect(worker).not.toMatch(/setBadgeText|setTitle/);

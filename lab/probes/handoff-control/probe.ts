@@ -4,7 +4,7 @@ import {
   type PresentedSameTab,
   presentSameTab,
   restoreSameTab,
-} from "./presenter.js";
+} from "../../../packages/handoff-extension/src/presenter.js";
 
 const BUILD_HASH = /^[a-f0-9]{64}$/;
 const EXTENSION_ID = /^[a-p]{32}$/;

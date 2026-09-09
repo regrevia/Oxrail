@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CredentialKeychainProbeResultSchema } from "../packages/protocol/src/index.js";
+import { CredentialKeychainProbeResultSchema } from "../../packages/protocol/src/index.js";
 
 const canary = "oxrail_api_key_probe_output_canary";
 

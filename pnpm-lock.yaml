@@ -30,9 +30,11 @@ importers:
         specifier: 4.1.5
         version: 4.1.5
 
-  packages/core: {}
+  lab: {}
 
-  packages/evidence: {}
+  lab/evidence: {}
+
+  packages/core: {}
 
   packages/handoff-extension: {}
 
