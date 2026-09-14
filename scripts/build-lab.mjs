@@ -58,6 +58,48 @@ const monitorResult = await build({
   metafile: true,
 });
 
+const hostHookResult = await build({
+  entryPoints: {
+    "codex-hook-marketplace/plugins/oxrail-lab-codex-hook/dist/hook":
+      "lab/host-codex/hook-cli.ts",
+    "chrome-hook-trial": "lab/host-codex/trial-cli.ts",
+  },
+  outdir: outputRoot,
+  outExtension: { ".js": ".mjs" },
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  target: "node20",
+  sourcemap: false,
+  legalComments: "none",
+  metafile: true,
+});
+const labPluginRoot = `${outputRoot}/codex-hook-marketplace/plugins/oxrail-lab-codex-hook`;
+await mkdir(`${labPluginRoot}/.codex-plugin`, {
+  recursive: true,
+});
+await mkdir(`${labPluginRoot}/hooks`, { recursive: true });
+await mkdir(`${outputRoot}/codex-hook-marketplace/.agents/plugins`, {
+  recursive: true,
+});
+await copyFile(
+  "lab/host-codex/plugin/.codex-plugin/plugin.json",
+  `${labPluginRoot}/.codex-plugin/plugin.json`,
+);
+await copyFile(
+  "lab/host-codex/plugin/plugin.json",
+  `${labPluginRoot}/plugin.json`,
+);
+await copyFile(
+  "lab/host-codex/plugin/hooks/hooks.json",
+  `${labPluginRoot}/hooks/hooks.json`,
+);
+await copyFile("lab/host-codex/plugin/README.md", `${labPluginRoot}/README.md`);
+await copyFile(
+  "lab/host-codex/marketplace.json",
+  `${outputRoot}/codex-hook-marketplace/.agents/plugins/marketplace.json`,
+);
+
 await build({
   entryPoints: ["lab/probes/handoff-control/service-worker.ts"],
   outfile: `${outputRoot}/handoff-control/service-worker.js`,
@@ -104,6 +146,8 @@ await writeFile(
       evidenceOutputs: Object.keys(evidenceResult.metafile.outputs).sort(),
       monitorInputs: Object.keys(monitorResult.metafile.inputs).sort(),
       monitorOutputs: Object.keys(monitorResult.metafile.outputs).sort(),
+      hostHookInputs: Object.keys(hostHookResult.metafile.inputs).sort(),
+      hostHookOutputs: Object.keys(hostHookResult.metafile.outputs).sort(),
     },
     null,
     2,

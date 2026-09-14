@@ -2,6 +2,11 @@ import { z } from "zod";
 
 const hexRef = z.string().regex(/^[a-f0-9]{64}$/);
 const boundedId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+export const ToolNameSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^[A-Za-z0-9_.:-]+$/);
 
 export const SourceSchema = z.enum([
   "HOST_HOOK",
@@ -99,6 +104,7 @@ export const SafeEventSchema = z
     toolAlias: z
       .enum(["NATIVE_BROWSER", "BUILTIN_BROWSER", "OTHER_REGISTERED"])
       .nullable(),
+    toolName: ToolNameSchema.nullable().optional(),
     granularity: GranularitySchema,
     outcome: z.enum(["SUCCESS", "FAILURE", "DENIED", "UNKNOWN"]),
     metrics: metricsSchema,

@@ -39,3 +39,14 @@ if (monitorViolations.length > 0) {
   process.exit(1);
 }
 console.log("Lab monitor dependency boundaries: ok");
+
+const hostHookViolations = labManifest.hostHookInputs.filter((input) =>
+  forbiddenMonitorInputs.some((prefix) => input.startsWith(prefix)),
+);
+if (hostHookViolations.length > 0) {
+  console.error(
+    `Lab Host Hook dependency boundary violation:\n${hostHookViolations.join("\n")}`,
+  );
+  process.exit(1);
+}
+console.log("Lab Host Hook dependency boundaries: ok");

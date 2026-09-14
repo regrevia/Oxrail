@@ -15,6 +15,7 @@
     "clean": "node scripts/clean.mjs",
     "lab:credential-demo": "node lab/scripts/credential.mjs",
     "lab:legacy-demo": "node lab/scripts/legacy-demo.mjs",
+    "lab:chrome-hook-trial": "pnpm build:lab && node lab/dist/chrome-hook-trial.mjs",
     "doctor": "node dist/doctor.mjs",
     "fixture:serve": "node benchmarks/harness/server.mjs",
     "format:check": "prettier --check .",

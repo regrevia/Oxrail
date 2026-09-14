@@ -1,0 +1,20 @@
+{
+  "name": "oxrail-lab-local",
+  "interface": {
+    "displayName": "Oxrail Lab Local"
+  },
+  "plugins": [
+    {
+      "name": "oxrail-lab-codex-hook",
+      "source": {
+        "source": "local",
+        "path": "./plugins/oxrail-lab-codex-hook"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
