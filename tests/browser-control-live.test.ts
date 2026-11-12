@@ -241,6 +241,86 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
   );
 
   it(
+    "clicks a control a smooth-scrolling page has to animate into view",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-smooth-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      const smooth = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>fired:</title>
+<style>html{scroll-behavior:smooth}body{margin:0}</style></head>
+<body>
+  <button id="top" onclick="document.title += ',top'">Top action</button>
+  <div style="height:4000px"></div>
+  <button id="far" onclick="document.title += ',far'">Far action</button>
+  <div style="height:800px"></div>
+</body></html>`)}`;
+      try {
+        await route.open({ url: smooth });
+        const snapshot = await route.read();
+        const far = snapshot.controls.find(
+          (control) => control.name === "Far action",
+        );
+        expect(far, "the far control is numbered").toBeDefined();
+        if (far === undefined) throw new Error("no far control");
+
+        // scrollIntoView animates on this page, so the rect it reports right
+        // after the call is the one from before the scroll: clicking there
+        // reported success while the page never heard the press.
+        await route.click({ ref: far.ref });
+        expect((await route.state()).title).toBe("fired:,far");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "clicks a control whose own child takes the press",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-child-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      const nested = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>fired:</title></head>
+<body>
+  <button id="nested" onclick="document.title += ',nested'"
+          style="padding:0;border:0;background:none">
+    <span style="display:block;padding:14px">Nested label</span>
+  </button>
+</body></html>`)}`;
+      try {
+        await route.open({ url: nested });
+        const snapshot = await route.read();
+        const nestedControl = snapshot.controls.find(
+          (control) => control.name === "Nested label",
+        );
+        if (nestedControl === undefined) throw new Error("no nested control");
+        // The press lands on the span and bubbles to the button: refusing here
+        // would be a false positive that blocks a working control.
+        await route.click({ ref: nestedControl.ref });
+        expect((await route.state()).title).toBe("fired:,nested");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
     "reclaims an idle browser without being asked",
     { timeout: 90_000 },
     async () => {

@@ -2,6 +2,17 @@
 
 All notable project changes are documented here. The normative specification history remains in `spec/OXRAIL_SPEC.md`.
 
+## [0.1.0-alpha.8] - 2026-11-13
+
+- 滚动到目标后的坐标不再取错：`scrollIntoView` 以前跟着页面的 `scroll-behavior:smooth`
+  一起动画，紧随其后读到的矩形还是滚动前的位置，合入视口后又落在这个控件之外，于是点到了别处。
+  现在强制瞬时滚动，只使用视口内可见的那部分矩形，不再把控件外的点夹进视口。复现页
+  （`html{scroll-behavior:smooth}`，按钮在 4000px 之后）从「返回 clicked 但页面没收到」
+  变为页面收到。点击耗时 26 ms → 22 ms。
+- 覆盖判定不再接受祖先：`body` 包含每一个控件，旧规则把这种包含当成命中，遮罩、粘性页头
+  挡住的控件照样上报成功。只接受控件本身和它的后代（按下会冒泡回控件），`pointer-events:none`
+  的控件因此被正确判定为收不到按下。新增 2 个真实浏览器回归用例。
+
 ## [0.1.0-alpha.7] - 2026-11-13
 
 - Fixed a false success in `browser_click`: a control fully covered by a modal

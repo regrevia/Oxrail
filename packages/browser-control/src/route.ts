@@ -447,24 +447,44 @@ export class CdpBrowserRoute implements BrowserRoute {
   })()`
   };
   if (!el) return { found: false };
-  el.scrollIntoView({ block: "center", inline: "center" });
+  /* Instant, not smooth: a page with scroll-behavior:smooth animates this call,
+     and the rect read one line later is the one it had before the scroll, so
+     every point below would be computed against where the control used to be. */
+  el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
   const label = (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("title") || "").replace(/\\s+/g, " ").trim().slice(0, 80);
   const box = el.getBoundingClientRect();
   if (box.width < 2 || box.height < 2) return { found: true, label, blocked: "it has no area on screen to click" };
+  /* Only the part of the control the viewport shows can be pressed. Clamping a
+     point that lies outside it invents a place the control is not, and the
+     press then lands wherever the clamp put it. */
+  const seenLeft = Math.max(box.left, 0);
+  const seenTop = Math.max(box.top, 0);
+  const seenRight = Math.min(box.right, innerWidth);
+  const seenBottom = Math.min(box.bottom, innerHeight);
+  if (seenRight - seenLeft < 2 || seenBottom - seenTop < 2)
+    return { found: true, label, blocked: "it is outside the visible area even after scrolling it into view" };
   /* The point must be one where a real press would reach this control: an
      overlay, a sticky header or a modal owns that pixel otherwise, and clicking
      it anyway would report success while the page never heard the press. Five
      samples, centre first, so a control covered only in the middle still gets
-     clicked where it is reachable. */
+     clicked where it is reachable.
+     A descendant counts, because the press bubbles up to the control. An
+     ancestor does not: body contains every control, and an element with
+     pointer-events:none is painted under the thing that really takes the
+     press, so a click there is heard by the page and by nobody the caller
+     asked for. */
   const within = (value, limit) => Math.min(Math.max(value, 1), Math.max(limit - 2, 1));
   const spread = [[0.5, 0.5], [0.3, 0.5], [0.7, 0.5], [0.5, 0.3], [0.5, 0.7]];
   for (const [fx, fy] of spread) {
-    const x = within(box.x + box.width * fx, innerWidth);
-    const y = within(box.y + box.height * fy, innerHeight);
+    const x = within(seenLeft + (seenRight - seenLeft) * fx, innerWidth);
+    const y = within(seenTop + (seenBottom - seenTop) * fy, innerHeight);
     const hit = document.elementFromPoint(x, y);
-    if (hit !== null && (hit === el || el.contains(hit) || hit.contains(el))) return { found: true, x, y, label };
+    if (hit !== null && (hit === el || el.contains(hit))) return { found: true, x, y, label };
   }
-  const top = document.elementFromPoint(within(box.x + box.width / 2, innerWidth), within(box.y + box.height / 2, innerHeight));
+  const top = document.elementFromPoint(
+    within(seenLeft + (seenRight - seenLeft) / 2, innerWidth),
+    within(seenTop + (seenBottom - seenTop) / 2, innerHeight),
+  );
   const owner = top === null
     ? "the page has nothing at that point"
     : "it is behind " + top.tagName.toLowerCase() + (top.id ? "#" + top.id : "") + (typeof top.className === "string" && top.className.trim() !== "" ? "." + top.className.trim().split(/\\s+/).slice(0, 2).join(".") : "") + " \\"" + (top.innerText || top.getAttribute("aria-label") || "").replace(/\\s+/g, " ").trim().slice(0, 60) + "\\"";

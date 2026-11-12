@@ -83,13 +83,13 @@ Screenshots are written under `<state dir>/shots` and returned both as an image 
 
 `browser_shot` captures in CSS pixels at any device pixel ratio, so a coordinate read off the picture can be handed straight back to `browser_click`. A viewport capture is exactly `window.innerWidth` by `window.innerHeight`, and `fullPage` is the viewport width by the full document height; both account for how far the page is scrolled.
 
-`browser_click` resolves a control, scrolls it into view, and hit-tests up to five points inside it with `document.elementFromPoint`, centre first. A point counts only when it belongs to the control or to one of its ancestors or children, so a partly covered control still clicks at a reachable point. When every sample is covered the call refuses before any input is dispatched and names what is in the way:
+`browser_click` resolves a control, scrolls it into view, and hit-tests up to five points inside it with `document.elementFromPoint`, centre first. The scroll is instant even on a page that sets `scroll-behavior:smooth`: an animated scroll reports the rectangle the control had before it moved, and a point taken from that rectangle is somewhere else by the time the press is sent. Only the part of the control the viewport actually shows is sampled, so a point is never clamped into a place the control does not occupy. A point counts when it belongs to the control or to one of its descendants — the press bubbles back up — but not to an ancestor, because `body` contains every control and an element painted under its parent is not the element the caller asked for. A control covered only in its middle still clicks at a reachable point. When every sample is covered the call refuses before any input is dispatched and names what is in the way:
 
 ```
 "Continue" cannot be clicked because it is behind div#sheet "Close Sign up to continue". Close or dismiss what covers it, then call browser_view and retry.
 ```
 
-A control with no area on screen is reported separately: `"…" cannot be clicked: it has no area on screen to click.` Both messages are a fact about the page, not a retry suggestion; the fix is to dismiss the layer or scroll the thing into view, then read the page again.
+A control with no area on screen is reported separately: `"…" cannot be clicked: it has no area on screen to click.` So is a control that stays out of the viewport after scrolling: `"…" cannot be clicked because it is outside the visible area even after scrolling it into view.` These messages are a fact about the page, not a retry suggestion; the fix is to dismiss the layer or scroll the thing into view, then read the page again.
 
 ## Not claimed
 
