@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.24
+# Oxrail — 唯一实现规范（SPEC）v1.0.25
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,9 +48,9 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.24
+  spec_version: 1.0.25
   status: AUTHORITATIVE
-  effective_date: 2026-09-08
+  effective_date: 2026-11-12
   evidence_cutoff: 2026-09-05
   previous_versions:
     - OXRAIL_SPEC_v0.1_review-draft.md
@@ -58,8 +58,8 @@ spec:
     - OXRAIL_SPEC_v0.2.0_CANONICAL.md
     - OXRAIL_SPEC_v0.3_partial.backup.md
   owner: Oxrail maintainers
-  section_count: 52
-  work_package_count: 107
+  section_count: 53
+  work_package_count: 108
   companion_files:
     - OXRAIL_SPEC_INDEX.json
     - OXRAIL_SPEC.sha256
@@ -534,7 +534,10 @@ Oxrail 不是：
 - CAPTCHA 破解器；
 - 代理、隐身、反检测或风控规避框架；
 - 通用 browser write transport；
+- 默认启用的 Native Computer Use 替代品；
 - 通过文字规则伪装成安全边界的 Prompt Skill。
+
+SEC-52 定义的 opt-in Browser Control route 不推翻上述定位：它默认关闭，必须由使用者显式配置，只驱动自有 Chromium 进程，且不得被称为通用 write transport 或 Native 路由的替代品。
 
 ## 2.5 原生写执行权原则
 
@@ -560,6 +563,8 @@ Oxrail 禁止默认：
 - 自己 submit；
 - 自己执行 reload/back；
 - 通过扩展或 CDP 代替 Native Computer Use 发起写命令。
+
+上述禁令约束默认路径与 Native 路由。SEC-52 的 opt-in Browser Control route 不属于该默认路径：它不接管任何 Native 调用，不提升 Native 路由的可靠性，也不改变本节对默认写执行权的分配。
 
 若未来为了可靠性必须由 Oxrail 执行上述写操作，项目必须触发 K12：明确转型为 Browser Agent/Driver，或停止该路线；不得继续宣称 thin interposer。
 
@@ -1231,6 +1236,23 @@ fixed signed native template, not Agent/page-defined UI
 ```
 
 任一环节未被当前 Host Profile、独立签名信任根与 SecretLeakBench 证明时，Credential Channel 必须显示 `INACTIVE`；不得回退到聊天或普通本地秘密存储。只有 fixture consumer 时只能显示 `FIXTURE_ONLY/EXPERIMENTAL`，不能显示公开可用的 Credential protection `ACTIVE`。
+
+### G16 — Opt-in Browser Control Route & Explicit Enablement
+
+必须逐项证明：
+
+```text
+host MCP config explicitly names this server
+→ no tool surface exists before that config exists
+→ own Chromium process and own profile dir; never the person's browser
+→ Native packages do not import the CDP route
+→ route actions are NOT Hook-visible, NOT Guard-mediated, NOT Native-equivalent
+→ idle reclaim never runs while someone is watching; state reports pid/profile/idleMs/closesInMs
+→ an early browser death fails in milliseconds and names the cause
+→ saved sign-ins stay inside one profile; no cross-profile export
+```
+
+任一环节不满足时，Browser Control 必须显示 `INACTIVE`；README、Doctor、证据与 release note 不得出现“支持浏览器控制”“等价于 Native Computer Use”“经 Oxrail 安全校验”或“默认可用”的表述。
 
 ## 6.10 Gate 输出
 
@@ -5845,6 +5867,8 @@ Benchmark 分析：
 - 输入录制/重放框架；
 - 通用 CDP write transport。
 
+唯一例外是 SEC-52 的 opt-in Browser Control route：它默认关闭、由使用者显式配置、只服务自有 Chromium 进程，不接管使用者浏览器，也不构成对 Native Computer Use 的替代。
+
 ## 30.4 引入重大依赖的 Gate
 
 必须先创建 ADR，回答：
@@ -6049,6 +6073,12 @@ fixture 不使用真实密码、OTP 或第三方账户。
 | `TEST-NIF-021` | ordinary action pass-through | canonical low-level input 无未授权变化 |
 | `TEST-NIF-022` | no-op Oxrail overlay policy | 页面 layout/focus/scroll/hit-test 无变化 |
 | `TEST-NIF-023` | normal-action false block | 全部普通 primitive 均不被 Oxrail 错误阻止 |
+| `TEST-BCTL-001` | opt-in route 未配置时不可达 | 未显式配置 MCP server 时不存在 Browser Control 工具、不启动进程，也不出现 Hook 命中或 Native 替代声明 |
+| `TEST-BCTL-002` | 自有浏览器进程与 profile 隔离 | 路由只驱动自己启动的 Chromium 与自己创建的 profile，不接管使用者浏览器；Native package 不 import CDP 路由 |
+| `TEST-BCTL-003` | 控件编号在重绘后仍可解析 | 重绘后旧编号要么重新解析到正确目标，要么明确报错；不得静默点到错误元素 |
+| `TEST-BCTL-004` | 浏览器早死与空闲回收 | 启动即死亡在毫秒级报错并给出原因；空闲回收不发生在仍在观察时，`state` 如实报告 `pid`/`idleMs`/`closesInMs` |
+
+`TEST-BCTL-*` 不是 Native parity 用例：不得计入 NIF 矩阵，也不得用于支持任何“等价于 Native”的声明；其覆盖对象是 SEC-52 的路由自身合同。
 
 每个用例至少覆盖：
 
@@ -7021,6 +7051,7 @@ Kill Criteria 是强制决策，不是“值得关注”的风险描述。触发
 | `KILL-K31` | 错误 service/origin/purpose/consumer、过期、撤销或旧 generation 的 credentialRef 仍可消费 | Release fail；撤销受影响 grants/items，Credential Channel 保持 INACTIVE |
 | `KILL-K32` | Agent 在 credential-input lease 生效前触发/观察 API key generate/reveal，lease 中任一 Agent path 可运行，或 key reveal surface 仍可见时恢复 Agent | Release fail；禁用 Credential Channel；该 Host 不得声称安全输入 |
 | `KILL-K33` | 错误 signer/designated requirement、替换或 rollback registry 被接受，或匹配 pasteboard 内容在 Agent resume 时仍存在 | Release fail；禁用 helper、撤销 grants/items，并保持 Credential Channel INACTIVE |
+| `KILL-K34` | Browser Control route 未显式启用即可达，或被报告为 Hook-visible、Guard 中介或与 Native Computer Use 等价 | 杀死该路由的相应声明；未启用却可达时整条路由下线，直到 GATE-G16 逐项证明 |
 
 ## 42.1 Pivot 决策
 
@@ -7315,7 +7346,7 @@ install plugin
 
 ## 47.2 不应擅自修改的定位
 
-除非正式触发 Pivot ADR，不得把 Oxrail 改成 Browser Agent、Playwright wrapper、CDP writer、remote browser、input replay system 或 secret form proxy。
+除非正式触发 Pivot ADR，不得把 Oxrail 改成 Browser Agent、Playwright wrapper、CDP writer、remote browser、input replay system 或 secret form proxy。SEC-52 的 opt-in Browser Control route 是独立、默认关闭、可整体删除的附加 surface，不改变本节的定位：它不接管 Native 调用，也不得被描述成 Oxrail 的核心执行路径。
 
 ## 47.3 审阅输出格式
 
@@ -7606,6 +7637,7 @@ BLOCKED / REJECTED / KILLED may branch from any non-ACCEPTED state
 | [`WP-V1-004`](#wp-v1-004) | Final documentation, limitations and release notes | P1 | `PLANNED` |
 | [`WP-V1-005`](#wp-v1-005) | Stable publish and rollback readiness | P0 | `PLANNED` |
 | [`WP-V1-006`](#wp-v1-006) | Post-release drift and incident monitoring | P0 | `PLANNED` |
+| [`WP-BCTL-001`](#wp-bctl-001) | Opt-in Browser Control route (MCP / CDP) | P2 | `IN_PROGRESS` |
 | [`WP-RLS-100`](#wp-rls-100) | V1.0 final acceptance | P0 | `PLANNED` |
 
 ## 49.5 工作包卡片
@@ -7799,7 +7831,7 @@ Create the minimal repository skeleton without committing to unproven Host capab
 **验收**
 
 - [ ] Install, lint, typecheck and empty test suites pass.
-- [ ] Production packages do not depend on Playwright/CDP write APIs.
+- [ ] Production packages do not depend on Playwright/CDP write APIs on the Native route. The opt-in Browser Control package is the only CDP owner and stays unreachable unless a host explicitly configures its MCP server (SEC-52).
 - [ ] Handoff and Observer extensions are separate capability modules.
 
 **测试 / 证据**
@@ -11610,7 +11642,7 @@ Prove every KILL condition was checked and the final architecture remains a thin
 **验收**
 
 - [ ] No active KILL trigger.
-- [ ] No production mouse/keyboard/CDP writer.
+- [ ] No production mouse/keyboard/CDP writer on the Native route. The opt-in Browser Control route is governed by SEC-52, is never the Native executor, and is not counted as Native capability (KILL-K34).
 - [ ] Observer/Handoff permissions match approved scope.
 - [ ] Public positioning matches actual mode.
 
@@ -11832,6 +11864,53 @@ Make the final Go/No-Go decision for the first stable release.
 
 ---
 
+<a id="wp-bctl-001"></a>
+### WP-BCTL-001 — Opt-in Browser Control route (MCP / CDP)
+<!-- wp-meta: MILESTONE=V1.0 PRIORITY=P2 STATUS=IN_PROGRESS -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V1.0` |
+| Priority | `P2` |
+| Status | `IN_PROGRESS` |
+| Depends | `WP-FND-001`, `WP-DOC-001` |
+| Related | `REQ-BCTL-001`, `REQ-BCTL-002`, `REQ-BCTL-003`, `REQ-BCTL-004`, `GATE-G16`, `KILL-K34`, `SEC-52`, `ADR-BROWSERCTL-001`, `TEST-BCTL-001`, `TEST-BCTL-002`, `TEST-BCTL-003`, `TEST-BCTL-004` |
+
+**目标**
+
+Ship a Browser Control surface that a host may opt into through an explicitly configured MCP server, without acquiring any default route, any Hook participation, or any claim of Native Computer Use equivalence.
+
+**产物**
+
+- `@oxrail/browser-control`: own Chromium process, CDP session, ref numbering, navigation, screenshot, state/reclaim, per-profile saved sign-ins
+- MCP stdio entry point exposing the tool surface
+- `docs/adr/ADR-BROWSERCTL-001.md`
+- tests for `TEST-BCTL-001`–`TEST-BCTL-004`
+
+**验收**
+
+- [ ] No tool surface and no browser process exists before a host explicitly configures the MCP server.
+- [ ] The route drives only its own Chromium and its own profile directory; it never attaches to the person's browser.
+- [ ] Native packages and the Native route never import the CDP route.
+- [ ] An early browser death is reported as a death in milliseconds, not as a 15 s wait.
+- [ ] Idle reclaim never fires while the route is in use, and `state` reports `pid`, `profile`, `idleMs`, `closesInMs`.
+- [ ] No Hook, Guard, Safety, Native-equivalence or default-availability claim is made for this route.
+- [ ] Deleting the package, the host MCP entry and the profile directory removes the capability with no migration.
+- [ ] Real-host evidence (MCP auto-load, tool-result image support) is recorded, or the WP stays IN_PROGRESS/BLOCKED.
+
+**测试 / 证据**
+
+- `TEST-BCTL-001`–`TEST-BCTL-004`
+- installed-host MCP configuration check
+- evidence manifest per §49.1
+
+**阻断 / Kill**
+
+- `KILL-K34` if the route is reachable without explicit opt-in or is reported as Hook-visible/native-equivalent.
+- No ACCEPTED status before real-host evidence exists.
+
+---
+
 ## 49.18 工作包状态变更格式
 
 ```yaml
@@ -11851,7 +11930,7 @@ blocked_by: []
 
 一个里程碑只有其 `WP-RLS-*` 进入 `ACCEPTED` 才完成。某个功能 WP 完成但 release WP 未接受，不得发布该里程碑版本号。
 
-本总账共定义 **99 个工作包**。
+本总账共定义 **100 个工作包**。
 
 ---
 
@@ -12009,6 +12088,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.25 — 2026-11-12
+
+- 新增 opt-in Browser Control route（`packages/browser-control/`）：MCP stdio 工具面、自有 headless Chromium、自带 profile；默认关闭，只有宿主显式配置后才存在。
+- 新增 ADR-BROWSERCTL-001、SEC-52、GATE-G16、KILL-K34、WP-BCTL-001、REQ-BCTL-001 至 REQ-BCTL-004、TEST-BCTL-001 至 TEST-BCTL-004；该路由不经过 Hook/Guard，不作 Native Computer Use 的替代，不计入 NIF 或 paired benchmark。
+- Native 路由、既有禁令与公开声明不变：默认写执行权仍属于宿主原生 Computer Use，本次不新增任何默认写路径。
 
 ### v1.0.24 — 2026-09-08
 
@@ -12289,7 +12374,7 @@ Oxrail 的成立条件不是“能写一个漂亮 Skill”，也不是“能把�
 
 首轮真实浏览器路径优先复用现有 Chrome 路线。不要同时把两组的浏览器从 Chrome/内置互换；“浏览器路由策略是否更好”另建实验，不能与本轮 Oxrail 净增益混为一项。
 
-本轮不开发通用浏览器录像扩展、任意站点登录检测、Electron 镜像输入、新浏览器驱动、模型轮询等待、云端实验平台或漂亮 Dashboard。已有测试 fixture/harness 优先复用，不能为了采集改用 Playwright/CDP 代替真实宿主执行任务。
+本轮不开发通用浏览器录像扩展、任意站点登录检测、Electron 镜像输入、新浏览器驱动、模型轮询等待、云端实验平台或漂亮 Dashboard。已有测试 fixture/harness 优先复用，不能为了采集改用 Playwright/CDP 代替真实宿主执行任务。SEC-52 的 opt-in Browser Control route 不属于采集路径，也不是本交接书的交付物。
 
 ### 3. 目标目录与依赖规则
 
@@ -12690,3 +12775,44 @@ Next eligible WP:
 [S9] https://raw.githubusercontent.com/regrevia/Oxrail/dev/AGENTS.md
 [S10] https://learn.chatgpt.com/docs/hooks
 ```
+
+---
+
+<a id="sec-52"></a>
+# 52. Opt-in Browser Control 路由（MCP / CDP）
+
+<!-- oxrail-index: browser-control,mcp,cdp,opt-in,route -->
+
+本节定义一条**默认关闭、由宿主显式启用**的 Browser Control 路由。它不取代 Native Computer Use，不经过 Hook/Guard，也不参与 Native 的任何 headline 指标。决策与前因见 `docs/adr/ADR-BROWSERCTL-001.md`；Gate 见 GATE-G16；Kill 见 KILL-K34。
+
+## 52.1 路由定位与开关
+
+- 唯一入口是宿主显式配置的 MCP server（stdio）。未配置时不存在工具面、不启动浏览器进程、不注册任何 Hook。
+- 无法通过环境变量把普通安装变成 Browser Control 安装；`OXRAIL_*` 变量只在该 server 已被宿主启动之后生效。
+- 路由拥有自己启动的 Chromium 进程和自己的 profile 目录；不接管、不连接、不注入使用者正在使用的浏览器。
+- 二进制发现顺序为 `OXRAIL_CHROME` → 平台常见安装路径 → PATH；找不到时明确失败，不静默退回 Native 路由。
+- 默认 headless；只有 `OXRAIL_BROWSER_HEADLESS=0` 才显示窗口。
+- Native 路由与 Native package 不得 import 本路由；本路由的加载不由任何 Hook 事件触发。
+
+## 52.2 需求
+
+- **REQ-BCTL-001**：Browser Control 路由必须默认关闭，且只能由宿主显式配置的 MCP server 暴露；未配置时不存在工具面、进程或 Hook 命中。
+- **REQ-BCTL-002**：路由必须只驱动自己启动的 Chromium 与自己创建的 profile，不接管使用者浏览器；Native 路由不得 import 该路由。
+- **REQ-BCTL-003**：不得为路由声明 Hook-visible、Guard/Safety 中介或与 Native Computer Use 等价；其测试结果不得计入 NIF 或 paired benchmark。
+- **REQ-BCTL-004**：路由必须自行回收空闲浏览器、在仍被观察时不回收、如实报告进程与回收剩余时间、把启动即死亡按死亡报错，并按 profile 保存登录态。
+
+## 52.3 非声明
+
+明确不说：不支持任意站点，不保证绕过风控，不承诺与 Native 相同成功率，不提供页面读写之外的系统权限，不读取宿主浏览器数据，不作为 Native Computer Use 的 fallback 或加速器，也不得作为任何“Oxrail 净收益”的对照组。
+
+## 52.4 生命周期与资源回收
+
+- 空闲回收默认 5 分钟；`OXRAIL_BROWSER_IDLE_MS` 限制在 60 秒–15 分钟；`state` 必须报告 `running`、`pid`、`profile`、`idleMs` 与 `closesInMs`。
+- 正常关闭必须走 `Browser.close`，让 cookie 落到 profile；异常死亡不等于正常关闭，可能丢失本次登录态，不得宣称已保存。
+- 等待调试端口有 15 秒上限；进程提前退出必须立即按死亡报告（退出码/信号/耗时/stderr 摘要），不得等满 15 秒再报超时。
+- 截图写入 state 目录下的固定位置并返回路径；不写入 Lab 数据目录，不写进产品 release artifact。
+- profile 之间互不可见；不提供跨 profile 导出或迁移。
+
+## 52.5 相关 ID
+
+`REQ-BCTL-001`–`REQ-BCTL-004`、`GATE-G16`、`KILL-K34`、`WP-BCTL-001`、`TEST-BCTL-001`–`TEST-BCTL-004`、`ADR-BROWSERCTL-001`；实现位于 `packages/browser-control/`。

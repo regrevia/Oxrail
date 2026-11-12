@@ -1754,36 +1754,45 @@ describe("public Codex hooks", () => {
     ).resolves.toMatchObject({ noProgressCount: 0 });
   });
 
-  it("bounds passive browser-route evidence without storing tool ids", async () => {
-    const environment = await setup();
-    for (let index = 0; index < MAX_BROWSER_ROUTE_OBSERVATIONS + 32; index++) {
-      await recordBrowserHookPhase(
-        environment.pluginData,
-        "PreToolUse",
-        {
-          definitionHash: environment.definitionHash,
-          profileId: "hp_fixture",
-          sessionDigest: digestSessionId("bounded-session"),
-          synthetic: false,
-          toolUseDigest: digestToolUseId(`raw-tool-use-${index}`),
-        },
-        index,
-      );
-    }
+  // 288 sequential marker writes plus a full re-read: I/O-bound, not logic-bound.
+  it(
+    "bounds passive browser-route evidence without storing tool ids",
+    { timeout: 30_000 },
+    async () => {
+      const environment = await setup();
+      for (
+        let index = 0;
+        index < MAX_BROWSER_ROUTE_OBSERVATIONS + 32;
+        index++
+      ) {
+        await recordBrowserHookPhase(
+          environment.pluginData,
+          "PreToolUse",
+          {
+            definitionHash: environment.definitionHash,
+            profileId: "hp_fixture",
+            sessionDigest: digestSessionId("bounded-session"),
+            synthetic: false,
+            toolUseDigest: digestToolUseId(`raw-tool-use-${index}`),
+          },
+          index,
+        );
+      }
 
-    const observations = await readBrowserRouteObservations(
-      environment.pluginData,
-    );
-    expect(observations.length).toBeLessThanOrEqual(
-      MAX_BROWSER_ROUTE_OBSERVATIONS,
-    );
-    const persisted = await Promise.all(
-      (await allFiles(environment.pluginData)).map((filename) =>
-        readFile(filename, "utf8"),
-      ),
-    );
-    expect(persisted.join("\n")).not.toContain("raw-tool-use-");
-  });
+      const observations = await readBrowserRouteObservations(
+        environment.pluginData,
+      );
+      expect(observations.length).toBeLessThanOrEqual(
+        MAX_BROWSER_ROUTE_OBSERVATIONS,
+      );
+      const persisted = await Promise.all(
+        (await allFiles(environment.pluginData)).map((filename) =>
+          readFile(filename, "utf8"),
+        ),
+      );
+      expect(persisted.join("\n")).not.toContain("raw-tool-use-");
+    },
+  );
 
   it("surfaces a fixed inactive status when the Hook CLI fails internally", () => {
     const canary = "OXRAIL_INTERNAL_ERROR_INPUT_MUST_NOT_LEAK";

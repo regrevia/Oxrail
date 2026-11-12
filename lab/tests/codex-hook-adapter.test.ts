@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -129,7 +136,9 @@ describe("WP-LAB-004 Codex Hook adapter", () => {
   });
 
   it("runs the built neutral Hook through authenticated local IPC", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "oxrail-lab-hook-e2e-"));
+    // The collector IPC socket lives under this root; a canonical short path
+    // keeps it within the 104-byte AF_UNIX limit on macOS.
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), "oxl-e2e-")));
     const collector = await LabCollector.create({
       root,
       runId: config.runId,

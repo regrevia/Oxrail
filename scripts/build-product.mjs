@@ -12,6 +12,9 @@ const result = await build({
     "hooks/post-tool": "hooks/post-tool.ts",
     doctor: "packages/host-openai/src/doctor-cli.ts",
     "generate-schemas": "packages/protocol/src/generate.ts",
+    // Opt-in Browser Control: a separate entry so hosts run it as its own MCP
+    // server; it shares nothing with the hook-visible product binaries.
+    "browser-control/mcp": "packages/browser-control/src/main.ts",
   },
   outdir: "dist",
   outExtension: { ".js": ".mjs" },

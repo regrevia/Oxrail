@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -59,7 +59,11 @@ describe("evidence release gate", () => {
   });
 
   it("verifies the full release matrix and rejects a single trace", async () => {
-    const repositoryRoot = await mkdtemp(join(tmpdir(), "oxrail-gate-"));
+    // Evidence paths are realpath-canonicalized by the gate, so the fixture
+    // root must be canonical too (macOS /var -> /private/var).
+    const repositoryRoot = await realpath(
+      await mkdtemp(join(tmpdir(), "oxrail-gate-")),
+    );
     const runRoot = join(repositoryRoot, "evidence/WP-RLS-010/run");
     await mkdir(runRoot, { recursive: true });
     const runGit = (...args: string[]) => {

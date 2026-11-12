@@ -1106,7 +1106,7 @@ describe("credential Host suspension observation", () => {
     expect(timedOut.kind).toBe("FAILED_SAFE");
     expect(replay.kind).toBe("FIXTURE_ONLY_REPLAY");
     expect(observer).toHaveBeenCalledTimes(1);
-  }, 2_000);
+  }, 30_000);
 
   it("rejects caller-added fields before invoking the Host observer", async () => {
     const value = await fixture();

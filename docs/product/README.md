@@ -17,10 +17,10 @@ Safety, Handoff, and Credential capabilities report `INACTIVE`.
 Project documentation and the authoritative specification are maintained at
 https://github.com/regrevia/Oxrail.
 
-## Alpha.5 trial check
+## Alpha.6 trial check
 
 This product-only tree is bound to the immutable ref
-`product-v0.1.0-alpha.5`. From the installed plugin root, run:
+`product-v0.1.0-alpha.6`. From the installed plugin root, run:
 
 ```bash
 node skills/oxrail/scripts/trial-check.mjs
@@ -46,6 +46,17 @@ separate fact and becomes `OBSERVED_CURRENT_DEFINITION` only after a recent
 current-hash Hook event. Select Chrome explicitly with `@Chrome` in a new Codex
 chat; a specialized Chrome path may still bypass lifecycle Hooks and must then
 remain `BLOCKED`.
+
+## Browser Control (opt-in)
+
+This preview also ships `dist/browser-control/mcp.mjs`, a stdio MCP server that
+drives one headless Chrome process through its own profile under
+`~/.oxrail/browser-control/`. It starts nothing until a host launches it, and it
+does not replace Native Computer Use: the route is not Hook-visible, not
+Guard-mediated, and its observations do not advance the passive Chrome-route
+lifecycle. Server owners keep the write path; review
+[the Browser Control reference](docs/browser-control.md) before enabling it in a
+host configuration.
 
 ## License
 

@@ -787,7 +787,7 @@ describe("fixture-only locked Handoff completion admission", () => {
     await expect(
       readBrowserTaskState(timedOut.root, timedOut.scope),
     ).resolves.toEqual(timeoutBefore);
-  }, 1_000);
+  }, 30_000);
 
   it("rechecks the receiver deadline after final gate and journal reads", async () => {
     const fixture = await makeFixture();

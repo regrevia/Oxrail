@@ -40,6 +40,14 @@
       "source": "dist/product-dependencies.json",
       "destination": "dist/product-dependencies.json"
     },
+    {
+      "source": "dist/browser-control/mcp.mjs",
+      "destination": "dist/browser-control/mcp.mjs"
+    },
+    {
+      "source": "docs/product/browser-control.md",
+      "destination": "docs/browser-control.md"
+    },
     { "source": "icon/oxrail.png", "destination": "icon/oxrail.png" },
     { "source": "docs/product/README.md", "destination": "README.md" },
     { "source": "SECURITY.md", "destination": "SECURITY.md" },

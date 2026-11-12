@@ -29,7 +29,7 @@ Native Interaction Fidelity and real-host benchmark evidence are still in progre
 
 Requires a current Codex CLI with plugin marketplace support and Node.js 20 or newer.
 `main` is the latest accepted stable line; ongoing development happens on `dev` and reaches `main` only after a milestone gate passes.
-The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the product-only immutable `product-v0.1.0-alpha.5` development preview; it is not an accepted stable release.
+The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the product-only immutable `product-v0.1.0-alpha.6` development preview; it is not an accepted stable release.
 
 ```bash
 codex plugin marketplace add regrevia/Oxrail
@@ -159,7 +159,18 @@ Handoff protection: INACTIVE
 
 `BYPASSED` is fail-open for the native browser capability, not proof of Oxrail protection. Safety and Handoff are shown as `ACTIVE` only when their required capabilities are verified and currently effective. Host-native approvals and safety controls remain authoritative.
 
-The current `0.1.0-alpha.5` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Retrieval filtering and the secure credential window are not product-active in this preview. The repository-only macOS Lab fixture does not change that status and is not shipped in the product artifact. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
+The current `0.1.0-alpha.6` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Retrieval filtering and the secure credential window are not product-active in this preview. The repository-only macOS Lab fixture does not change that status and is not shipped in the product artifact. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
+
+## Browser Control (opt-in)
+
+The preview also ships a dependency-free stdio MCP server,
+`dist/browser-control/mcp.mjs`, that a host may start only when its owner
+configures it explicitly. It drives one headless Chrome process in its own
+profile, serves both MCP eras, and stays outside the Hook/Guard lifecycle — it
+is not a Native Computer Use substitute and no lifecycle claim moves when it is
+running. Setup for Codex CLI and Claude Code, the tool list, and the reclaim
+policy are in [Browser Control](docs/product/browser-control.md) and
+[ADR-BROWSERCTL-001](docs/adr/ADR-BROWSERCTL-001.md).
 
 ## What v0.1 is testing
 

@@ -2,7 +2,19 @@
 
 All notable project changes are documented here. The normative specification history remains in `spec/OXRAIL_SPEC.md`.
 
-## [Unreleased]
+## [0.1.0-alpha.6] - 2026-11-12
+
+- Added an opt-in Browser Control route: `packages/browser-control` exposes a
+  dependency-free stdio MCP server (`dist/browser-control/mcp.mjs`) with ten
+  `browser_*` tools over one headless Chrome process and a private profile. It
+  serves both MCP eras (2025-11-25 and 2026-07-28), is default-off, and does not
+  replace the Native Computer Use writer.
+- Fixed a reopen defect where a reused profile left a stale
+  `DevToolsActivePort` behind and the route trusted a port nothing listened on
+  (`ws: connect ECONNREFUSED`); the port file is cleared before spawn and a
+  second `browser_open` in the same profile now succeeds.
+
+- Spec 1.0.25 adds the governance for an opt-in, default-off Browser Control route: SEC-52, ADR-BROWSERCTL-001, GATE-G16, KILL-K34, WP-BCTL-001, four requirements and four own-contract tests. The route is reachable only when a host explicitly configures its MCP server; it is not Hook-visible, not Guard-mediated, and not a Native Computer Use substitute. No default write path, positioning claim, or NIF matrix entry changes.
 
 - Spec 1.0.24 incorporates the approved product/Lab separation contract, eight sequential work packages, and twenty acceptance cases. This documentation change does not activate Host capabilities.
 

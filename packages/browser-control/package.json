@@ -1,0 +1,7 @@
+{
+  "name": "@oxrail/browser-control",
+  "version": "0.1.0-alpha.6",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts"
+}

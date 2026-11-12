@@ -1,6 +1,7 @@
 /dist/
 /docs/generated/
 /evidence/
+/native/macos/.build/
 /icon/
 /spec/
 LICENSE
