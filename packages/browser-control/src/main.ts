@@ -11,7 +11,7 @@ import type { BrowserRoute } from "./types.js";
 import { serveMcp } from "./mcp.js";
 
 /** Kept in step with the package version that ships this file. */
-export const VERSION = "0.1.0-alpha.6";
+export const VERSION = "0.1.0-alpha.7";
 
 const USAGE =
   "usage: oxrail-browser-control [--version|--help]  (stdio MCP server for the Browser Control route)";

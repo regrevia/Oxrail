@@ -150,6 +150,97 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
   );
 
   it(
+    "refuses to click a control a layer covers, and clicks the reachable one",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-covered-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      const covered = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>fired:</title></head>
+<body>
+  <button id="under" onclick="document.title += ',under'">Hidden action</button>
+  <button id="free" onclick="document.title += ',free'">Free action</button>
+  <div id="sheet" style="position:fixed;inset:0;z-index:99;background:#fff">
+    <button onclick="document.title += ',sheet'; this.parentNode.remove()">Dismiss</button>
+  </div>
+</body></html>`)}`;
+      try {
+        await route.open({ url: covered });
+        const snapshot = await route.read();
+        const under = snapshot.controls.find(
+          (control) => control.name === "Hidden action",
+        );
+        const free = snapshot.controls.find(
+          (control) => control.name === "Free action",
+        );
+        const dismiss = snapshot.controls.find(
+          (control) => control.name === "Dismiss",
+        );
+        expect(under, "the covered control is still numbered").toBeDefined();
+        if (under === undefined) throw new Error("no covered control");
+        if (free === undefined) throw new Error("no free control");
+        if (dismiss === undefined) throw new Error("no dismiss control");
+
+        // A covered control must not report success while the page hears nothing.
+        await expect(route.click({ ref: under.ref })).rejects.toThrow(
+          /behind/u,
+        );
+        expect((await route.state()).title).toBe("fired:");
+
+        await route.click({ ref: dismiss.ref });
+        expect((await route.state()).title).toBe("fired:,sheet");
+
+        // The sheet is gone, so the control it covered is now clickable.
+        await route.click({ text: "Free action" });
+        expect((await route.state()).title).toBe("fired:,sheet,free");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "captures the screenshot in the same pixel space as the click",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-pixels-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      try {
+        await route.open({
+          url: `data:text/html;charset=utf-8,${encodeURIComponent(
+            '<!doctype html><html><head><title>pixels</title></head><body style="margin:0"><p>pixels</p></body></html>',
+          )}`,
+        });
+        const shot = await route.shot();
+        // PNG header: width and height live at bytes 16..24, big endian.
+        const bytes = Buffer.from(shot.png, "base64");
+        const width = bytes.readUInt32BE(16);
+        const height = bytes.readUInt32BE(20);
+        // The input domain uses CSS pixels, so the picture must too.
+        expect(width).toBe(1280);
+        expect(height).toBeGreaterThan(600);
+        expect(height).toBeLessThan(1280);
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
     "reclaims an idle browser without being asked",
     { timeout: 90_000 },
     async () => {

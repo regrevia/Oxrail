@@ -734,7 +734,7 @@ var init_chrome = __esm({
     init_cdp();
     DEVTOOLS_PORT_FILE = "DevToolsActivePort";
     DEFAULT_DEADLINE_MS = 15e3;
-    DEFAULT_WINDOW_SIZE = { width: 1280, height: 800 };
+    DEFAULT_WINDOW_SIZE = { width: 1280, height: 900 };
     STDERR_LOG_NAME = "browser.err.log";
     STDERR_LOG_LIMIT_BYTES = 1024 * 1024;
     STDERR_EXCERPT_CHARS = 240;
@@ -794,13 +794,12 @@ var init_chrome = __esm({
         mkdirSync(logs, { recursive: true, mode: 448 });
         const logPath = path.join(logs, STDERR_LOG_NAME);
         const offset = stderrOffset(logPath);
-        const args = chromeArgs(
-          options.extraFlags === void 0 ? { userDataDir, headless: options.headless } : {
-            userDataDir,
-            headless: options.headless,
-            extraFlags: options.extraFlags
-          }
-        );
+        const args = chromeArgs({
+          userDataDir,
+          headless: options.headless,
+          ...options.extraFlags === void 0 ? {} : { extraFlags: options.extraFlags },
+          ...options.windowSize === void 0 ? {} : { windowSize: options.windowSize }
+        });
         const logFd = openSync(logPath, "a", 384);
         let child;
         try {
@@ -948,6 +947,7 @@ __export(route_exports, {
   idleMs: () => idleMs,
   inspectBinary: () => inspectBinary,
   profileFromEnv: () => profileFromEnv,
+  shotClip: () => shotClip,
   snapshotExpression: () => snapshotExpression,
   viewSize: () => viewSize
 });
@@ -960,6 +960,25 @@ function idleMs(env = process.env) {
 }
 function headlessFromEnv(env = process.env) {
   return env.OXRAIL_BROWSER_HEADLESS !== "0";
+}
+function shotClip(view, fullPage) {
+  const width = Math.max(1, Math.round(view.width));
+  if (fullPage) {
+    return {
+      x: 0,
+      y: 0,
+      width,
+      height: Math.max(1, Math.round(view.documentHeight)),
+      scale: 1
+    };
+  }
+  return {
+    x: Math.round(view.scrollX),
+    y: Math.round(view.scrollY),
+    width,
+    height: Math.max(1, Math.round(view.height)),
+    scale: 1
+  };
 }
 function profileFromEnv(env = process.env) {
   const raw = env.OXRAIL_BROWSER_PROFILE;
@@ -1164,7 +1183,7 @@ var init_route = __esm({
             headless,
             profile,
             ...process.env.OXRAIL_CHROME !== void 0 ? { binaryPath: process.env.OXRAIL_CHROME } : {},
-            extraFlags: [`--window-size=${this.size.width},${this.size.height}`]
+            windowSize: this.size
           });
           this.chrome = chrome;
           const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
@@ -1258,37 +1277,53 @@ var init_route = __esm({
           };
         });
       }
-      /** Resolve a numbered control or a text match to a box; throws when stale. */
+      /** Resolve a numbered control or a text match to a point that will hit it. */
       async locate(target) {
         if (target.ref !== void 0 && target.text !== void 0) {
           throw new Error("give either ref or text, not both");
         }
-        const expression = target.ref !== void 0 ? `(() => {
-  const el = document.querySelector('[data-oxrail-ref="${target.ref}"]');
+        const expression = `(() => {
+  const el = ${target.ref !== void 0 ? `document.querySelector('[data-oxrail-ref="${target.ref}"]')` : `(() => {
+    const needle = ${JSON.stringify(target.text ?? "")}.replace(/\\s+/g, " ").trim().toLowerCase();
+    if (needle === "") return null;
+    const all = document.querySelectorAll('a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[role="menuitem"]');
+    let best = null, bestArea = Infinity;
+    for (const node of all) {
+      const text = (node.innerText || node.value || node.getAttribute("aria-label") || node.getAttribute("title") || "").replace(/\\s+/g, " ").trim().toLowerCase();
+      if (text === "" || !text.includes(needle)) continue;
+      const box = node.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) continue;
+      const area = box.width * box.height;
+      if (area < bestArea) { best = node; bestArea = area; }
+    }
+    return best;
+  })()`};
   if (!el) return { found: false };
   el.scrollIntoView({ block: "center", inline: "center" });
-  const r = el.getBoundingClientRect();
-  return { found: true, x: r.x + r.width / 2, y: r.y + r.height / 2, label: (el.innerText || el.getAttribute("aria-label") || "").replace(/\\s+/g, " ").trim().slice(0, 80) };
-})()` : `(() => {
-  const needle = ${JSON.stringify(target.text ?? "")}.replace(/\\s+/g, " ").trim().toLowerCase();
-  if (needle === "") return { found: false };
-  const all = document.querySelectorAll('a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[role="menuitem"]');
-  let best = null, bestArea = Infinity;
-  for (const el of all) {
-    const text = (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("title") || "").replace(/\\s+/g, " ").trim().toLowerCase();
-    if (text === "" || !text.includes(needle)) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) continue;
-    const area = r.width * r.height;
-    if (area < bestArea) { best = el; bestArea = area; }
+  const label = (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("title") || "").replace(/\\s+/g, " ").trim().slice(0, 80);
+  const box = el.getBoundingClientRect();
+  if (box.width < 2 || box.height < 2) return { found: true, label, blocked: "it has no area on screen to click" };
+  /* The point must be one where a real press would reach this control: an
+     overlay, a sticky header or a modal owns that pixel otherwise, and clicking
+     it anyway would report success while the page never heard the press. Five
+     samples, centre first, so a control covered only in the middle still gets
+     clicked where it is reachable. */
+  const within = (value, limit) => Math.min(Math.max(value, 1), Math.max(limit - 2, 1));
+  const spread = [[0.5, 0.5], [0.3, 0.5], [0.7, 0.5], [0.5, 0.3], [0.5, 0.7]];
+  for (const [fx, fy] of spread) {
+    const x = within(box.x + box.width * fx, innerWidth);
+    const y = within(box.y + box.height * fy, innerHeight);
+    const hit = document.elementFromPoint(x, y);
+    if (hit !== null && (hit === el || el.contains(hit) || hit.contains(el))) return { found: true, x, y, label };
   }
-  if (!best) return { found: false };
-  best.scrollIntoView({ block: "center", inline: "center" });
-  const r = best.getBoundingClientRect();
-  return { found: true, x: r.x + r.width / 2, y: r.y + r.height / 2, label: (best.innerText || "").replace(/\\s+/g, " ").trim().slice(0, 80) };
+  const top = document.elementFromPoint(within(box.x + box.width / 2, innerWidth), within(box.y + box.height / 2, innerHeight));
+  const owner = top === null
+    ? "the page has nothing at that point"
+    : "it is behind " + top.tagName.toLowerCase() + (top.id ? "#" + top.id : "") + (typeof top.className === "string" && top.className.trim() !== "" ? "." + top.className.trim().split(/\\s+/).slice(0, 2).join(".") : "") + " \\"" + (top.innerText || top.getAttribute("aria-label") || "").replace(/\\s+/g, " ").trim().slice(0, 60) + "\\"";
+  return { found: true, label, blocked: owner };
 })()`;
         const found = await this.evaluate(expression);
-        if (found.found !== true || found.x === void 0 || found.y === void 0) {
+        if (found.found !== true) {
           if (target.ref !== void 0)
             throw new StaleRefError(
               `the page changed; control ${target.ref} is gone \u2014 call browser_view again`
@@ -1297,7 +1332,19 @@ var init_route = __esm({
             `no visible control contains ${JSON.stringify(target.text ?? "")}`
           );
         }
-        return { x: found.x, y: found.y, label: found.label ?? "" };
+        const label = found.label ?? "";
+        if (found.blocked !== void 0) {
+          const named = label === "" ? "control" : JSON.stringify(label);
+          throw new Error(
+            found.blocked.startsWith("it has no area") ? `${named} cannot be clicked: ${found.blocked}.` : `${named} cannot be clicked because ${found.blocked}. Close or dismiss what covers it, then call browser_view and retry.`
+          );
+        }
+        if (found.x === void 0 || found.y === void 0) {
+          throw new Error(
+            `${label === "" ? "control" : JSON.stringify(label)} has no reachable point on screen.`
+          );
+        }
+        return { x: found.x, y: found.y, label };
       }
       async mouseClick(x, y) {
         const { cdp, page } = await this.ensure();
@@ -1513,11 +1560,20 @@ var init_route = __esm({
       async shot(options = {}) {
         return this.serial(async () => {
           const { cdp, page } = await this.ensure();
+          const view = await this.evaluate(`({
+  width: innerWidth,
+  height: innerHeight,
+  scrollX: pageXOffset,
+  scrollY: pageYOffset,
+  documentHeight: Math.max(document.documentElement.scrollHeight, innerHeight)
+})`);
+          const clip = shotClip(view, options.fullPage === true);
           const reply = await cdp.send(
             "Page.captureScreenshot",
             {
               format: "png",
-              ...options.fullPage === true ? { captureBeyondViewport: true } : {}
+              clip,
+              captureBeyondViewport: true
             },
             page.sessionId
           );
@@ -2281,7 +2337,7 @@ function note(stderr, message, error) {
 }
 
 // packages/browser-control/src/main.ts
-var VERSION = "0.1.0-alpha.6";
+var VERSION = "0.1.0-alpha.7";
 var USAGE = "usage: oxrail-browser-control [--version|--help]  (stdio MCP server for the Browser Control route)";
 var INSTRUCTIONS = "This server drives its own headless Chrome through the Browser Control route. It is opt-in and separate from the person's browser: call browser_open before any other browser tool, and browser_close when the work is done.";
 async function main(argv = process.argv.slice(2)) {

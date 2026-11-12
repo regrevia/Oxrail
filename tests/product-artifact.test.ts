@@ -88,8 +88,8 @@ describe("WP-LAB-001 product artifact", () => {
     );
     expect(verified.status, verified.stderr).toBe(0);
     expect(JSON.parse(verified.stdout)).toMatchObject({
-      version: "0.1.0-alpha.6",
-      immutableRef: "product-v0.1.0-alpha.6",
+      version: "0.1.0-alpha.7",
+      immutableRef: "product-v0.1.0-alpha.7",
       artifactIntegrity: "PASS",
     });
 
@@ -126,7 +126,7 @@ describe("WP-LAB-001 product artifact", () => {
     );
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
-      version: "0.1.0-alpha.6",
+      version: "0.1.0-alpha.7",
       artifactIntegrity: "PASS",
       stage: "INSTALLED",
       readiness: "HOST_SETUP_REQUIRED",

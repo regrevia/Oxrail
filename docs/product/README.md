@@ -20,7 +20,7 @@ https://github.com/regrevia/Oxrail.
 ## Alpha.6 trial check
 
 This product-only tree is bound to the immutable ref
-`product-v0.1.0-alpha.6`. From the installed plugin root, run:
+`product-v0.1.0-alpha.7`. From the installed plugin root, run:
 
 ```bash
 node skills/oxrail/scripts/trial-check.mjs

@@ -2,6 +2,39 @@
 
 All notable project changes are documented here. The normative specification history remains in `spec/OXRAIL_SPEC.md`.
 
+## [0.1.0-alpha.7] - 2026-11-13
+
+- Fixed a false success in `browser_click`: a control fully covered by a modal
+  layer, or by a sibling painted on top of it, used to report `clicked "…"`
+  while the page received nothing, because the click was dispatched at the
+  element's centre and the layer above swallowed it. The route now hit-tests up
+  to five points inside the control with `document.elementFromPoint` (centre
+  first, then the four mid-edges) and accepts only a point that belongs to the
+  control or one of its ancestors or children, so a partially covered control
+  still clicks at a reachable point. When every sample is covered it refuses
+  before dispatching any input and names what is in the way, e.g.
+  `"Continue" cannot be clicked because it is behind div#sheet "Close Sign up
+to continue". Close or dismiss what covers it, then call browser_view and
+retry.` Refusing is better than a silent no-op: the agent would otherwise
+  trust a page state that never changed. Measured on one headless Chrome: a
+  covered button and a button under a full-screen sheet went from "success plus
+  nothing fired" to a refusal naming the layer with no input sent, while the
+  reachable controls on the same page (one on its own overlay, one 4000 px down,
+  one at 5000 px) still fired. Click cost is unchanged within noise (9-23 ms
+  before, 9-17 ms after); the hit test runs inside the same `Runtime.evaluate`.
+- Fixed the screenshot coordinate space: `browser_shot` came back in device
+  pixels while `browser_click` takes CSS pixels, so on any display with a
+  device pixel ratio above 1 a coordinate read off the picture and handed back
+  as a click landed at half the intended place. The capture now asks for
+  `scale: 1` with an explicit clip in CSS pixels, so the picture and the input
+  domain are the same space on every display. It also fixes the full-page
+  capture, which at 1265 px wide was narrower than the 1280 px viewport because
+  the scrollbar was included in the clip; it is now exactly the viewport width
+  and the full document height (1280x2039).
+- Fixed the window size: the launcher used a fixed 1280x800 while the route
+  wanted 1280x900, and both were passed as an ad hoc extra flag. The size is now
+  a first-class launch option and `--window-size` is emitted from one place.
+
 ## [0.1.0-alpha.6] - 2026-11-12
 
 - Added an opt-in Browser Control route: `packages/browser-control` exposes a

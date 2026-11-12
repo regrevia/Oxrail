@@ -79,6 +79,18 @@ The route holds one browser for the life of the host session. When the session e
 
 Screenshots are written under `<state dir>/shots` and returned both as an image and as a path, so a host that cannot show images can still open the file.
 
+## Pixels and hit testing
+
+`browser_shot` captures in CSS pixels at any device pixel ratio, so a coordinate read off the picture can be handed straight back to `browser_click`. A viewport capture is exactly `window.innerWidth` by `window.innerHeight`, and `fullPage` is the viewport width by the full document height; both account for how far the page is scrolled.
+
+`browser_click` resolves a control, scrolls it into view, and hit-tests up to five points inside it with `document.elementFromPoint`, centre first. A point counts only when it belongs to the control or to one of its ancestors or children, so a partly covered control still clicks at a reachable point. When every sample is covered the call refuses before any input is dispatched and names what is in the way:
+
+```
+"Continue" cannot be clicked because it is behind div#sheet "Close Sign up to continue". Close or dismiss what covers it, then call browser_view and retry.
+```
+
+A control with no area on screen is reported separately: `"…" cannot be clicked: it has no area on screen to click.` Both messages are a fact about the page, not a retry suggestion; the fix is to dismiss the layer or scroll the thing into view, then read the page again.
+
 ## Not claimed
 
 - The route is not visible to Hook. Hook does not see the browser it starts, and no Hook rule is evaluated against it.

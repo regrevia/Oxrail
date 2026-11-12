@@ -70,11 +70,11 @@ to stdout, including at startup.
 | --------------- | --------------------------------------------------------------- |
 | `browser_open`  | Start (or reuse) this route's Chrome and return its state.      |
 | `browser_view`  | Read the page: text plus `[12] button "Sign in"` control lines. |
-| `browser_click` | Click a control by `ref`, or by its visible text.               |
+| `browser_click` | Click a `ref` or some text; refuses when a layer covers it.     |
 | `browser_type`  | Type into a field by `ref`; optionally clear or press Enter.    |
 | `browser_key`   | Press one named key (Enter, Tab, Escape, arrows, …).            |
 | `browser_nav`   | Open a URL, go back, or reload.                                 |
-| `browser_shot`  | Screenshot the viewport or the whole page.                      |
+| `browser_shot`  | Screenshot the viewport or the whole page, in CSS pixels.       |
 | `browser_state` | Is it running, on what page, and when will it be reclaimed.     |
 | `browser_login` | Report the profile and whether it holds a saved sign-in.        |
 | `browser_close` | Close the browser now instead of waiting for reclaim.           |

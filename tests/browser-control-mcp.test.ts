@@ -24,7 +24,7 @@ import type {
   ToolResult,
 } from "../packages/browser-control/src/types.js";
 
-const TEST_VERSION = "0.1.0-alpha.6";
+const TEST_VERSION = "0.1.0-alpha.7";
 
 const TOOL_NAMES = [
   "browser_open",

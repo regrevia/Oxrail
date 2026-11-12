@@ -23,7 +23,7 @@ import { CdpConnection } from "./cdp.js";
 
 const DEVTOOLS_PORT_FILE = "DevToolsActivePort";
 const DEFAULT_DEADLINE_MS = 15_000;
-const DEFAULT_WINDOW_SIZE = { width: 1280, height: 800 } as const;
+const DEFAULT_WINDOW_SIZE = { width: 1280, height: 900 } as const;
 const STDERR_LOG_NAME = "browser.err.log";
 const STDERR_LOG_LIMIT_BYTES = 1024 * 1024;
 const STDERR_EXCERPT_CHARS = 240;
@@ -76,6 +76,7 @@ export interface LaunchChromeOptions {
   readonly headless: boolean;
   readonly profile: string;
   readonly extraFlags?: readonly string[];
+  readonly windowSize?: { readonly width: number; readonly height: number };
   readonly env?: NodeJS.ProcessEnv;
   readonly binaryPath?: string;
 }
@@ -343,15 +344,16 @@ export class ChromeProcess {
     mkdirSync(logs, { recursive: true, mode: 0o700 });
     const logPath = path.join(logs, STDERR_LOG_NAME);
     const offset = stderrOffset(logPath);
-    const args = chromeArgs(
-      options.extraFlags === undefined
-        ? { userDataDir, headless: options.headless }
-        : {
-            userDataDir,
-            headless: options.headless,
-            extraFlags: options.extraFlags,
-          },
-    );
+    const args = chromeArgs({
+      userDataDir,
+      headless: options.headless,
+      ...(options.extraFlags === undefined
+        ? {}
+        : { extraFlags: options.extraFlags }),
+      ...(options.windowSize === undefined
+        ? {}
+        : { windowSize: options.windowSize }),
+    });
 
     const logFd = openSync(logPath, "a", 0o600);
     let child: ChildProcess;

@@ -97,7 +97,7 @@ describe("chromeArgs", () => {
     expect(args).toContain(
       "--disable-features=Translate,MediaRouter,OptimizationHints",
     );
-    expect(args).toContain("--window-size=1280,800");
+    expect(args).toContain("--window-size=1280,900");
     expect(args).not.toContain("--headless=new");
     // Sandboxing is the host's decision; turning it off would weaken it.
     expect(args).not.toContain("--no-sandbox");
