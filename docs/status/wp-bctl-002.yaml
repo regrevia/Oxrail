@@ -1,0 +1,11 @@
+work_package: WP-BCTL-002
+from: PLANNED
+to: IN_PROGRESS
+changed_at: 2026-11-14
+changed_by: lead
+reason: >-
+  The reading layer exists and passes its unit and live tests, but the WP cannot
+  reach ACCEPTED before the live reading measurement is recorded as evidence and
+  the real-host evidence for WP-BCTL-001 arrives.
+evidence_manifest: null
+blocked_by: []

@@ -1,6 +1,6 @@
 # Browser Control
 
-Browser Control is an opt-in browser route. A host that enables it gets ten tools for reading and driving a Chrome window that the route starts for itself. It is not the person's browser, it is not a second view of what the person has open, and it is not the default route: Native Computer Use still drives the desktop unless a host is configured to launch this one.
+Browser Control is an opt-in browser route. A host that enables it gets eleven tools for reading and driving a Chrome window that the route starts for itself. It is not the person's browser, it is not a second view of what the person has open, and it is not the default route: Native Computer Use still drives the desktop unless a host is configured to launch this one.
 
 The route speaks MCP over stdio. It starts no server, opens no port, and needs only Node 20 or newer and a Chrome or Chromium binary on the machine.
 
@@ -58,20 +58,54 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 
 ## Tools
 
-| Tool            | Purpose                                                                                   |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| `browser_open`  | Start the route's Chrome, optionally at a URL, and return its state                       |
-| `browser_view`  | Read the page as text with numbered controls; each number is a `ref`                      |
-| `browser_click` | Click a `ref` from the last read, or the first control matching some text                 |
-| `browser_type`  | Type into a field, optionally clearing it first or pressing Enter                         |
-| `browser_key`   | Press one named key; `browser_type` is the normal way to enter text                       |
-| `browser_nav`   | Open a URL, go back, or reload, and return the new state                                  |
-| `browser_shot`  | Take a PNG of the viewport or the full page, and return it with its path                  |
-| `browser_state` | Report whether a browser is running, how long it has been idle, and what it will close in |
-| `browser_login` | Report whether the route's own profile holds saved sign-ins                               |
-| `browser_close` | Stop the route's Chrome and return the final state                                        |
+| Tool            | Purpose                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| `browser_open`  | Start the route's Chrome, optionally at a URL, and return its state                           |
+| `browser_view`  | Read the page as text with numbered controls; each number is a `ref`                          |
+| `browser_read`  | Answer a question from the page, or read it as prose or an outline, in a fraction of the text |
+| `browser_click` | Click a `ref` from the last read, or the first control matching some text                     |
+| `browser_type`  | Type into a field, optionally clearing it first or pressing Enter                             |
+| `browser_key`   | Press one named key; `browser_type` is the normal way to enter text                           |
+| `browser_nav`   | Open a URL, go back, or reload, and return the new state                                      |
+| `browser_shot`  | Take a PNG of the viewport or the full page, and return it with its path                      |
+| `browser_state` | Report whether a browser is running, how long it has been idle, and what it will close in     |
+| `browser_login` | Report whether the route's own profile holds saved sign-ins                                   |
+| `browser_close` | Stop the route's Chrome and return the final state                                            |
 
 `browser_view` renders each control as a line such as `[12] button "Sign in"`. The `12` is the `ref` that `browser_click` and `browser_type` accept until the page changes or is read again; using an old `ref` fails with a message telling the model to read the page again.
+
+## Reading without pasting the page
+
+`browser_view` returns the page. On a large page that is the expensive part of a turn, and most of what comes back does not answer anything. `browser_read` reads the same page in one of four modes:
+
+| Mode      | Returns                                                              | For                                        |
+| --------- | -------------------------------------------------------------------- | ------------------------------------------ |
+| `article` | The page as a Markdown column: headings, prose, lists, links         | Reading it, or quoting it                  |
+| `map`     | Headings, how many controls there are, how many words — no body text | Deciding whether the page is the right one |
+| `query`   | Only the passages that answer `query`, ranked in this process        | A question with an answer on the page      |
+| `changed` | Only what the previous `text` read did not already say               | Watching a page after an action            |
+
+`query` is the mode worth reaching for first. Measured on one long page — 40 near-identical sections, three headings, a list of 60 links, one answer — the same browser session gave:
+
+| Call                                                            | Characters |
+| --------------------------------------------------------------- | ---------- |
+| `browser_view`                                                  | 5974       |
+| `browser_read {mode:"article", maxChars:24000}`                 | 6061       |
+| `browser_read {mode:"map"}`                                     | 45         |
+| `browser_read {mode:"query", query:"how long do refunds take"}` | 89         |
+| `browser_read {mode:"changed"}` after a click                   | 31         |
+
+Each of those was one call, and each took single-digit milliseconds in the page. The number that matters is not that `article` is smaller — on a prose page it is not, because it trades numbered control lines for heading and list markers — but that a question gets answered in 89 characters instead of 5974, and that an outline costs 45.
+
+Those are one fixture on one machine, not a benchmark; nothing here is a claim about other pages. What repeats on any page is the shape: a question costs the answer, not the page.
+
+Ranking happens in this process with no model, no network and no third-party library. A question is folded to terms (plurals and participles collapse: `refunds` and `refund` are the same, `shipping` and `shipped` both become `ship`), scored against the page's blocks with saturation and length normalization, and the best passages are emitted with the heading they sit under. `query` also reports what it did not show: `passages: 2 of 40 blocks`.
+
+`changed` compares against the last `text`-shaped read of the same address. A first read is the whole page, not "nothing changed"; after that a re-read costs only the difference. Reads of a different shape — an `article` column, a `map` — do not become the baseline, because diffing two projections would report a change that never happened.
+
+A control keeps its number for as long as it is on the page: the page-side store maps the element itself to a ref, so re-reading a page whose first control disappeared does not renumber everything below it and report the whole page as changed. The numbering starts over when the document does, which is why a navigation invalidates every old ref — `browser_click` says the ref is stale instead of guessing.
+
+`maxChars` bounds each mode (default 2000, minimum 200). It is a character budget, not a token one: the same characters cost more in Chinese than in English.
 
 ## Turns and reclaim
 

@@ -89,6 +89,7 @@
     "packages/browser-control/src/chrome.ts",
     "packages/browser-control/src/main.ts",
     "packages/browser-control/src/mcp.ts",
+    "packages/browser-control/src/read.ts",
     "packages/browser-control/src/route.ts",
     "packages/browser-control/src/tools.ts",
     "packages/browser-control/src/types.ts",

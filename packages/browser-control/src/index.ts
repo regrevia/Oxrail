@@ -5,6 +5,7 @@
  */
 
 export * from "./types.js";
+export * from "./read.js";
 export * from "./route.js";
 export * from "./chrome.js";
 export * from "./cdp.js";

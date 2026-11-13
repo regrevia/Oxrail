@@ -14,6 +14,7 @@ import {
 } from "../packages/browser-control/src/types.js";
 import type {
   BrowserRoute,
+  DigestOptions,
   LoginState,
   OpenOptions,
   ReadOptions,
@@ -29,6 +30,7 @@ const TEST_VERSION = "0.1.0-alpha.8";
 const TOOL_NAMES = [
   "browser_open",
   "browser_view",
+  "browser_read",
   "browser_click",
   "browser_type",
   "browser_key",
@@ -108,6 +110,9 @@ class FakeRoute implements BrowserRoute {
     text: "saved sign-in for example.test",
   };
   readImpl: () => Promise<Snapshot> = async () => this.snapshot;
+  lastDigestOptions: DigestOptions | undefined = undefined;
+  digestImpl: (options: DigestOptions) => Promise<Snapshot> = async () =>
+    this.snapshot;
   clickImpl: (target: { ref?: number; text?: string }) => Promise<ToolResult> =
     async () => ok("clicked");
   stateImpl: () => Promise<RouteState> = async () => this.stateValue;
@@ -120,6 +125,11 @@ class FakeRoute implements BrowserRoute {
   async read(options?: ReadOptions): Promise<Snapshot> {
     this.lastReadOptions = options;
     return this.readImpl();
+  }
+
+  async digest(options: DigestOptions): Promise<Snapshot> {
+    this.lastDigestOptions = options;
+    return this.digestImpl(options);
   }
 
   async click(target: { ref?: number; text?: string }): Promise<ToolResult> {
@@ -402,13 +412,13 @@ describe("MCP server", () => {
     await harness.end();
   });
 
-  it("lists the ten tools in order with object schemas", async () => {
+  it("lists the eleven tools in order with object schemas", async () => {
     const harness = createHarness();
     harness.send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
     const reply = await harness.waitForReply(1);
     const tools = resultRecord(reply).tools as Array<Record<string, unknown>>;
     expect(tools.map((tool) => tool.name)).toEqual(TOOL_NAMES);
-    expect(tools).toHaveLength(10);
+    expect(tools).toHaveLength(11);
     expect(tools).toHaveLength(TOOL_DEFINITIONS.length);
     for (const tool of tools) {
       expect(typeof tool.description).toBe("string");
@@ -450,6 +460,95 @@ describe("MCP server", () => {
     expect(second).toContain("controls: 2");
     expect(second).not.toContain("title:");
     expect(harness.route.lastReadOptions).toEqual({ maxChars: 40 });
+    await harness.end();
+  });
+
+  it("passes a reading request through and renders its counts", async () => {
+    const harness = createHarness();
+    /* An article read has no controls to number: the column is prose. */
+    harness.route.digestImpl = async () => ({
+      ...harness.route.snapshot,
+      mode: "article",
+      text: "## Returns\nRefunds are paid within three working days.",
+      controls: [],
+      truncated: true,
+      chars: 52,
+      words: 812,
+    });
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_read", arguments: {} },
+    });
+    const text = firstBlock(await harness.waitForReply(1)).text as string;
+    /* The default is the reading column, not the page, and no budget was
+       asked for so none is invented. */
+    expect(harness.route.lastDigestOptions).toEqual({ mode: "article" });
+    expect(text).toContain("three working days");
+    expect(text).toContain("url: https://example.test/login");
+    expect(text).toContain("title: Example login");
+    expect(text).toContain("controls: 0");
+    expect(text).toContain("truncated: true");
+
+    /* The answer mode carries the question and its own counts. */
+    harness.route.digestImpl = async () => ({
+      ...harness.route.snapshot,
+      mode: "query",
+      text: "## Returns\nRefunds are paid within three working days.",
+      controls: [],
+      truncated: false,
+      chars: 52,
+      words: 812,
+      matched: 1,
+      total: 40,
+    });
+    harness.send({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "browser_read",
+        arguments: {
+          mode: "query",
+          query: "how long do refunds take",
+          maxChars: 900,
+        },
+      },
+    });
+    const answer = firstBlock(await harness.waitForReply(2)).text as string;
+    expect(harness.route.lastDigestOptions).toEqual({
+      mode: "query",
+      query: "how long do refunds take",
+      maxChars: 900,
+    });
+    expect(answer).toContain("three working days");
+    expect(answer).toContain("chars: 52");
+    expect(answer).toContain("words: 812");
+    expect(answer).toContain("passages: 1 of 40 blocks");
+    expect(answer).not.toContain("truncated");
+    await harness.end();
+  });
+
+  it("refuses the answer mode without a question", async () => {
+    const harness = createHarness();
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_read", arguments: { mode: "query" } },
+    });
+    const reply = await harness.waitForReply(1);
+    expect(JSON.stringify(reply)).toContain("needs a query");
+    await harness.end();
+  });
+
+  it("rejects an unknown reading mode", async () => {
+    const harness = createHarness();
+    const result = await dispatch(harness.route, "browser_read", {
+      mode: "summary",
+    });
+    expect(JSON.stringify(result)).toContain("mode");
     await harness.end();
   });
 

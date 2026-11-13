@@ -31,6 +31,7 @@ import {
   StaleRefError,
   type BrowserRoute,
   type Control,
+  type DigestOptions,
   type LoginState,
   type OpenOptions,
   type ReadOptions,
@@ -40,6 +41,14 @@ import {
   type Snapshot,
   type ToolResult,
 } from "./types.js";
+import {
+  articleExpression,
+  blocksExpression,
+  deltaOf,
+  evidence,
+  passagesToText,
+  type Block,
+} from "./read.js";
 
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 900;
@@ -115,7 +124,7 @@ export function viewSize(env: NodeJS.ProcessEnv = process.env): {
 
 /** The page walk, as one expression: it must run in the page and return JSON. */
 export function snapshotExpression(options: {
-  mode: "text" | "links" | "forms";
+  mode: "text" | "links" | "forms" | "map";
   maxChars: number;
 }): string {
   const mode = JSON.stringify(options.mode);
@@ -172,6 +181,25 @@ export function snapshotExpression(options: {
     return "control";
   };
 
+  /* A control keeps its number for as long as the element is on the page.
+     Numbering a fresh list from 1 on every read would renumber the page each
+     time anything above it appeared, and a delta between two reads would then
+     report the renumbering as a change. The store lives on the window, so a
+     navigation drops it along with the elements it points at. */
+  const store = window.__oxrailRefs || {
+    next: 1,
+    byEl: new WeakMap(),
+  };
+  window.__oxrailRefs = store;
+  const refOf = (el) => {
+    const known = store.byEl.get(el);
+    if (known !== undefined) return known;
+    const ref = store.next;
+    store.next += 1;
+    store.byEl.set(el, ref);
+    return ref;
+  };
+
   let nodes = 0;
   let truncated = false;
   const clickable = document.querySelectorAll(
@@ -185,13 +213,19 @@ export function snapshotExpression(options: {
     if (!visible(el)) continue;
     const name = nameOf(el);
     if (name === "" && !el.hasAttribute("contenteditable") && el.tagName.toLowerCase() !== "input") continue;
-    const ref = controls.length + 1;
+    const ref = refOf(el);
     el.setAttribute("data-oxrail-ref", String(ref));
     controls.push({ ref, role: roleOf(el), name, tag: el.tagName.toLowerCase() });
   }
 
   const body = document.body;
-  let text = body ? body.innerText || "" : "";
+  const everything = body ? body.innerText || "" : "";
+  let text = everything;
+  /* Words, not characters: a page of Chinese is not four times longer than the
+     same page in English, and a caller sizing a budget in characters will read
+     four times too much of it. Same rule as the term counter in read.js. */
+  const runs = everything.match(/[a-z0-9]+|[\\u3400-\\u9fff]/gi);
+  const words = runs === null ? 0 : runs.length;
   if (text.length > MAX_CHARS) { text = text.slice(0, MAX_CHARS); truncated = true; }
   text = text.replace(/\\n{3,}/g, "\\n\\n").trim();
 
@@ -217,21 +251,46 @@ export function snapshotExpression(options: {
     text = rows.length > 0 ? rows.join("\\n") : "(no visible controls)";
   }
 
+  /* A map is the shape of the page, not its words: the headings in order and
+     the controls already numbered, so a caller can decide what to read next
+     without having read anything yet. */
+  if (MODE === "map") {
+    const outline = [];
+    for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=\\"heading\\"]")) {
+      if (!visible(el)) continue;
+      const depth = Number(el.tagName.slice(1)) || 2;
+      const said = nameOf(el);
+      if (said === "") continue;
+      outline.push("#".repeat(Math.min(6, Math.max(1, depth))) + " " + said);
+      if (outline.length >= 80) { truncated = true; break; }
+    }
+    text = outline.length > 0 ? outline.join("\\n") : "(no headings)";
+  }
+
   return {
     url: location.href,
     title: document.title || "",
     text,
     controls,
     truncated,
+    words,
   };
 })()`;
 }
+
+/** Just where we are and how much there is to read, for a read that never
+ * touches `snapshotExpression` (the article column is built by `read.js`). */
+const META_EXPRESSION = `(() => {
+  const body = document.body;
+  const everything = body ? body.innerText || "" : "";
+  const runs = everything.match(/[a-z0-9]+|[\\u3400-\\u9fff]/gi);
+  return { url: location.href, title: document.title || "", words: runs === null ? 0 : runs.length };
+})()`;
 
 interface PageSession {
   readonly sessionId: string;
   readonly targetId: string;
 }
-
 type EvaluateResult = {
   result?: { value?: unknown; description?: string };
   exceptionDetails?: { text?: string; exception?: { description?: string } };
@@ -253,6 +312,16 @@ export class CdpBrowserRoute implements BrowserRoute {
   private readonly size: { width: number; height: number };
   private queue: Promise<unknown> = Promise.resolve();
   private closed = false;
+  /** The previous read, so `mode: "changed"` can answer with a delta. */
+  /** What the last `text`-shaped read said, for the `changed` mode. Only reads
+   * that return the same projection update it: diffing an article against a
+   * snapshot would report two different shapes as a change. It carries the
+   * address because a page that navigated has nothing to diff against. */
+  private last: {
+    url: string;
+    text: string;
+    controls: readonly Control[];
+  } | null = null;
 
   constructor(options?: { env?: NodeJS.ProcessEnv }) {
     const env = options?.env ?? process.env;
@@ -408,14 +477,180 @@ export class CdpBrowserRoute implements BrowserRoute {
         snapshotExpression({ mode, maxChars }),
       );
       this.touch();
+      this.last = {
+        url: snapshot.url,
+        text: snapshot.text,
+        controls: snapshot.controls,
+      };
       return {
         url: snapshot.url,
         title: snapshot.title,
         text: snapshot.text,
         controls: snapshot.controls,
         truncated: snapshot.truncated === true,
+        words: snapshot.words ?? 0,
+        chars: snapshot.text.length,
       };
     });
+  }
+
+  /**
+   * Read the page for a few hundred words instead of a whole DOM.
+   *
+   * `article` renders the reading column as Markdown. `map` gives the shape of
+   * the page — headings, controls, how many words there are — without the words.
+   * `query` returns only the passages that answer a question, ranked in this
+   * process. `changed` returns only what the last read did not already say.
+   *
+   * The snapshot is still the same shape, so a caller that only knows how to
+   * read `text` and `controls` keeps working.
+   */
+  async digest(options: DigestOptions): Promise<Snapshot> {
+    return this.serial(async () => {
+      await this.ensure();
+      const maxChars = options.maxChars ?? 2_000;
+      if (options.mode === "article") {
+        /* The page expression hands back JSON text rather than an object: a
+           CDP evaluate returns JSON-serialisable values, and a column of page
+           text is not one until it has been stringified. */
+        const raw = await this.evaluate<string>(articleExpression(maxChars));
+        const page = CdpBrowserRoute.parseArticle(raw);
+        const seen = await this.evaluate<{
+          url: string;
+          title: string;
+          words: number;
+        }>(META_EXPRESSION);
+        this.touch();
+        return {
+          url: seen.url,
+          title: seen.title,
+          text: page.text,
+          controls: [],
+          truncated: page.truncated === true,
+          mode: "article",
+          words: seen.words,
+          chars: page.text.length,
+        };
+      }
+      if (options.mode === "map") {
+        const page = await this.evaluate<Snapshot>(
+          snapshotExpression({ mode: "map", maxChars }),
+        );
+        this.touch();
+        return {
+          url: page.url,
+          title: page.title,
+          text: page.text,
+          controls: page.controls,
+          truncated: page.truncated === true,
+          mode: "map",
+          words: page.words ?? 0,
+          chars: page.text.length,
+        };
+      }
+      if (options.mode === "query") {
+        const asked = (options.query ?? "").trim();
+        if (asked === "")
+          throw new Error(
+            "mode query needs a query: what are you looking for?",
+          );
+        const blocks = await this.blocksFor(maxChars);
+        const found = evidence(blocks, asked, { maxChars, limit: 24 });
+        const page = await this.evaluate<Snapshot>(
+          snapshotExpression({ mode: "map", maxChars }),
+        );
+        this.touch();
+        const text = passagesToText(found);
+        return {
+          url: page.url,
+          title: page.title,
+          text:
+            text === ""
+              ? `(nothing on this page answers ${JSON.stringify(asked)})`
+              : text,
+          controls: page.controls,
+          truncated: found.rows.length < found.matched,
+          mode: "query",
+          words: page.words ?? 0,
+          chars: text.length,
+          matched: found.rows.length,
+          total: found.total,
+        };
+      }
+      const page = await this.evaluate<Snapshot>(
+        snapshotExpression({ mode: "text", maxChars }),
+      );
+      this.touch();
+      const before =
+        this.last !== null && this.last.url === page.url ? this.last : null;
+      this.last = { url: page.url, text: page.text, controls: page.controls };
+      /* No earlier read to compare against — or the page navigated since, in
+         which case everything is new: the honest answer is the whole page,
+         not "nothing changed". */
+      if (before === null)
+        return {
+          url: page.url,
+          title: page.title,
+          text: page.text,
+          controls: page.controls,
+          truncated: page.truncated === true,
+          mode: "changed",
+          words: page.words ?? 0,
+          chars: page.text.length,
+        };
+      const delta = deltaOf(before, {
+        text: page.text,
+        controls: page.controls,
+      });
+      return {
+        url: page.url,
+        title: page.title,
+        text:
+          delta.text === "" ? "(no change since the last read)" : delta.text,
+        controls: delta.controls,
+        truncated: page.truncated === true,
+        mode: "changed",
+        words: page.words ?? 0,
+        chars: delta.text.length,
+      };
+    });
+  }
+
+  /** The page's blocks, collected at six times the budget so ranking has room. */
+  /** The reading column comes back as JSON text; a malformed one is empty,
+   * not an exception, so a page that cannot be read does not kill the route. */
+  private static parseArticle(raw: unknown): {
+    text: string;
+    chars: number;
+    linkCount: number;
+    truncated: boolean;
+  } {
+    try {
+      const parsed = JSON.parse(String(raw ?? "")) as {
+        text?: unknown;
+        chars?: unknown;
+        linkCount?: unknown;
+        truncated?: unknown;
+      };
+      return {
+        text: String(parsed.text ?? ""),
+        chars: Number(parsed.chars ?? 0),
+        linkCount: Number(parsed.linkCount ?? 0),
+        truncated: parsed.truncated === true,
+      };
+    } catch {
+      return { text: "", chars: 0, linkCount: 0, truncated: false };
+    }
+  }
+
+  private async blocksFor(maxChars: number): Promise<Block[]> {
+    const raw = await this.evaluate<string>(blocksExpression(maxChars * 6));
+    try {
+      const parsed = JSON.parse(raw) as { blocks?: Block[] };
+      return Array.isArray(parsed.blocks) ? parsed.blocks : [];
+    } catch {
+      return [];
+    }
   }
 
   /** Resolve a numbered control or a text match to a point that will hit it. */

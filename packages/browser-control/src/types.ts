@@ -35,6 +35,24 @@ export interface Snapshot {
   readonly text: string;
   readonly controls: readonly Control[];
   readonly truncated: boolean;
+  /** Which reading produced this, when it was one of the cheap ones. */
+  readonly mode?: ReadMode | "text" | "links" | "forms";
+  /** Words in the page, so a caller can see how much it did not read. */
+  readonly words?: number;
+  /** Characters in `text`, which is what a context budget actually spends. */
+  readonly chars?: number;
+  /** Passages shown, against the blocks they were chosen from. */
+  readonly matched?: number;
+  readonly total?: number;
+}
+
+/** A cheap reading of the page: what to take, and what to look for. */
+export interface DigestOptions {
+  readonly mode: ReadMode;
+  /** The question, for `query`. */
+  readonly query?: string;
+  /** Character ceiling for the returned text. */
+  readonly maxChars?: number;
 }
 
 /** Where the browser is right now, and how long it will stay. */
@@ -64,6 +82,16 @@ export interface ReadOptions {
   readonly maxChars?: number;
 }
 
+/**
+ * The reading modes that cost a few hundred words instead of a page.
+ *
+ * `article` renders the reading column as Markdown. `map` lists the controls and
+ * the headings and counts the words, without carrying the words. `query` picks
+ * the passages that answer a question, ranked locally. `changed` re-reads and
+ * returns only what the last read did not already say.
+ */
+export type ReadMode = "article" | "map" | "query" | "changed";
+
 /** A screenshot, base64 for the host plus the file it was also written to. */
 export interface ShotOptions {
   readonly fullPage?: boolean;
@@ -85,6 +113,8 @@ export interface LoginState {
 export interface BrowserRoute {
   open(options?: OpenOptions): Promise<RouteState>;
   read(options?: ReadOptions): Promise<Snapshot>;
+  /** Read the page cheaply: the reading column, a map, an answer, or a delta. */
+  digest(options: DigestOptions): Promise<Snapshot>;
   click(target: { ref?: number; text?: string }): Promise<ToolResult>;
   type(target: {
     ref?: number;

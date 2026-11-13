@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.25
+# Oxrail — 唯一实现规范（SPEC）v1.0.26
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -48,7 +48,7 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 1.0.25
+  spec_version: 1.0.26
   status: AUTHORITATIVE
   effective_date: 2026-11-12
   evidence_cutoff: 2026-09-05
@@ -6077,6 +6077,8 @@ fixture 不使用真实密码、OTP 或第三方账户。
 | `TEST-BCTL-002` | 自有浏览器进程与 profile 隔离 | 路由只驱动自己启动的 Chromium 与自己创建的 profile，不接管使用者浏览器；Native package 不 import CDP 路由 |
 | `TEST-BCTL-003` | 控件编号在重绘后仍可解析 | 重绘后旧编号要么重新解析到正确目标，要么明确报错；不得静默点到错误元素 |
 | `TEST-BCTL-004` | 浏览器早死与空闲回收 | 启动即死亡在毫秒级报错并给出原因；空闲回收不发生在仍在观察时，`state` 如实报告 `pid`/`idleMs`/`closesInMs` |
+| `TEST-BCTL-005` | 读取模式回答且受预算约束 | 长页面上 `query` 必须返回含答案的段落并报告未展示部分（`matched`/`total`）；四种模式都受限 `maxChars`；`query` 缺问题时拒绝，未知模式指名报错；`browser_view` 的行为与编号语义不变 |
+| `TEST-BCTL-006` | 投影与增量一致性 | `changed` 只与同投影同地址的上一次读取比较；首次读取返回整页；导航后重建基线；页面未变时 `ref` 跨读取保持同一编号 |
 
 `TEST-BCTL-*` 不是 Native parity 用例：不得计入 NIF 矩阵，也不得用于支持任何“等价于 Native”的声明；其覆盖对象是 SEC-52 的路由自身合同。
 
@@ -7638,6 +7640,7 @@ BLOCKED / REJECTED / KILLED may branch from any non-ACCEPTED state
 | [`WP-V1-005`](#wp-v1-005) | Stable publish and rollback readiness | P0 | `PLANNED` |
 | [`WP-V1-006`](#wp-v1-006) | Post-release drift and incident monitoring | P0 | `PLANNED` |
 | [`WP-BCTL-001`](#wp-bctl-001) | Opt-in Browser Control route (MCP / CDP) | P2 | `IN_PROGRESS` |
+| [`WP-BCTL-002`](#wp-bctl-002) | Context-efficient Browser reads (`browser_read`) | P1 | `IN_PROGRESS` |
 | [`WP-RLS-100`](#wp-rls-100) | V1.0 final acceptance | P0 | `PLANNED` |
 
 ## 49.5 工作包卡片
@@ -11911,6 +11914,56 @@ Ship a Browser Control surface that a host may opt into through an explicitly co
 
 ---
 
+<a id="wp-bctl-002"></a>
+### WP-BCTL-002 — Context-efficient Browser reads (`browser_read`)
+<!-- wp-meta: MILESTONE=V1.0 PRIORITY=P1 STATUS=IN_PROGRESS -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V1.0` |
+| Priority | `P1` |
+| Status | `IN_PROGRESS` |
+| Depends | `WP-BCTL-001` |
+| Related | `SEC-52`, `ADR-BROWSERCTL-002`, `KILL-K12`, `KILL-K18`, `KILL-K34`, `TEST-BCTL-005`, `TEST-BCTL-006` |
+
+**目标**
+
+Let a host answer a question about a page, or watch it for changes, without paying for the page: read a projection of the page instead of its full text. The projection is computed in the route's own process, with no model call, no network request and no third-party dependency, and it is always a read — it never clicks, types, navigates or rewrites a coordinate.
+
+**产物**
+
+- `packages/browser-control/src/read.ts`: block extraction, term folding, ranking, passage selection, delta
+- `digest()` on the route, and the `browser_read` tool (`article` / `map` / `query` / `changed`)
+- `docs/adr/ADR-BROWSERCTL-002.md`
+- tests for `TEST-BCTL-005`–`TEST-BCTL-006`
+
+**验收**
+
+- [ ] `browser_view` is unchanged: same modes, defaults, output shape and ref semantics.
+- [ ] `browser_read {mode:"query"}` returns the passage containing the answer on a long page, and reports how much it did not show (`matched` of `total`).
+- [ ] `query` needs a `query`; an unknown mode is refused with the field named.
+- [ ] `changed` compares only against a previous read of the same projection and the same address; a first read returns the page, and a navigated page starts a new baseline.
+- [ ] A `ref` keeps its number across re-reads of an unchanged page, so a delta between two reads is a change and not a renumbering.
+- [ ] Every mode is bounded by `maxChars`, and the bound is documented as characters, not tokens.
+- [ ] Ranking is a pure function of page text and query, covered by unit tests with no browser.
+- [ ] The reading layer is not described as Computer Use, Hook-visible, Guard-mediated or equivalent to Native; it does not enter the NIF matrix or a paired benchmark.
+- [ ] `docs/product/browser-control.md` states which measurement is a regression baseline and which is a page-specific result, including the case where `article` is not smaller than `browser_view`.
+
+**测试 / 证据**
+
+- `TEST-BCTL-005` (reading modes answer and bound), `TEST-BCTL-006` (projection and delta consistency)
+- `tests/browser-control-read.test.ts`, `tests/browser-control-digest-live.test.ts`
+- evidence manifest per §49.1
+
+**阻断 / Kill**
+
+- `KILL-K12` if reading reliably requires clicking, typing or navigating.
+- `KILL-K18` if ranking rewrites final coordinates, paths, deltas, keys, clicks or focus.
+- `KILL-K34` if the reading layer is reported as Hook-visible, Guard-mediated or Native-equivalent.
+- No ACCEPTED status before the live reading measurement is recorded as evidence.
+
+---
+
 ## 49.18 工作包状态变更格式
 
 ```yaml
@@ -12088,6 +12141,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.26 — 2026-11-14
+
+- 新增 WP-BCTL-002（上下文高效的 Browser 读取层）、TEST-BCTL-005 至 TEST-BCTL-006、ADR-BROWSERCTL-002：`browser_read` 提供 `article`/`map`/`query`/`changed` 四种只读投影，排序在本进程内完成（不调用模型、不发网络请求、不引入第三方依赖），巡航预算按字符计；`changed` 只与同投影同地址的上一次读取比较，控件编号跨读取保持稳定。该层不点击、不输入、不导航、不改写坐标，不改变 §2.5 与 §42.1 的结论，也不作 Computer Use 声明。
+- 新增 WP-BCTL-002 与 TEST-BCTL-005 至 TEST-BCTL-006；`browser_view` 的行为、默认值与编号语义不变，读取层是新增的第十一个工具，宿主不调用时不存在任何成本。
+- §2.5、§42.1 与 SEC-52 对写执行的约束不变：读取层只投影已加载页面，写侧若要扩大必须按 §42.1 的三个选项单独决策；本次不新增默认写路径。
 
 ### v1.0.25 — 2026-11-12
 
@@ -12815,4 +12874,4 @@ Next eligible WP:
 
 ## 52.5 相关 ID
 
-`REQ-BCTL-001`–`REQ-BCTL-004`、`GATE-G16`、`KILL-K34`、`WP-BCTL-001`、`TEST-BCTL-001`–`TEST-BCTL-004`、`ADR-BROWSERCTL-001`；实现位于 `packages/browser-control/`。
+`REQ-BCTL-001`–`REQ-BCTL-004`、`GATE-G16`、`KILL-K34`、`WP-BCTL-001`、`WP-BCTL-002`、`TEST-BCTL-001`–`TEST-BCTL-006`、`ADR-BROWSERCTL-001`、`ADR-BROWSERCTL-002`；实现位于 `packages/browser-control/`。读取层（`browser_read` 的四种模式）只投影已加载页面，不点击、不输入、不导航、不改写坐标，因此不改变本章对写执行的既有约束。

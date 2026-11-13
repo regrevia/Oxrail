@@ -7,6 +7,7 @@
 
 import type {
   BrowserRoute,
+  DigestOptions,
   LoginState,
   OpenOptions,
   ReadOptions,
@@ -112,6 +113,51 @@ const TOOLS: readonly ToolSpec[] = [
         ...(maxChars === undefined ? {} : { maxChars }),
       };
       return textResult(formatSnapshot(await route.read(options)));
+    },
+  },
+  {
+    name: "browser_read",
+    title: "Read only what you need",
+    description:
+      'Read the page without taking the whole DOM. mode:"article" gives the reading column as Markdown; mode:"map" gives the headings and the numbered controls with no body text, to decide what to read next; mode:"query" plus a query gives only the passages that answer it, ranked locally, so a long page costs a few hundred words; mode:"changed" gives only what appeared since the last read. Prefer this over browser_view on any page longer than a few screens.',
+    properties: {
+      mode: {
+        kind: "enum",
+        values: ["article", "map", "query", "changed"],
+        description:
+          "article: the text. map: the shape. query: the passages that answer a query. changed: only what is new.",
+      },
+      query: {
+        kind: "string",
+        description: "What you are looking for, for mode query.",
+      },
+      maxChars: {
+        kind: "integer",
+        description: "Stop after this many characters. Default 2000.",
+        extras: { minimum: 200 },
+      },
+    },
+    async run(route, args) {
+      const mode = stringValue(args, "mode") ?? "article";
+      if (
+        mode !== "article" &&
+        mode !== "map" &&
+        mode !== "query" &&
+        mode !== "changed"
+      )
+        return failure(
+          `unknown mode ${JSON.stringify(mode)}: use article, map, query or changed`,
+        );
+      const query = stringValue(args, "query");
+      if (mode === "query" && (query ?? "").trim() === "")
+        return failure("mode query needs a query: what are you looking for?");
+      const maxChars = integerValue(args, "maxChars");
+      const options: DigestOptions = {
+        mode,
+        ...(query === undefined ? {} : { query }),
+        ...(maxChars === undefined ? {} : { maxChars }),
+      };
+      return textResult(formatSnapshot(await route.digest(options)));
     },
   },
   {
@@ -441,6 +487,12 @@ function formatSnapshot(snapshot: Snapshot): string {
   if (lines.length === 0) lines.push("(blank page)");
   if (snapshot.url !== "") lines.push(`url: ${snapshot.url}`);
   if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
+  /* What the read cost and what it left behind, so a caller can tell a short
+     page from a page it is only seeing part of. */
+  if (snapshot.chars !== undefined) lines.push(`chars: ${snapshot.chars}`);
+  if (snapshot.words !== undefined) lines.push(`words: ${snapshot.words}`);
+  if (snapshot.matched !== undefined && snapshot.total !== undefined)
+    lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
   if (snapshot.truncated) {
     lines.push(`controls: ${snapshot.controls.length}`, "truncated: true");
   }

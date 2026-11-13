@@ -939,6 +939,384 @@ var init_chrome = __esm({
   }
 });
 
+// packages/browser-control/src/read.ts
+function blocksExpression(budget) {
+  return `(() => {
+  const root = document.querySelector('article, main, [role="main"]') || document.body
+  if (!root) return JSON.stringify({ blocks: [] })
+  const limit = ${Math.max(200, Math.trunc(budget) || 200)}
+  const guard = limit * 6
+  const BLOCK = new Set(['P', 'LI', 'BLOCKQUOTE', 'PRE', 'FIGCAPTION', 'DD', 'DT', 'SUMMARY'])
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME', 'CANVAS', 'VIDEO', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FORM', 'BUTTON', 'SELECT', 'TEXTAREA'])
+  const out = []
+  const seen = new Set()
+  const stack = []
+  let chars = 0
+  const flatten = (text) => String(text ?? '').replace(/\\s+/g, ' ').trim()
+  const trail = () => stack.filter((one) => one !== '').join(' \\u203a ')
+  const said = () => stack.filter((one) => one !== '').pop() ?? ''
+  /* How much of a block reads like prose rather than a list of links: ends of
+     sentences per word, plus a length floor. One number, no dictionary. */
+  const written = (text) => {
+    const words = text.toLowerCase().match(/[a-z0-9]+|[\\u3400-\\u9fff]/g) ?? []
+    if (words.length === 0) return 0
+    const ends = text.match(/[.!?\\u3002\\uff01\\uff1f;\\uff1b]/g) ?? []
+    return Math.min(1, (ends.length / words.length) * 12)
+  }
+  const quality = (text, density) => Math.round((0.45 * (1 - density) + 0.35 * written(text) + 0.2 * Math.min(1, text.length / 180)) * 100) / 100
+  const push = (el) => {
+    if (chars >= guard) return
+    const text = flatten(el.innerText ?? el.textContent ?? '')
+    if (text === '' || text.length > 4000) return
+    let linkChars = 0
+    for (const link of el.querySelectorAll('a')) linkChars += flatten(link.innerText ?? '').length
+    if (el.tagName === 'A') linkChars += text.length
+    const density = Math.min(1, linkChars / text.length)
+    /* A block that is almost all link and short is a menu item, not a sentence;
+       carrying it only spends the budget. */
+    if (density >= 0.8 && text.length < 80) return
+    out.push({ h: said(), p: trail(), t: text, d: Math.round(density * 100) / 100, q: quality(text, density) })
+    chars += text.length
+  }
+  const row = (tr) => {
+    if (chars >= guard) return
+    const cells = Array.from(tr.children).filter((cell) => cell.tagName === 'TD' || cell.tagName === 'TH')
+    const words = cells.map((cell) => flatten(cell.innerText ?? ''))
+    if (words.filter((one) => one !== '').length < 2) return
+    const table = tr.closest('table')
+    const first = table === null ? null : table.querySelector('tr')
+    const head = first === null || first === tr ? [] : Array.from(first.children).map((cell) => flatten(cell.innerText ?? ''))
+    const line = words.map((one, at) => (head[at] === undefined || head[at] === '' || head[at] === one ? one : head[at] + ': ' + one)).join(' | ')
+    out.push({ h: said(), p: trail(), t: line, d: 0, q: 0.95, r: 1 })
+    chars += line.length
+  }
+  const walk = (el) => {
+    if (el === null || chars >= guard) return
+    const tag = el.tagName
+    if (SKIP.has(tag) || el.hidden === true || el.getAttribute?.('aria-hidden') === 'true') return
+    const style = getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden') return
+    if (/^H[1-6]$/.test(tag)) {
+      const level = Number(tag.slice(1))
+      stack.length = level
+      stack[level - 1] = flatten(el.innerText ?? '')
+      return
+    }
+    if (tag === 'TR') {
+      if (!seen.has(el)) { seen.add(el); row(el) }
+      return
+    }
+    if (BLOCK.has(tag)) {
+      if (!seen.has(el)) { seen.add(el); push(el) }
+      return
+    }
+    for (const child of el.children) walk(child)
+  }
+  walk(root)
+  const title = document.title
+  /* The page arrives in document order, so a menu at the top would spend the
+     whole budget before the article starts. Keep the blocks that read like
+     content, still in page order, until the budget is spent. */
+  let kept = out
+  const total = out.reduce((sum, block) => sum + block.t.length, 0)
+  if (total > limit) {
+    const byQuality = out.map((block, at) => ({ block, at })).sort((a, b) => b.block.q - a.block.q || a.at - b.at)
+    const keep = new Set()
+    let used = 0
+    for (const one of byQuality) {
+      if (used + one.block.t.length > limit) continue
+      keep.add(one.at)
+      used += one.block.t.length
+    }
+    kept = out.filter((block, at) => keep.has(at))
+  }
+  return JSON.stringify({ title, blocks: kept })
+})()`;
+}
+function articleExpression(budget) {
+  const limit = Math.max(400, Math.trunc(budget) || 400);
+  return `(() => {
+  const limit = ${limit}
+  const pick = document.querySelector('article, main, [role="main"]') || document.body
+  if (!pick) return JSON.stringify({ text: '', chars: 0, linkCount: 0, truncated: false })
+  const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME', 'CANVAS', 'VIDEO', 'HEADER', 'FOOTER', 'NAV', 'ASIDE'])
+  const lines = []
+  let length = 0
+  let truncated = false
+  let linkCount = 0
+  const walk = (node) => {
+    if (truncated || node === null || node === undefined) return
+    if (node.nodeType === 3) {
+      const text = String(node.textContent ?? '').replace(/\\s+/g, ' ').trim()
+      if (text !== '') { lines.push(text); length += text.length + 1 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (node.nodeType !== 1) return
+    const tag = node.tagName
+    if (skip.has(tag) || node.hidden === true || node.getAttribute?.('aria-hidden') === 'true') return
+    const style = getComputedStyle(node)
+    if (style.display === 'none' || style.visibility === 'hidden') return
+    if (/^H[1-6]$/.test(tag)) {
+      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
+      if (text !== '') { lines.push('#'.repeat(Number(tag.slice(1))) + ' ' + text); length += text.length + Number(tag.slice(1)) + 2 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (tag === 'A') {
+      linkCount += 1
+      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
+      const href = String(node.href ?? '')
+      if (text !== '' && /^https?:/.test(href)) {
+        const line = '[' + text.slice(0, 120) + '](' + href + ')'
+        lines.push(line); length += line.length + 1
+      } else if (text !== '') { lines.push(text); length += text.length + 1 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (tag === 'LI') {
+      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
+      if (text !== '') { lines.push('- ' + text); length += text.length + 3 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (tag === 'PRE' || tag === 'CODE') {
+      const text = String(node.innerText ?? '').slice(0, 1200)
+      if (text !== '') { lines.push('~~~'); lines.push(text); lines.push('~~~'); length += text.length + 8 }
+      if (length >= limit) truncated = true
+      return
+    }
+    for (const child of node.childNodes) walk(child)
+  }
+  walk(pick)
+  let text = lines.filter((one) => one !== '').join(String.fromCharCode(10)).trim()
+  if (text.length > limit) { text = text.slice(0, limit); truncated = true }
+  return JSON.stringify({ text, chars: text.length, linkCount: document.querySelectorAll('a[href]').length, truncated })
+})()`;
+}
+function undouble(word) {
+  return /([b-dfglmnprst])\1$/.test(word) ? word.slice(0, -1) : word;
+}
+function fold(word) {
+  if (word.length <= 3 || /[0-9]/.test(word) || /[^a-z]/.test(word))
+    return word;
+  if (word.endsWith("ies") && word.length > 4) return `${word.slice(0, -3)}y`;
+  if (word.endsWith("sses")) return word.slice(0, -2);
+  if (word.endsWith("ing") && word.length > 5)
+    return undouble(word.slice(0, -3));
+  if (word.endsWith("ed") && word.length > 4 && !word.endsWith("eed"))
+    return undouble(word.slice(0, -2));
+  if (word.endsWith("es") && word.length > 4) return word.slice(0, -2);
+  if (word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us") && !word.endsWith("is"))
+    return word.slice(0, -1);
+  return word;
+}
+function terms(text) {
+  const raw = String(text ?? "").toLowerCase().match(TOKEN);
+  return (raw ?? []).map(fold);
+}
+function sentences(text) {
+  const raw = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (raw === "") return [];
+  const out = [];
+  for (const piece of raw.split(SENTENCE_BREAK)) {
+    const one = piece.trim();
+    if (one === "") continue;
+    const continues = /^[a-z(]/.test(one) || (out[out.length - 1]?.length ?? 0) < 4;
+    if (out.length > 0 && continues)
+      out[out.length - 1] = `${out[out.length - 1] ?? ""} ${one}`;
+    else out.push(one);
+  }
+  return out;
+}
+function trailOf(block) {
+  const path2 = String(block.p ?? "");
+  const near = String(block.h ?? "");
+  if (path2 === "" || path2 === near || path2.length > 90) return near;
+  return path2;
+}
+function rank(blocks, query) {
+  const asked = terms(query);
+  if (asked.length === 0) return [];
+  const docs = blocks.map((block) => ({
+    block,
+    terms: terms(`${block.p ?? ""} ${block.h ?? ""} ${block.t}`)
+  }));
+  const average = docs.reduce((sum, one) => sum + one.terms.length, 0) / Math.max(1, docs.length);
+  const seen = /* @__PURE__ */ new Map();
+  for (const one of docs)
+    for (const term of new Set(one.terms))
+      seen.set(term, (seen.get(term) ?? 0) + 1);
+  const total = Math.max(1, docs.length);
+  const scored = [];
+  for (const one of docs) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of one.terms) counts.set(term, (counts.get(term) ?? 0) + 1);
+    let score = 0;
+    for (const term of asked) {
+      const seenIn = seen.get(term) ?? 0;
+      if (seenIn === 0) continue;
+      const idf = Math.log(1 + (total - seenIn + 0.5) / (seenIn + 0.5));
+      const tf = counts.get(term) ?? 0;
+      if (tf === 0) continue;
+      const length = one.terms.length;
+      score += idf * (tf * (SATURATION + 1) / (tf + SATURATION * (1 - 0.75 + 0.75 * length / average)));
+    }
+    score *= 1 - 0.8 * Number(one.block.d ?? 0);
+    score *= 0.85 + 0.15 * Number(one.block.q ?? 0.5);
+    if (score > 0) scored.push({ block: one.block, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+function evidence(blocks, query, options = {}) {
+  const typed = terms(query);
+  if (typed.length === 0) return { rows: [], total: blocks.length, matched: 0 };
+  const near = rank(blocks, query).slice(
+    0,
+    Math.max(1, Math.min(60, Number(options.blocks ?? 40)))
+  );
+  const units = [];
+  for (const row of near) {
+    const heading = trailOf(row.block);
+    const parts = sentences(String(row.block.t ?? ""));
+    for (let step = 0; step < parts.length; step += 1) {
+      const spoken = terms(parts[step] ?? "");
+      if (spoken.length === 0) continue;
+      units.push({
+        text: parts[step] ?? "",
+        terms: spoken,
+        heading,
+        at: blocks.indexOf(row.block),
+        step,
+        prior: row.score,
+        block: row.block,
+        score: 0
+      });
+    }
+  }
+  if (units.length === 0) return { rows: [], total: blocks.length, matched: 0 };
+  const total = Math.max(1, units.length);
+  const seen = /* @__PURE__ */ new Map();
+  for (const unit of units)
+    for (const term of new Set(unit.terms))
+      seen.set(term, (seen.get(term) ?? 0) + 1);
+  const average = units.reduce((sum, unit) => sum + unit.terms.length, 0) / total;
+  const weight = (term) => {
+    const inHowMany = seen.get(term) ?? 0;
+    return inHowMany === 0 ? 0 : Math.log(1 + (total - inHowMany + 0.5) / (inHowMany + 0.5));
+  };
+  const sharp = typed.filter((term) => weight(term) >= 0.5);
+  const asked = sharp.length > 0 ? sharp : typed;
+  const askedWeight = asked.reduce((sum, term) => sum + weight(term), 0);
+  for (const unit of units) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of unit.terms)
+      counts.set(term, (counts.get(term) ?? 0) + 1);
+    let score = 0;
+    let covered = 0;
+    for (const term of asked) {
+      const tf = counts.get(term) ?? 0;
+      if (tf === 0) continue;
+      covered += weight(term);
+      score += weight(term) * (tf * (SATURATION + 1) / (tf + SATURATION * (1 - 0.75 + 0.75 * unit.terms.length / average)));
+    }
+    score *= covered / Math.max(1e-6, askedWeight);
+    const headingHit = asked.filter(
+      (term) => terms(unit.heading).includes(term)
+    ).length;
+    const linkish = (1 - 0.8 * Number(unit.block.d ?? 0)) * (unit.block.r === 1 ? 1 : 0.9 + 0.1 * Number(unit.block.q ?? 0.5));
+    unit.score = score * linkish * (1 + 0.25 * headingHit) * (1 + 0.5 * (unit.prior > 0 ? 1 : 0));
+  }
+  const best = units.reduce((top, unit) => Math.max(top, unit.score), 0);
+  for (const unit of units) if (unit.score < best * 0.2) unit.score = 0;
+  const lambda = Math.max(0, Math.min(0.9, Number(options.lambda ?? 0.35)));
+  const ceiling = Math.max(
+    200,
+    Math.min(24e3, Number(options.maxChars ?? 4e3))
+  );
+  const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
+  const chosen = [];
+  const left = units.filter((unit) => unit.score > 0);
+  let used = 0;
+  let lastHeading = "";
+  while (left.length > 0 && chosen.length < limit) {
+    let at = -1;
+    let bestValue = -Infinity;
+    for (let i = 0; i < left.length; i += 1) {
+      const candidate = left[i];
+      const spoken = new Set(candidate.terms);
+      let overlap = 0;
+      for (const picked of chosen) {
+        const other = new Set(picked.terms);
+        let shared = 0;
+        for (const term of spoken) if (other.has(term)) shared += 1;
+        overlap = Math.max(
+          overlap,
+          shared / Math.max(1, spoken.size + other.size - shared)
+        );
+      }
+      const value = candidate.score * (1 - lambda) - lambda * overlap;
+      if (value > bestValue) {
+        bestValue = value;
+        at = i;
+      }
+    }
+    if (at < 0 || bestValue <= 0) break;
+    const pick = left.splice(at, 1)[0];
+    const heading = pick.heading !== lastHeading && pick.heading !== "" ? pick.heading.length + 8 : 0;
+    if (used + pick.text.length + heading > ceiling && chosen.length > 0) break;
+    lastHeading = pick.heading;
+    used += pick.text.length + heading;
+    chosen.push(pick);
+  }
+  chosen.sort((a, b) => a.at - b.at || a.step - b.step);
+  return {
+    rows: chosen.map((one) => ({
+      text: one.text,
+      heading: one.heading,
+      at: one.at,
+      step: one.step
+    })),
+    total: blocks.length,
+    matched: chosen.length
+  };
+}
+function passagesToText(passages) {
+  const lines = [];
+  let heading = "";
+  for (const row of passages.rows) {
+    if (row.heading !== "" && row.heading !== heading) {
+      heading = row.heading;
+      lines.push(`## ${heading}`);
+    }
+    lines.push(row.text);
+  }
+  return lines.join("\n");
+}
+function deltaOf(before, after) {
+  const known = new Set(
+    before.controls.map((control) => `${control.ref}\0${control.name}`)
+  );
+  const controls = after.controls.filter(
+    (control) => !known.has(`${control.ref}\0${control.name}`)
+  );
+  const seen = new Set(
+    before.text.split("\n").map((line) => line.trim()).filter((line) => line !== "")
+  );
+  const lines = after.text.split("\n").filter((line) => line.trim() !== "" && !seen.has(line.trim()));
+  return { text: lines.join("\n"), controls };
+}
+var TOKEN, SATURATION, SENTENCE_BREAK;
+var init_read = __esm({
+  "packages/browser-control/src/read.ts"() {
+    "use strict";
+    TOKEN = /[a-z0-9]+|[\u3400-\u9fff]/g;
+    SATURATION = 1.5;
+    SENTENCE_BREAK = /(?<=[。！？；])|(?<=[.!?;])\s+/u;
+  }
+});
+
 // packages/browser-control/src/route.ts
 var route_exports = {};
 __export(route_exports, {
@@ -1042,6 +1420,25 @@ function snapshotExpression(options) {
     return "control";
   };
 
+  /* A control keeps its number for as long as the element is on the page.
+     Numbering a fresh list from 1 on every read would renumber the page each
+     time anything above it appeared, and a delta between two reads would then
+     report the renumbering as a change. The store lives on the window, so a
+     navigation drops it along with the elements it points at. */
+  const store = window.__oxrailRefs || {
+    next: 1,
+    byEl: new WeakMap(),
+  };
+  window.__oxrailRefs = store;
+  const refOf = (el) => {
+    const known = store.byEl.get(el);
+    if (known !== undefined) return known;
+    const ref = store.next;
+    store.next += 1;
+    store.byEl.set(el, ref);
+    return ref;
+  };
+
   let nodes = 0;
   let truncated = false;
   const clickable = document.querySelectorAll(
@@ -1055,13 +1452,19 @@ function snapshotExpression(options) {
     if (!visible(el)) continue;
     const name = nameOf(el);
     if (name === "" && !el.hasAttribute("contenteditable") && el.tagName.toLowerCase() !== "input") continue;
-    const ref = controls.length + 1;
+    const ref = refOf(el);
     el.setAttribute("data-oxrail-ref", String(ref));
     controls.push({ ref, role: roleOf(el), name, tag: el.tagName.toLowerCase() });
   }
 
   const body = document.body;
-  let text = body ? body.innerText || "" : "";
+  const everything = body ? body.innerText || "" : "";
+  let text = everything;
+  /* Words, not characters: a page of Chinese is not four times longer than the
+     same page in English, and a caller sizing a budget in characters will read
+     four times too much of it. Same rule as the term counter in read.js. */
+  const runs = everything.match(/[a-z0-9]+|[\\u3400-\\u9fff]/gi);
+  const words = runs === null ? 0 : runs.length;
   if (text.length > MAX_CHARS) { text = text.slice(0, MAX_CHARS); truncated = true; }
   text = text.replace(/\\n{3,}/g, "\\n\\n").trim();
 
@@ -1087,12 +1490,29 @@ function snapshotExpression(options) {
     text = rows.length > 0 ? rows.join("\\n") : "(no visible controls)";
   }
 
+  /* A map is the shape of the page, not its words: the headings in order and
+     the controls already numbered, so a caller can decide what to read next
+     without having read anything yet. */
+  if (MODE === "map") {
+    const outline = [];
+    for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=\\"heading\\"]")) {
+      if (!visible(el)) continue;
+      const depth = Number(el.tagName.slice(1)) || 2;
+      const said = nameOf(el);
+      if (said === "") continue;
+      outline.push("#".repeat(Math.min(6, Math.max(1, depth))) + " " + said);
+      if (outline.length >= 80) { truncated = true; break; }
+    }
+    text = outline.length > 0 ? outline.join("\\n") : "(no headings)";
+  }
+
   return {
     url: location.href,
     title: document.title || "",
     text,
     controls,
     truncated,
+    words,
   };
 })()`;
 }
@@ -1106,13 +1526,14 @@ function inspectBinary(env = process.env) {
   }
   throw new Error("set OXRAIL_CHROME to a Chrome or Chromium binary path");
 }
-var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, CdpBrowserRoute;
+var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, META_EXPRESSION, CdpBrowserRoute;
 var init_route = __esm({
   "packages/browser-control/src/route.ts"() {
     "use strict";
     init_cdp();
     init_chrome();
     init_types();
+    init_read();
     VIEW_WIDTH = 1280;
     VIEW_HEIGHT = 900;
     DEFAULT_MAX_CHARS = 6e3;
@@ -1120,7 +1541,13 @@ var init_route = __esm({
     MAX_IDLE_MS = 15 * 6e4;
     MIN_IDLE_MS = 6e4;
     LOAD_TIMEOUT_MS = 2e4;
-    CdpBrowserRoute = class {
+    META_EXPRESSION = `(() => {
+  const body = document.body;
+  const everything = body ? body.innerText || "" : "";
+  const runs = everything.match(/[a-z0-9]+|[\\u3400-\\u9fff]/gi);
+  return { url: location.href, title: document.title || "", words: runs === null ? 0 : runs.length };
+})()`;
+    CdpBrowserRoute = class _CdpBrowserRoute {
       chrome = null;
       cdp = null;
       page = null;
@@ -1132,6 +1559,12 @@ var init_route = __esm({
       size;
       queue = Promise.resolve();
       closed = false;
+      /** The previous read, so `mode: "changed"` can answer with a delta. */
+      /** What the last `text`-shaped read said, for the `changed` mode. Only reads
+       * that return the same projection update it: diffing an article against a
+       * snapshot would report two different shapes as a change. It carries the
+       * address because a page that navigated has nothing to diff against. */
+      last = null;
       constructor(options) {
         const env = options?.env ?? process.env;
         this.idleWindow = idleMs(env);
@@ -1268,14 +1701,152 @@ var init_route = __esm({
             snapshotExpression({ mode, maxChars })
           );
           this.touch();
+          this.last = {
+            url: snapshot.url,
+            text: snapshot.text,
+            controls: snapshot.controls
+          };
           return {
             url: snapshot.url,
             title: snapshot.title,
             text: snapshot.text,
             controls: snapshot.controls,
-            truncated: snapshot.truncated === true
+            truncated: snapshot.truncated === true,
+            words: snapshot.words ?? 0,
+            chars: snapshot.text.length
           };
         });
+      }
+      /**
+       * Read the page for a few hundred words instead of a whole DOM.
+       *
+       * `article` renders the reading column as Markdown. `map` gives the shape of
+       * the page — headings, controls, how many words there are — without the words.
+       * `query` returns only the passages that answer a question, ranked in this
+       * process. `changed` returns only what the last read did not already say.
+       *
+       * The snapshot is still the same shape, so a caller that only knows how to
+       * read `text` and `controls` keeps working.
+       */
+      async digest(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const maxChars = options.maxChars ?? 2e3;
+          if (options.mode === "article") {
+            const raw = await this.evaluate(articleExpression(maxChars));
+            const page2 = _CdpBrowserRoute.parseArticle(raw);
+            const seen = await this.evaluate(META_EXPRESSION);
+            this.touch();
+            return {
+              url: seen.url,
+              title: seen.title,
+              text: page2.text,
+              controls: [],
+              truncated: page2.truncated === true,
+              mode: "article",
+              words: seen.words,
+              chars: page2.text.length
+            };
+          }
+          if (options.mode === "map") {
+            const page2 = await this.evaluate(
+              snapshotExpression({ mode: "map", maxChars })
+            );
+            this.touch();
+            return {
+              url: page2.url,
+              title: page2.title,
+              text: page2.text,
+              controls: page2.controls,
+              truncated: page2.truncated === true,
+              mode: "map",
+              words: page2.words ?? 0,
+              chars: page2.text.length
+            };
+          }
+          if (options.mode === "query") {
+            const asked = (options.query ?? "").trim();
+            if (asked === "")
+              throw new Error(
+                "mode query needs a query: what are you looking for?"
+              );
+            const blocks = await this.blocksFor(maxChars);
+            const found = evidence(blocks, asked, { maxChars, limit: 24 });
+            const page2 = await this.evaluate(
+              snapshotExpression({ mode: "map", maxChars })
+            );
+            this.touch();
+            const text = passagesToText(found);
+            return {
+              url: page2.url,
+              title: page2.title,
+              text: text === "" ? `(nothing on this page answers ${JSON.stringify(asked)})` : text,
+              controls: page2.controls,
+              truncated: found.rows.length < found.matched,
+              mode: "query",
+              words: page2.words ?? 0,
+              chars: text.length,
+              matched: found.rows.length,
+              total: found.total
+            };
+          }
+          const page = await this.evaluate(
+            snapshotExpression({ mode: "text", maxChars })
+          );
+          this.touch();
+          const before = this.last !== null && this.last.url === page.url ? this.last : null;
+          this.last = { url: page.url, text: page.text, controls: page.controls };
+          if (before === null)
+            return {
+              url: page.url,
+              title: page.title,
+              text: page.text,
+              controls: page.controls,
+              truncated: page.truncated === true,
+              mode: "changed",
+              words: page.words ?? 0,
+              chars: page.text.length
+            };
+          const delta = deltaOf(before, {
+            text: page.text,
+            controls: page.controls
+          });
+          return {
+            url: page.url,
+            title: page.title,
+            text: delta.text === "" ? "(no change since the last read)" : delta.text,
+            controls: delta.controls,
+            truncated: page.truncated === true,
+            mode: "changed",
+            words: page.words ?? 0,
+            chars: delta.text.length
+          };
+        });
+      }
+      /** The page's blocks, collected at six times the budget so ranking has room. */
+      /** The reading column comes back as JSON text; a malformed one is empty,
+       * not an exception, so a page that cannot be read does not kill the route. */
+      static parseArticle(raw) {
+        try {
+          const parsed = JSON.parse(String(raw ?? ""));
+          return {
+            text: String(parsed.text ?? ""),
+            chars: Number(parsed.chars ?? 0),
+            linkCount: Number(parsed.linkCount ?? 0),
+            truncated: parsed.truncated === true
+          };
+        } catch {
+          return { text: "", chars: 0, linkCount: 0, truncated: false };
+        }
+      }
+      async blocksFor(maxChars) {
+        const raw = await this.evaluate(blocksExpression(maxChars * 6));
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed.blocks) ? parsed.blocks : [];
+        } catch {
+          return [];
+        }
       }
       /** Resolve a numbered control or a text match to a point that will hit it. */
       async locate(target) {
@@ -1731,6 +2302,44 @@ var TOOLS = [
     }
   },
   {
+    name: "browser_read",
+    title: "Read only what you need",
+    description: 'Read the page without taking the whole DOM. mode:"article" gives the reading column as Markdown; mode:"map" gives the headings and the numbered controls with no body text, to decide what to read next; mode:"query" plus a query gives only the passages that answer it, ranked locally, so a long page costs a few hundred words; mode:"changed" gives only what appeared since the last read. Prefer this over browser_view on any page longer than a few screens.',
+    properties: {
+      mode: {
+        kind: "enum",
+        values: ["article", "map", "query", "changed"],
+        description: "article: the text. map: the shape. query: the passages that answer a query. changed: only what is new."
+      },
+      query: {
+        kind: "string",
+        description: "What you are looking for, for mode query."
+      },
+      maxChars: {
+        kind: "integer",
+        description: "Stop after this many characters. Default 2000.",
+        extras: { minimum: 200 }
+      }
+    },
+    async run(route, args) {
+      const mode = stringValue(args, "mode") ?? "article";
+      if (mode !== "article" && mode !== "map" && mode !== "query" && mode !== "changed")
+        return failure(
+          `unknown mode ${JSON.stringify(mode)}: use article, map, query or changed`
+        );
+      const query = stringValue(args, "query");
+      if (mode === "query" && (query ?? "").trim() === "")
+        return failure("mode query needs a query: what are you looking for?");
+      const maxChars = integerValue(args, "maxChars");
+      const options = {
+        mode,
+        ...query === void 0 ? {} : { query },
+        ...maxChars === void 0 ? {} : { maxChars }
+      };
+      return textResult(formatSnapshot(await route.digest(options)));
+    }
+  },
+  {
     name: "browser_click",
     title: "Click a control",
     description: "Activate one control: give its ref from the last browser_view, or its visible text. Pass exactly one of the two. A click usually changes the page, so read again before the next ref-based call.",
@@ -2017,6 +2626,10 @@ function formatSnapshot(snapshot) {
   if (lines.length === 0) lines.push("(blank page)");
   if (snapshot.url !== "") lines.push(`url: ${snapshot.url}`);
   if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
+  if (snapshot.chars !== void 0) lines.push(`chars: ${snapshot.chars}`);
+  if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);
+  if (snapshot.matched !== void 0 && snapshot.total !== void 0)
+    lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
   if (snapshot.truncated) {
     lines.push(`controls: ${snapshot.controls.length}`, "truncated: true");
   }
