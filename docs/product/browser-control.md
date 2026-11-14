@@ -78,12 +78,16 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 
 `browser_view` returns the page. On a large page that is the expensive part of a turn, and most of what comes back does not answer anything. `browser_read` reads the same page in one of four modes:
 
-| Mode      | Returns                                                              | For                                        |
-| --------- | -------------------------------------------------------------------- | ------------------------------------------ |
-| `article` | The page as a Markdown column: headings, prose, lists, links         | Reading it, or quoting it                  |
-| `map`     | Headings, how many controls there are, how many words — no body text | Deciding whether the page is the right one |
-| `query`   | Only the passages that answer `query`, ranked in this process        | A question with an answer on the page      |
-| `changed` | Only what the previous `text` read did not already say               | Watching a page after an action            |
+| Mode      | Returns                                                                      | For                                        |
+| --------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
+| `article` | The page as a Markdown column: headings, prose, lists, links                 | Reading it, or quoting it                  |
+| `map`     | The heading outline and the page's controls — no body text                   | Deciding whether the page is the right one |
+| `query`   | Only the passages that answer `query`, ranked in this process, plus controls | A question with an answer on the page      |
+| `changed` | Only what the previous `text` read did not already say                       | Watching a page after an action            |
+
+A read is also what makes its page writable: the controls it returns are the refs `browser_click` and `browser_type` will accept, and nothing else is. `map` and `query` return them, so a question can be followed by a click on the answer's page. `changed` returns only the controls that are new since the last read, but it hands the page's whole set, so a write can follow it too. `article` returns and hands no controls — it is for reading and quoting, not for acting — and it leaves the refs from the last read that had them still valid, because the page has not gone anywhere.
+
+That is why `map` and `query` are not free on a page with many links, and why `query` on such a page still costs its 61 `[n]` lines.
 
 `query` is the mode worth reaching for first. Measured on one long page — 40 near-identical sections, three headings, a list of 60 links, one answer, one button — the same browser session gave, in characters received by the caller:
 
