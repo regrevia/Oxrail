@@ -107,6 +107,19 @@ A control keeps its number for as long as it is on the page: the page-side store
 
 `maxChars` bounds each mode (default 2000, minimum 200). It is a character budget, not a token one: the same characters cost more in Chinese than in English.
 
+## Composed pages: shadow roots and frames
+
+A flat document query is correct on a plain page and wrong on a modern one. Controls increasingly live in an open shadow root or inside an iframe, where `document.querySelectorAll` cannot see them; the page then reads as if the button does not exist, and a click has nothing to land on. `browser_view` reaches both:
+
+- **Open shadow roots** are traversed, up to 24 roots per reading. A closed shadow root has no readable contents and is not claimed as readable.
+- **Same-origin frames** are read as part of the page. Their text is appended with a marker (`[frame 1]`), and their controls are numbered in the same sequence with the frame in the number: refs below `900000` are in the page, refs at or above it encode a frame number and a position inside that frame. A click on such a ref is resolved inside the frame and offset by the frame's own corner, so the press lands on the control rather than on the frame's rectangle.
+
+Measured on one composed fixture — a button in the document, a button in an open shadow root, and a button in a same-origin frame — `browser_view` numbered all three (`1`, `2`, `900003`) and reported the frames as `frame: 0`, `0`, `1`. Clicking `900003` fired the framed button's own handler.
+
+Frames nest, so a control two frames down is numbered by the whole chain rather than by the innermost number: on a fixture whose inner frame holds `Save`, the control came back as ref `1000001` in `frame: 2`.
+
+A frame the route cannot read — a cross-origin frame — is reported as `frames not read: N` rather than dropped: a short reading of a page that visibly has more should say so. Reading those needs a per-frame session, which is a larger permission surface than this route takes today. Crossing a frame border is the only place the route needs two origins to prove anything — before a foreign `src` commits, its iframe holds an initial `about:blank` that belongs to the parent's origin and reads as empty rather than as hidden — so that one is measured against two local ports instead of `data:` markup.
+
 ## Turns and reclaim
 
 The route holds one browser for the life of the host session. When the session ends the host closes stdin, and the process closes Chrome before it exits. If the browser is unused for the idle window it is stopped too, so a forgotten window does not stay on the machine; the next tool call starts it again. `browser_state` reports `idleMs` and `closesInMs` so a host can decide to keep working or to call `browser_close` itself.

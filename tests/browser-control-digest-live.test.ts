@@ -52,6 +52,29 @@ const page = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
 </main>
 </body></html>`)}`;
 
+/* Frames nest, so embedding markup in a `srcdoc` attribute has to escape one
+   level at a time: escaping only the quotes turns the inner attribute's own
+   `&quot;` back into a raw quote one level down and the frame parses as
+   garbage. `&` first, then `"`. */
+const esc = (html: string) =>
+  html.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+const fixturePage = (body: string) =>
+  `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><title>Composed</title></head><body>${body}</body></html>`)}`;
+
+/* The way real pages are built now: one control in a shadow root, one in a
+   frame, one in the document. A flat query on the document sees only the last
+   of them, and then a click tool is right and useless. */
+const composed = fixturePage(`<button id="plain">Plain button</button>
+<div id="host"></div>
+<iframe id="frame" srcdoc="${esc(`<!doctype html><html><body>
+<p>Widget price: 42 euros.</p>
+<button id="buy" onclick="document.getElementById('said').textContent='Bought'">Buy now</button>
+<p id="said">Not bought</p></body></html>`)}"></iframe>
+<script>
+  const root = document.getElementById("host").attachShadow({ mode: "open" });
+  root.innerHTML = '<p>Account</p><button id="deep">Delete account</button>';
+</script>`);
+
 describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
   it(
     "answers a question with a fraction of what reading the page costs",
@@ -143,6 +166,163 @@ describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
         expect(queryMs).toBeLessThan(2_000);
       } finally {
         await route.close();
+        const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+        if (dir !== "")
+          await import("node:fs").then((fs) =>
+            fs.rmSync(dir, { recursive: true, force: true }),
+          );
+      }
+    },
+  );
+
+  it(
+    "numbers a control inside a shadow root and inside a frame, and clicks both",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-frames-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      try {
+        await route.open({ url: composed });
+        const view = await route.read({});
+
+        const deep = view.controls.find(
+          (control) => control.name === "Delete account",
+        );
+        const framed = view.controls.find(
+          (control) => control.name === "Buy now",
+        );
+        /* A shadow root is part of the page, so its control is numbered like
+           any other and lives in the main frame. */
+        expect(deep).toBeDefined();
+        expect(deep?.frame).toBe(0);
+        /* A frame's controls carry the frame, so the number says which
+           document to look in. */
+        expect(framed).toBeDefined();
+        expect(framed?.frame).toBe(1);
+        expect(framed?.ref ?? 0).toBeGreaterThanOrEqual(900_000);
+
+        const report = {
+          controls: view.controls.map((control) => ({
+            ref: control.ref,
+            name: control.name,
+            frame: control.frame,
+          })),
+          blindFrames: view.blindFrames ?? 0,
+          text: view.text,
+        };
+        console.log(JSON.stringify(report, null, 2));
+
+        /* The frame's words are numbered as part of the page, or a price or an
+           error inside a widget would be invisible to the reader. */
+        expect(view.text).toContain("Widget");
+
+        /* The press has to land on the control inside the frame, not on the
+           frame's corner: the button's own handler is the proof. */
+        expect(framed).toBeDefined();
+        if (framed !== undefined) await route.click({ ref: framed.ref });
+        const after = await route.read({});
+        expect(after.text).toContain("Bought");
+
+        /* A control in a shadow root is not behind anything, so it clicks too. */
+        if (deep !== undefined) {
+          const clicked = await route.click({ ref: deep.ref });
+          expect(JSON.stringify(clicked)).toContain("Delete account");
+        }
+      } finally {
+        await route.close();
+        const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+        if (dir !== "")
+          await import("node:fs").then((fs) =>
+            fs.rmSync(dir, { recursive: true, force: true }),
+          );
+      }
+    },
+  );
+
+  it(
+    "reaches a control two frames deep, and counts a frame it cannot read",
+    { timeout: 90_000 },
+    async () => {
+      /* A cross-origin frame only stops being readable once its own document
+         has committed; before that an iframe holds an initial about:blank, which
+         is the parent's origin and reads as empty rather than as hidden. So the
+         fixture needs two real origins, and a local pair of ports is one without
+         reaching the network. */
+      const { createServer } = await import("node:http");
+      const serve = (body: string) =>
+        new Promise<{ port: number; close: () => void }>((resolve) => {
+          const server = createServer((_request, response) => {
+            response.writeHead(200, {
+              "content-type": "text/html; charset=utf-8",
+            });
+            response.end(body);
+          });
+          server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            const port =
+              typeof address === "object" && address !== null
+                ? address.port
+                : 0;
+            resolve({ port, close: () => server.close() });
+          });
+        });
+
+      const foreign = await serve("<p>Another origin</p>");
+      const nested = await serve(`<!doctype html><html><body>
+<iframe id="outer" srcdoc="${esc(`<!doctype html><html><body>
+<p>Outer frame</p>
+<iframe id="inner" srcdoc="${esc(`<!doctype html><html><body>
+<button id="save" onclick="document.getElementById('said').textContent='Saved'">Save</button>
+<p id="said">Not saved</p></body></html>`)}"></iframe>
+</body></html>`)}"></iframe>
+<iframe id="foreign" src="http://127.0.0.1:${foreign.port}/widget"></iframe>
+</body></html>`);
+
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-nested-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      try {
+        await route.open({ url: `http://127.0.0.1:${nested.port}/page` });
+        /* Frames nest asynchronously: the inner document does not exist at the
+           moment the outer one does, so a first read is allowed to be shallow.
+           Poll the page the way a caller would. */
+        let view = await route.read({});
+        const deadline = Date.now() + 5_000;
+        while (
+          view.controls.every((control) => control.name !== "Save") &&
+          Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          view = await route.read({});
+        }
+
+        const save = view.controls.find((control) => control.name === "Save");
+        expect(save).toBeDefined();
+        /* The outer frame is frame 1 and the inner one is frame 2, in the same
+           order the snapshot walked them. */
+        expect(save?.frame).toBe(2);
+        /* The frame the route cannot read is reported, not omitted: a page that
+           visibly holds more must not read as complete. */
+        expect(view.blindFrames ?? 0).toBeGreaterThanOrEqual(1);
+
+        if (save !== undefined) {
+          await route.click({ ref: save.ref });
+          const after = await route.read({});
+          expect(after.text).toContain("Saved");
+        }
+      } finally {
+        await route.close();
+        foreign.close();
+        nested.close();
         const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
         if (dir !== "")
           await import("node:fs").then((fs) =>

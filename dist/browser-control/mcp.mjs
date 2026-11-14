@@ -1321,6 +1321,8 @@ var init_read = __esm({
 var route_exports = {};
 __export(route_exports, {
   CdpBrowserRoute: () => CdpBrowserRoute,
+  FRAME_BASE: () => FRAME_BASE,
+  FRAME_SLOT: () => FRAME_SLOT,
   headlessFromEnv: () => headlessFromEnv,
   idleMs: () => idleMs,
   inspectBinary: () => inspectBinary,
@@ -1376,11 +1378,17 @@ function snapshotExpression(options) {
   const MAX_CONTROLS = 160;
   const MAX_NODES = 9000;
 
+  /* An element inside a frame comes from another realm, where the main
+     document's Element constructor does not match it; asking its own window
+     for the constructor and for getComputedStyle is what keeps a framed
+     control from being reported as invisible. */
   const visible = (el) => {
-    if (!(el instanceof Element)) return false;
+    const own = el && el.ownerDocument ? el.ownerDocument.defaultView : null;
+    if (own === null) return false;
+    if (!(el instanceof own.Element)) return false;
     const rect = el.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return false;
-    const style = getComputedStyle(el);
+    const style = own.getComputedStyle(el);
     if (style.visibility === "hidden" || style.display === "none") return false;
     if (style.opacity !== "" && Number(style.opacity) < 0.05) return false;
     return true;
@@ -1441,24 +1449,119 @@ function snapshotExpression(options) {
 
   let nodes = 0;
   let truncated = false;
-  const clickable = document.querySelectorAll(
-    'a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[role="menuitem"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])'
-  );
+
+  /* A document is not the whole page: components live in shadow roots, and a
+     checkout, a player or a chat widget lives in an iframe. Reading only
+     document.querySelectorAll would report such a page as having nothing to
+     click, and a click tool would then be right and useless. */
+  const SELECTOR = 'a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[role="menuitem"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])';
+
+  /* Open shadow roots only. A closed one cannot be reached from here at all,
+     and pretending otherwise would hide the gap instead of reporting it. */
+  const rootsOf = (root, out, depth) => {
+    if (depth > 4 || out.length >= 24) return out;
+    for (const el of root.querySelectorAll("*")) {
+      if (el.shadowRoot) {
+        out.push(el.shadowRoot);
+        rootsOf(el.shadowRoot, out, depth + 1);
+        if (out.length >= 24) break;
+      }
+    }
+    return out;
+  };
+
+  const deepQuery = (root, selector) => {
+    const found = [];
+    const roots = [root];
+    rootsOf(root, roots, 0);
+    for (const one of roots) {
+      for (const el of one.querySelectorAll(selector)) found.push(el);
+      if (found.length >= 4000) return found;
+    }
+    return found;
+  };
+
+  /* Frames, in document order, same-origin only. A cross-origin frame throws on
+     contentDocument; it is counted, not invented. */
+  const frames = [];
+  const unseen = [];
+  const walkFrames = (doc, depth) => {
+    if (depth > 2 || frames.length >= 8) return;
+    for (const holder of doc.querySelectorAll("iframe,frame")) {
+      let inside = null;
+      try { inside = holder.contentDocument; } catch (error) { inside = null; }
+      if (inside === null) { unseen.push(holder); continue; }
+      if (frames.length >= 8) { unseen.push(holder); continue; }
+      frames.push({ holder, doc: inside });
+      walkFrames(inside, depth + 1);
+    }
+  };
+  walkFrames(document, 0);
+  if (unseen.length > 0) truncated = true;
+
+  const offsetOf = (holder) => {
+    let x = 0;
+    let y = 0;
+    let node = holder;
+    let guard = 0;
+    while (node !== null && node !== undefined && guard < 8) {
+      const box = node.getBoundingClientRect();
+      x += box.left + (node.clientLeft || 0);
+      y += box.top + (node.clientTop || 0);
+      const own = node.ownerDocument;
+      const view = own === null ? null : own.defaultView;
+      if (view === null || view === undefined) break;
+      x -= view.scrollX || 0;
+      y -= view.scrollY || 0;
+      node = view.frameElement;
+      guard += 1;
+    }
+    return { x, y };
+  };
+
   const controls = [];
-  for (const el of clickable) {
+  const elements = [];
+  /* A control inside a frame is numbered in its own document, because that is
+     where the attribute has to be found again; the number a caller sees
+     carries the frame, so a click knows which document to look in and which
+     corner to add. */
+  const collect = (root, slot) => {
+    for (const el of deepQuery(root, SELECTOR)) {
+      if (controls.length >= MAX_CONTROLS) { truncated = true; return; }
+      nodes += 1;
+      if (nodes > MAX_NODES) { truncated = true; return; }
+      if (!visible(el)) continue;
+      const name = nameOf(el);
+      if (name === "" && !el.hasAttribute("contenteditable") && el.tagName.toLowerCase() !== "input") continue;
+      const local = refOf(el);
+      el.setAttribute("data-oxrail-ref", String(local));
+      elements.push(el);
+      controls.push({
+        ref: slot === 0 ? local : ${FRAME_BASE} + (slot - 1) * ${FRAME_SLOT} + local,
+        role: roleOf(el),
+        name,
+        tag: el.tagName.toLowerCase(),
+        frame: slot,
+      });
+    }
+  };
+  collect(document, 0);
+  for (let slot = 1; slot <= frames.length; slot += 1) {
     if (controls.length >= MAX_CONTROLS) { truncated = true; break; }
-    nodes += 1;
-    if (nodes > MAX_NODES) { truncated = true; break; }
-    if (!visible(el)) continue;
-    const name = nameOf(el);
-    if (name === "" && !el.hasAttribute("contenteditable") && el.tagName.toLowerCase() !== "input") continue;
-    const ref = refOf(el);
-    el.setAttribute("data-oxrail-ref", String(ref));
-    controls.push({ ref, role: roleOf(el), name, tag: el.tagName.toLowerCase() });
+    collect(frames[slot - 1].doc, slot);
   }
 
   const body = document.body;
-  const everything = body ? body.innerText || "" : "";
+  let everything = body ? body.innerText || "" : "";
+  /* A framed widget's words are part of the page for a reader: a price, an
+     error, a login form. Frames after the first are labelled, because three
+     silent paragraphs from three widgets read as one page. */
+  for (let slot = 1; slot <= frames.length; slot += 1) {
+    const inside = frames[slot - 1].doc;
+    const said = inside.body ? (inside.body.innerText || "").replace(/\\s+/g, " ").trim() : "";
+    if (said === "") continue;
+    everything += "\\n\\n[frame " + slot + "] " + said.slice(0, 400);
+  }
   let text = everything;
   /* Words, not characters: a page of Chinese is not four times longer than the
      same page in English, and a caller sizing a budget in characters will read
@@ -1470,7 +1573,9 @@ function snapshotExpression(options) {
 
   if (MODE === "links") {
     const links = [];
-    for (const el of document.querySelectorAll("a[href]")) {
+    const roots = [document];
+    rootsOf(document, roots, 0);
+    for (const root of roots) for (const el of root.querySelectorAll("a[href]")) {
       if (!visible(el)) continue;
       const name = nameOf(el);
       if (name === "") continue;
@@ -1481,8 +1586,8 @@ function snapshotExpression(options) {
   }
   if (MODE === "forms") {
     const rows = [];
-    for (const el of controls) {
-      const node = document.querySelector('[data-oxrail-ref="' + el.ref + '"]');
+    for (const [at, el] of controls.entries()) {
+      const node = elements[at];
       const value = node && typeof node.value === "string" ? node.value : "";
       const type = node ? (node.getAttribute("type") || "") : "";
       rows.push("[" + el.ref + "] " + el.role + (type ? ":" + type : "") + (value ? " = " + value : "") + (el.name ? " \u2014 " + el.name : ""));
@@ -1495,7 +1600,11 @@ function snapshotExpression(options) {
      without having read anything yet. */
   if (MODE === "map") {
     const outline = [];
-    for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=\\"heading\\"]")) {
+    const heads = [];
+    const roots = [document];
+    rootsOf(document, roots, 0);
+    for (const root of roots) for (const el of root.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=\\"heading\\"]")) heads.push(el);
+    for (const el of heads) {
       if (!visible(el)) continue;
       const depth = Number(el.tagName.slice(1)) || 2;
       const said = nameOf(el);
@@ -1512,6 +1621,7 @@ function snapshotExpression(options) {
     text,
     controls,
     truncated,
+    blindFrames: unseen.length,
     words,
   };
 })()`;
@@ -1526,7 +1636,7 @@ function inspectBinary(env = process.env) {
   }
   throw new Error("set OXRAIL_CHROME to a Chrome or Chromium binary path");
 }
-var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, META_EXPRESSION, CdpBrowserRoute;
+var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, FRAME_BASE, FRAME_SLOT, META_EXPRESSION, CdpBrowserRoute;
 var init_route = __esm({
   "packages/browser-control/src/route.ts"() {
     "use strict";
@@ -1541,6 +1651,8 @@ var init_route = __esm({
     MAX_IDLE_MS = 15 * 6e4;
     MIN_IDLE_MS = 6e4;
     LOAD_TIMEOUT_MS = 2e4;
+    FRAME_BASE = 9e5;
+    FRAME_SLOT = 1e5;
     META_EXPRESSION = `(() => {
   const body = document.body;
   const everything = body ? body.innerText || "" : "";
@@ -1712,6 +1824,9 @@ var init_route = __esm({
             text: snapshot.text,
             controls: snapshot.controls,
             truncated: snapshot.truncated === true,
+            /* Carried out of the page expression, or a caller counting only what it
+               received would call a page with an unreadable frame complete. */
+            blindFrames: snapshot.blindFrames ?? 0,
             words: snapshot.words ?? 0,
             chars: snapshot.text.length
           };
@@ -1853,11 +1968,32 @@ var init_route = __esm({
         if (target.ref !== void 0 && target.text !== void 0) {
           throw new Error("give either ref or text, not both");
         }
+        if (target.ref !== void 0 && target.ref >= FRAME_BASE) {
+          return this.locateInFrame(target.ref);
+        }
         const expression = `(() => {
-  const el = ${target.ref !== void 0 ? `document.querySelector('[data-oxrail-ref="${target.ref}"]')` : `(() => {
+  /* A control in a shadow root is in the page and has a point; a lookup on the
+     document alone would report it as gone. */
+  const roots = [document];
+  for (let at = 0; at < roots.length && roots.length < 24; at += 1)
+    for (const node of roots[at].querySelectorAll("*"))
+      if (node.shadowRoot !== null && roots.length < 24) roots.push(node.shadowRoot);
+  const deepAll = (selector) => {
+    const out = [];
+    for (const root of roots) for (const node of root.querySelectorAll(selector)) out.push(node);
+    return out;
+  };
+  const deepOne = (selector) => {
+    for (const root of roots) {
+      const node = root.querySelector(selector);
+      if (node !== null) return node;
+    }
+    return null;
+  };
+  const el = ${target.ref !== void 0 ? `deepOne('[data-oxrail-ref="${target.ref}"]')` : `(() => {
     const needle = ${JSON.stringify(target.text ?? "")}.replace(/\\s+/g, " ").trim().toLowerCase();
     if (needle === "") return null;
-    const all = document.querySelectorAll('a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[role="menuitem"]');
+    const all = deepAll('a[href],button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[role="menuitem"]');
     let best = null, bestArea = Infinity;
     for (const node of all) {
       const text = (node.innerText || node.value || node.getAttribute("aria-label") || node.getAttribute("title") || "").replace(/\\s+/g, " ").trim().toLowerCase();
@@ -1901,10 +2037,12 @@ var init_route = __esm({
   for (const [fx, fy] of spread) {
     const x = within(seenLeft + (seenRight - seenLeft) * fx, innerWidth);
     const y = within(seenTop + (seenBottom - seenTop) * fy, innerHeight);
-    const hit = document.elementFromPoint(x, y);
+    const root = el.getRootNode();
+    const own = root !== null && typeof root.elementFromPoint === "function" ? root : document;
+    const hit = own.elementFromPoint(x, y);
     if (hit !== null && (hit === el || el.contains(hit))) return { found: true, x, y, label };
   }
-  const top = document.elementFromPoint(
+  const top = own.elementFromPoint(
     within(seenLeft + (seenRight - seenLeft) / 2, innerWidth),
     within(seenTop + (seenBottom - seenTop) / 2, innerHeight),
   );
@@ -1935,6 +2073,86 @@ var init_route = __esm({
             `${label === "" ? "control" : JSON.stringify(label)} has no reachable point on screen.`
           );
         }
+        return { x: found.x, y: found.y, label };
+      }
+      /** A ref inside a frame is found in that frame's document, and its point is
+       * the frame's corner plus its own rect; the press is dispatched to the page
+       * as a whole, so only the total matters. */
+      async locateInFrame(ref) {
+        const slot = Math.floor((ref - FRAME_BASE) / FRAME_SLOT) + 1;
+        const local = ref - FRAME_BASE - (slot - 1) * FRAME_SLOT;
+        const found = await this.evaluate(`(() => {
+  /* The same walk the snapshot did, in the same order, or the frame number
+     means a different document here than it meant there. */
+  const holders = [];
+  const walk = (doc, depth) => {
+    if (depth > 2 || holders.length >= 8) return;
+    for (const one of doc.querySelectorAll("iframe,frame")) {
+      let inside = null;
+      try { inside = one.contentDocument; } catch (error) { inside = null; }
+      if (inside === null) continue;
+      holders.push(one);
+      walk(inside, depth + 1);
+    }
+  };
+  walk(document, 0);
+  const holder = holders[${slot} - 1];
+  if (!holder) return { found: false, frames: holders.length };
+  let inside = null;
+  try { inside = holder.contentDocument; } catch (error) { inside = null; }
+  if (inside === null) return { found: true, frames: holders.length, blocked: "the frame is cross-origin, so its contents cannot be read or clicked through this route" };
+  const el = inside.querySelector('[data-oxrail-ref="${local}"]');
+  if (!el) return { found: false, frames: holders.length };
+  const label = (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("title") || "").replace(/\\s+/g, " ").trim().slice(0, 80);
+  const own = el.getBoundingClientRect();
+  if (own.width < 2 || own.height < 2) return { found: true, frames: holders.length, label, blocked: "it has no area on screen to click" };
+  let x = 0, y = 0, node = holder, guard = 0, top = holder;
+  while (node && guard < 8) {
+    const box = node.getBoundingClientRect();
+    x += box.left + (node.clientLeft || 0);
+    y += box.top + (node.clientTop || 0);
+    const view = node.ownerDocument === null ? null : node.ownerDocument.defaultView;
+    if (view === null) break;
+    x -= view.scrollX || 0;
+    y -= view.scrollY || 0;
+    node = view.frameElement;
+    /* The hit test runs in this document, where the only frame element that
+       exists is the outermost one: a nested frame's holder belongs to another
+       document, and comparing a point with it can never match. */
+    if (node) top = node;
+    guard += 1;
+  }
+  const at = { x: x + own.left + own.width / 2, y: y + own.top + own.height / 2 };
+  /* The point has to be inside the frame's own visible box, and the frame's
+     box has to be on screen, or the press lands on whatever is above it. */
+  const box = holder.getBoundingClientRect();
+  if (at.x < box.left || at.x > box.right || at.y < box.top || at.y > box.bottom)
+    return { found: true, frames: holders.length, label, blocked: "it is scrolled out of the part of the frame that is shown" };
+  if (at.x < 0 || at.y < 0 || at.x > innerWidth - 1 || at.y > innerHeight - 1)
+    return { found: true, frames: holders.length, label, blocked: "the frame is outside the visible area" };
+  const hit = document.elementFromPoint(at.x, at.y);
+  if (hit === null || !(hit === top || top.contains(hit)))
+    return { found: true, frames: holders.length, label, blocked: "something is on top of the frame" };
+  return { found: true, frames: holders.length, label, x: at.x, y: at.y };
+})()`);
+        if (found.found !== true) {
+          if (found.frames < slot)
+            throw new StaleRefError(
+              `the page changed; control ${ref} was in frame ${slot}, and the page no longer has that frame \u2014 call browser_view again`
+            );
+          throw new StaleRefError(
+            `the page changed; control ${ref} is gone \u2014 call browser_view again`
+          );
+        }
+        const label = found.label ?? "";
+        if (found.blocked !== void 0)
+          throw new Error(
+            `${label === "" ? "control" : JSON.stringify(label)} cannot be clicked: ${found.blocked}.`
+          );
+        if (found.x === void 0 || found.y === void 0)
+          throw new Error(
+            `${label === "" ? "control" : JSON.stringify(label)} has no reachable point on screen.`
+          );
         return { x: found.x, y: found.y, label };
       }
       async mouseClick(x, y) {
@@ -2630,6 +2848,11 @@ function formatSnapshot(snapshot) {
   if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);
   if (snapshot.matched !== void 0 && snapshot.total !== void 0)
     lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  if ((snapshot.blindFrames ?? 0) > 0) {
+    lines.push(
+      `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`
+    );
+  }
   if (snapshot.truncated) {
     lines.push(`controls: ${snapshot.controls.length}`, "truncated: true");
   }

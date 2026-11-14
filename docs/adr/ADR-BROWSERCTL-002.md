@@ -39,6 +39,22 @@
 3. **两级下钻。** `map` 与全文之间多了 `query`，可以只取相关段落、再按 `region` 扩张，而不是在「大纲」和「整页」之间二选一。
 4. **分层的上限。** 控件（`MAX_CONTROLS` 160）、正文（`maxChars`）、块（`blocksExpression` 预算）、答案段落（`limit` 24）各有各自的上限；但溢出**只**以 `truncated` 一个布尔加 `matched`/`total` 报告，不是每个角色一份计数。初稿写成「各自报告溢出量」同样说过头了，按实现改为现状。
 
+## 快照深度（第二个增量）
+
+读取层的第一版只走 `document.querySelectorAll`。这在一份扁平文档上正确，在真实页面上不成立：现代站点把控件放进开放的 shadow root 和 iframe，扁平查询会漏掉它们，于是 `browser_view` 报「页面上没有那个按钮」，而 `browser_click` 也就无从点起——不是点错了，是看不见。这不是上下文预算问题，是覆盖问题，因此单独记录。
+
+决策与边界：
+
+1. **开放 shadow root 一律进入。** 深度上限 24 个 root、`deepQuery` 在 4000 个元素处提前退出，避免病态页把读取拖死。关闭的 shadow root 无特权可读，不假装能读。
+2. **同源 frame 内的控件纳入同一份快照。** 帧号从 1 开始，主文档为 0；控件编号编码「帧号 + 帧内编号」，帧内仍写本地 `data-oxrail-ref`，因此该属性在它所在的文档里能被找回。点击按 `frameElement` 逐级加 `getBoundingClientRect()` 与 `clientLeft/clientTop`、减滚动量，得到主视口坐标，再走同一条命中测试。
+3. **跨源 frame 不读，但必须报告。** `contentDocument` 在跨源时抛错，该 frame 记入 `unseen` 并以 `blindFrames` 计数返回。跨源帧需要逐帧会话（`Target.attachToTarget` 或 `createIsolatedWorld`），那是新权限面，本增量不做，也不以「读不到就当没有」蒙混。
+4. **跨 realm 的可见性判定。** frame 内的元素来自另一个 realm，主文档的 `instanceof Element` 对它为假、`getComputedStyle` 也取不到，于是 frame 内的控件会被判为不可见——实测确实如此，帧里的按钮一度消失。改为向元素自己的 `ownerDocument.defaultView` 要构造器与样式。
+5. **本增量仍是只读**（除点击已存在控件这一既有能力外），不新增 CDP 域、不新增权限、不改写坐标之外的任何输入，`§2.5` 与 `§42.1` 的结论不变。
+
+实测（`tests/browser-control-digest-live.test.ts` 第二个用例，同机 headless Chrome）：一个由文档按钮、shadow root 内按钮、同源 frame 内按钮组成的页面，`browser_view` 给出三个控件（ref `1`、`2`、`900003`，帧号分别为 0、0、1），frame 文本以 `[frame 1]` 并入；点击 `900003` 后帧内按钮自己的 handler 把它写成 `Bought`，点击 shadow 内的 `2` 返回 `clicked "Delete account"`。
+
+第三个用例把页面再压深一层，并在旁边放一个跨源 frame。它逼出三处第一版没暴露的问题：ref 里的帧号必须按一基解码（`frame 2` 对应 `1000001`，否则整体差一位）；点击的遮挡检查必须拿落点和最外层 frame 元素比——嵌套子帧的容器属于另一份文档，拿点与它比永远不成立，于是每一次深层点击都会被报成「被挡住」；`read()` 要把 `blindFrames` 从页面表达式里带出来，否则只数自己收到内容的调用方会把一个还有读不到子帧的页面当成完整的。三处修好后，两层帧里的 `Save` 点得动，跨源 frame 被计入。这一例的两个源是本地两个端口，不是 `data:` 标记：跨源 frame 的 `src` 提交之前，iframe 里是一个属于父页 origin 的初始 `about:blank`，读起来是空而不是读不到，所以只有真跨两个源才证明得了这件事。
+
 ## §30.4 的五个问题
 
 **1. 哪个已量化瓶颈无法由现有方案解决。**
@@ -60,4 +76,5 @@
 
 - 数字来自 `tests/browser-control-digest-live.test.ts`，一个 `data:text/html` fixture（40 个近似重复段落、3 个标题、60 个链接、1 个答案），在同一台 macOS 机器上一次 headless Chrome 会话内测得。它是回归基线，不是跨页面基准。
 - 该测试需要 `OXRAIL_BROWSER_LIVE=1`，默认跳过；CI 不跑真实 Chrome 时这些数字不会被重新生成。
-- 未测量、因此未声明的内容：真实站点的节省比例、中文页面的字符/token 关系、跨标签页汇总、iframe 与 shadow DOM 内的可读性（当前读取层不进入 iframe，也不展开未打开的 shadow root）。
+- 未测量、因此未声明的内容：真实站点的节省比例、中文页面的字符/token 关系、跨标签页汇总、跨源 iframe 的可读性。同源 iframe 与开放的 shadow root 已进入（见「快照深度」），跨源 iframe 需要逐帧会话，不在本层范围内，并以 `blindFrames` 报告。
+- 快照深度的上限是设计值不是测量值：每次读取最多 8 个 frame 子帧、深度 2，每份文档最多 24 个 root、`deepQuery` 4000 元素。超过上限的页面会被参与者读成「不完整」而不是「出错」，但上限本身未针对任何真实站点调过。

@@ -26,6 +26,10 @@ export interface Control {
   readonly role: string;
   readonly name: string;
   readonly tag?: string;
+  /** Which frame the control lives in: 0 is the page, 1 is the first frame.
+   * Its ref already encodes this, so a click needs the number; this is for a
+   * reader who wants to know the page is composed. */
+  readonly frame?: number;
 }
 
 /** One page reading: what it says, where it is, and the controls on it. */
@@ -35,6 +39,9 @@ export interface Snapshot {
   readonly text: string;
   readonly controls: readonly Control[];
   readonly truncated: boolean;
+  /** Frames whose contents could not be read, so a short reading of a page
+   * that visibly has more is explained instead of looking complete. */
+  readonly blindFrames?: number;
   /** Which reading produced this, when it was one of the cheap ones. */
   readonly mode?: ReadMode | "text" | "links" | "forms";
   /** Words in the page, so a caller can see how much it did not read. */

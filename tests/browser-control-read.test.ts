@@ -210,6 +210,18 @@ describe("page expressions", () => {
     expect(source).not.toContain("const ref = controls.length + 1");
   });
 
+  it("walks open shadow roots and same-origin frames instead of one flat query", () => {
+    const source = snapshotExpression({ mode: "text", maxChars: 6_000 });
+    /* A page whose button lives in a shadow root or a framed checkout is the
+       normal case now, and a flat document.querySelectorAll reports it as
+       having nothing to click. */
+    expect(source).toContain("shadowRoot");
+    expect(source).toContain("contentDocument");
+    /* Cross-origin frames cannot be read from the page; they must be counted
+       rather than silently dropped, or the blank looks like an empty page. */
+    expect(source).toContain("unseen.push");
+  });
+
   it("hands back JSON, so one evaluate call is enough", () => {
     expect(blocksExpression(2_000)).toContain("JSON.stringify");
     expect(articleExpression(2_000)).toContain("JSON.stringify");

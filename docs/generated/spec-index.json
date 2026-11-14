@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-13",
+  "generated_at": "2026-11-14",
   "canonical_file": "OXRAIL_SPEC.md",
-  "spec_version": "1.0.26",
-  "spec_sha256": "34d32bc39fb503a6bbe7178bba98ffc821e029ebc663aeb8d7d7d732388ca848",
+  "spec_version": "1.0.27",
+  "spec_sha256": "48e8060ab9b84774406f9dd2d161919ce6d23195d596b318d63f693b0d8c6eee",
   "counts": {
     "sections": 53,
     "requirements": 131,
@@ -619,7 +619,7 @@
       "title": "V1.0 工作包任务单总账",
       "anchor": "sec-49",
       "start_line": 7448,
-      "end_line": 11989,
+      "end_line": 11992,
       "keywords": [
         "work-packages",
         "task-ledger",
@@ -631,8 +631,8 @@
       "number": 50,
       "title": "文档实时维护、变更与归档协议",
       "anchor": "sec-50",
-      "start_line": 11990,
-      "end_line": 12373,
+      "start_line": 11993,
+      "end_line": 12380,
       "keywords": [
         "living-spec",
         "maintenance",
@@ -644,14 +644,14 @@
     "SEC-51": {
       "anchor": "sec-51",
       "title": "产品 Skill 与内部 Lab 分离实施合同",
-      "start_line": 12374,
-      "end_line": 12839
+      "start_line": 12381,
+      "end_line": 12846
     },
     "SEC-52": {
       "anchor": "sec-52",
       "title": "Opt-in Browser Control 路由（MCP / CDP）",
-      "start_line": 12840,
-      "end_line": 12878
+      "start_line": 12847,
+      "end_line": 12885
     }
   },
   "requirements": {
@@ -1503,7 +1503,7 @@
       "locations": [
         158,
         8812,
-        12050
+        12053
       ]
     },
     "REQ-NIF-011": {
@@ -2078,7 +2078,7 @@
       "locations": [
         186,
         10605,
-        12313
+        12320
       ]
     },
     "REQ-CRED-002": {
@@ -2358,7 +2358,7 @@
         4444,
         8477,
         10022,
-        12306
+        12313
       ]
     },
     "REQ-SEC-002": {
@@ -4795,7 +4795,7 @@
         7987,
         8252,
         8853,
-        12324
+        12331
       ]
     },
     "REQ-HOST-008": {
@@ -5011,7 +5011,7 @@
         137,
         8252,
         10605,
-        12313
+        12320
       ]
     },
     "REQ-BCTL-001": {
@@ -5027,9 +5027,9 @@
       ],
       "locations": [
         11880,
-        12154,
-        12858,
-        12877
+        12161,
+        12865,
+        12884
       ]
     },
     "REQ-BCTL-002": {
@@ -5045,7 +5045,7 @@
       ],
       "locations": [
         11880,
-        12859
+        12866
       ]
     },
     "REQ-BCTL-003": {
@@ -5061,7 +5061,7 @@
       ],
       "locations": [
         11880,
-        12860
+        12867
       ]
     },
     "REQ-BCTL-004": {
@@ -5077,9 +5077,9 @@
       ],
       "locations": [
         11880,
-        12154,
-        12861,
-        12877
+        12161,
+        12868,
+        12884
       ]
     }
   },
@@ -5297,7 +5297,7 @@
         10605,
         10636,
         10690,
-        12313
+        12320
       ]
     },
     "GATE-G16": {
@@ -5311,9 +5311,9 @@
       "locations": [
         7056,
         11880,
-        12154,
-        12845,
-        12877
+        12161,
+        12852,
+        12884
       ]
     }
   },
@@ -5552,7 +5552,7 @@
         9442,
         10465,
         11927,
-        11960
+        11963
       ]
     },
     "KILL-K13": {
@@ -5663,7 +5663,7 @@
         9442,
         10465,
         11927,
-        11961
+        11964
       ]
     },
     "KILL-K19": {
@@ -5716,7 +5716,7 @@
         9876,
         9964,
         10424,
-        12052
+        12055
       ]
     },
     "KILL-K22": {
@@ -5834,7 +5834,7 @@
       "locations": [
         7051,
         10656,
-        12313
+        12320
       ]
     },
     "KILL-K30": {
@@ -5905,10 +5905,10 @@
         11880,
         11912,
         11927,
-        11962,
-        12154,
-        12845,
-        12877
+        11965,
+        12161,
+        12852,
+        12884
       ]
     }
   },
@@ -9867,8 +9867,8 @@
       "title": "合同与现状冻结",
       "status": "READY",
       "depends_on": [],
-      "start_line": 12485,
-      "end_line": 12497
+      "start_line": 12492,
+      "end_line": 12504
     },
     "WP-LAB-001": {
       "anchor": "wp-lab-001",
@@ -9877,8 +9877,8 @@
       "depends_on": [
         "WP-LAB-000"
       ],
-      "start_line": 12498,
-      "end_line": 12516
+      "start_line": 12505,
+      "end_line": 12523
     },
     "WP-LAB-002": {
       "anchor": "wp-lab-002",
@@ -9887,8 +9887,8 @@
       "depends_on": [
         "WP-LAB-001"
       ],
-      "start_line": 12517,
-      "end_line": 12535
+      "start_line": 12524,
+      "end_line": 12542
     },
     "WP-LAB-003": {
       "anchor": "wp-lab-003",
@@ -9897,8 +9897,8 @@
       "depends_on": [
         "WP-LAB-002"
       ],
-      "start_line": 12536,
-      "end_line": 12552
+      "start_line": 12543,
+      "end_line": 12559
     },
     "WP-LAB-004": {
       "anchor": "wp-lab-004",
@@ -9907,8 +9907,8 @@
       "depends_on": [
         "WP-LAB-003"
       ],
-      "start_line": 12553,
-      "end_line": 12573
+      "start_line": 12560,
+      "end_line": 12580
     },
     "WP-LAB-005": {
       "anchor": "wp-lab-005",
@@ -9917,8 +9917,8 @@
       "depends_on": [
         "WP-LAB-004"
       ],
-      "start_line": 12574,
-      "end_line": 12594
+      "start_line": 12581,
+      "end_line": 12601
     },
     "WP-LAB-006": {
       "anchor": "wp-lab-006",
@@ -9927,8 +9927,8 @@
       "depends_on": [
         "WP-LAB-005"
       ],
-      "start_line": 12595,
-      "end_line": 12609
+      "start_line": 12602,
+      "end_line": 12616
     },
     "WP-LAB-007": {
       "anchor": "wp-lab-007",
@@ -9942,8 +9942,8 @@
         "WP-LAB-005",
         "WP-LAB-006"
       ],
-      "start_line": 12610,
-      "end_line": 12878
+      "start_line": 12617,
+      "end_line": 12885
     },
     "WP-BCTL-002": {
       "title": "Context-efficient Browser reads (`browser_read`)",
@@ -9992,7 +9992,7 @@
         "No ACCEPTED status before the live reading measurement is recorded as evidence."
       ],
       "start_line": 11917,
-      "end_line": 12878
+      "end_line": 12885
     }
   },
   "milestones": {
@@ -10186,7 +10186,7 @@
         11198,
         11240,
         11323,
-        12050
+        12053
       ],
       "sections": [
         "SEC-28",
@@ -11432,7 +11432,7 @@
       "locations": [
         6305,
         10637,
-        12313
+        12320
       ],
       "sections": [
         "SEC-35",
@@ -11520,7 +11520,7 @@
         9613,
         9784,
         9828,
-        12215
+        12222
       ],
       "sections": [
         "SEC-35",
@@ -12248,7 +12248,7 @@
       "locations": [
         6396,
         10637,
-        12313
+        12320
       ],
       "sections": [
         "SEC-36",
@@ -12361,7 +12361,7 @@
         6405,
         10643,
         10700,
-        12208
+        12215
       ],
       "sections": [
         "SEC-36",
@@ -12377,7 +12377,7 @@
         6406,
         10644,
         10701,
-        12202
+        12209
       ],
       "sections": [
         "SEC-36",
@@ -12393,7 +12393,7 @@
         6407,
         10645,
         10702,
-        12196
+        12203
       ],
       "sections": [
         "SEC-36",
@@ -12409,7 +12409,7 @@
         6408,
         10646,
         10703,
-        12190
+        12197
       ],
       "sections": [
         "SEC-36",
@@ -12425,7 +12425,7 @@
         6409,
         10647,
         10704,
-        12184
+        12191
       ],
       "sections": [
         "SEC-36",
@@ -12441,7 +12441,7 @@
         6410,
         10648,
         10705,
-        12178
+        12185
       ],
       "sections": [
         "SEC-36",
@@ -12457,7 +12457,7 @@
         6411,
         10649,
         10706,
-        12172
+        12179
       ],
       "sections": [
         "SEC-36",
@@ -12473,7 +12473,7 @@
         6412,
         10650,
         10707,
-        12166
+        12173
       ],
       "sections": [
         "SEC-36",
@@ -12666,7 +12666,7 @@
         8014,
         8285,
         8882,
-        12324
+        12331
       ],
       "sections": [
         "SEC-10",
@@ -12785,142 +12785,142 @@
       "title": "扫描产品依赖图和安装产物",
       "expected": "无Lab、benchmark、Demo运行依赖及实验CLI",
       "locations": [
-        12159,
-        12771
+        12166,
+        12778
       ]
     },
     "TEST-LAB-002": {
       "title": "只保留产品安装根运行",
       "expected": "不寻找Lab，不创建Lab数据目录，能力状态诚实",
       "locations": [
-        12772
+        12779
       ]
     },
     "TEST-LAB-003": {
       "title": "设置遗留实验环境变量运行产品",
       "expected": "不能启动实验采集或Demo",
       "locations": [
-        12773
+        12780
       ]
     },
     "TEST-LAB-004": {
       "title": "完全没有Oxrail时启动Lab",
       "expected": "可采集受控宿主事件；真实主机项单独记录",
       "locations": [
-        12774
+        12781
       ]
     },
     "TEST-LAB-005": {
       "title": "检查baseline的新会话/配置",
       "expected": "没有产品Skill/Hook/任务上下文残留；无法证明则BLOCKED",
       "locations": [
-        12775
+        12782
       ]
     },
     "TEST-LAB-006": {
       "title": "监控OFF启动新会话",
       "expected": "无Lab监控Hook/collector；不冒充有详细轨迹",
       "locations": [
-        12776
+        12783
       ]
     },
     "TEST-LAB-007": {
       "title": "对Lab适配器投递各类合法/非法事件",
       "expected": "不返回allow/deny/模型上下文、不改写原调用",
       "locations": [
-        12777
+        12784
       ]
     },
     "TEST-LAB-008": {
       "title": "collector退出、断链、慢盘、满盘",
       "expected": "不影响浏览器权限或动作；报告数据不完整",
       "locations": [
-        12778
+        12785
       ]
     },
     "TEST-LAB-009": {
       "title": "重复/乱序/缺失Pre/Post、并发子代理",
       "expected": "幂等、正确关联、不伪造执行与完成",
       "locations": [
-        12779
+        12786
       ]
     },
     "TEST-LAB-010": {
       "title": "复合工具只暴露事务事件",
       "expected": "不输出逐点击或逐键精确统计",
       "locations": [
-        12780
+        12787
       ]
     },
     "TEST-LAB-011": {
       "title": "宿主不提供Token/用量混合多个run",
       "expected": "值为null并有原因，不输出假精确总量",
       "locations": [
-        12781
+        12788
       ]
     },
     "TEST-LAB-012": {
       "title": "秘密诱饵藏入输入/URL/header/异常字段",
       "expected": "trace、IPC持久化、日志、临时/崩溃文件零泄漏",
       "locations": [
-        12782
+        12789
       ]
     },
     "TEST-LAB-013": {
       "title": "登录fixture期间采集",
       "expected": "只有许可阶段元数据，无截图/输入值/键盘/剪贴板",
       "locations": [
-        12783
+        12790
       ]
     },
     "TEST-LAB-014": {
       "title": "持有Handoff租约时关闭/删除Lab",
       "expected": "产品安全锁不解除、不绕过验证恢复Agent",
       "locations": [
-        12784
+        12791
       ]
     },
     "TEST-LAB-015": {
       "title": "A/B任一环境字段/初态/监控hash不一致",
       "expected": "比较拒绝或标不可比，不自动忽略",
       "locations": [
-        12785
+        12792
       ]
     },
     "TEST-LAB-016": {
       "title": "Guard请求实际为ADVISORY/BYPASSED",
       "expected": "TREATMENT_NOT_ACTIVE，不计为Guard成绩",
       "locations": [
-        12786
+        12793
       ]
     },
     "TEST-LAB-017": {
       "title": "真实宿主四象限smoke",
       "expected": "有实际证据的分别通过；未跑不能PASS",
       "locations": [
-        12787
+        12794
       ]
     },
     "TEST-LAB-018": {
       "title": "实际插件安装及源目录移除",
       "expected": "安装根无实验残留且路径/hash正确",
       "locations": [
-        12788
+        12795
       ]
     },
     "TEST-LAB-019": {
       "title": "尝试由任务Agent读实验计划/报告",
       "expected": "正式隔离路径应拒绝；否则标隔离未证明",
       "locations": [
-        12789
+        12796
       ]
     },
     "TEST-LAB-020": {
       "title": "Lab purge与旧Demo迁移",
       "expected": "不越界删除产品状态、Keychain或历史release evidence",
       "locations": [
-        12159,
-        12790
+        12166,
+        12797
       ]
     },
     "TEST-BCTL-001": {
@@ -12929,8 +12929,8 @@
         11880,
         11891,
         11906,
-        12154,
-        12877
+        12161,
+        12884
       ],
       "sections": [
         "SEC-52"
@@ -12969,7 +12969,7 @@
         11880,
         11891,
         11906,
-        12154
+        12161
       ],
       "sections": [
         "SEC-52"
@@ -12991,9 +12991,9 @@
         6080,
         11927,
         11938,
-        11954,
-        12147,
-        12148
+        11957,
+        12154,
+        12155
       ]
     },
     "TEST-BCTL-006": {
@@ -13009,10 +13009,10 @@
         6081,
         11927,
         11938,
-        11954,
-        12147,
-        12148,
-        12877
+        11957,
+        12154,
+        12155,
+        12884
       ]
     }
   },
@@ -13201,7 +13201,7 @@
       "title": "产品与内部 Lab 独立交付",
       "path": "docs/adr/ADR-LAB-001.md",
       "locations": [
-        12492
+        12499
       ]
     },
     "ADR-BROWSERCTL-001": {
@@ -13210,9 +13210,9 @@
       "locations": [
         11880,
         11890,
-        12154,
-        12845,
-        12877
+        12161,
+        12852,
+        12884
       ]
     },
     "ADR-BROWSERCTL-002": {
@@ -13221,8 +13221,8 @@
       "locations": [
         11927,
         11937,
-        12147,
-        12877
+        12154,
+        12884
       ]
     }
   },

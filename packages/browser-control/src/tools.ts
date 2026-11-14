@@ -493,6 +493,11 @@ function formatSnapshot(snapshot: Snapshot): string {
   if (snapshot.words !== undefined) lines.push(`words: ${snapshot.words}`);
   if (snapshot.matched !== undefined && snapshot.total !== undefined)
     lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  if ((snapshot.blindFrames ?? 0) > 0) {
+    lines.push(
+      `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`,
+    );
+  }
   if (snapshot.truncated) {
     lines.push(`controls: ${snapshot.controls.length}`, "truncated: true");
   }

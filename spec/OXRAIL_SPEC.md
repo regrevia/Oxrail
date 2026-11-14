@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.26
+# Oxrail — 唯一实现规范（SPEC）v1.0.27
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -11939,6 +11939,9 @@ Let a host answer a question about a page, or watch it for changes, without payi
 
 **验收**
 
+- [ ] A snapshot reaches every document the page is composed of that the route can reach without new privileges: open shadow roots are traversed, and same-origin frames are numbered as part of the page.
+- [ ] A control inside a frame carries the frame in its ref, and a click on it lands inside that frame rather than on the frame's own rectangle.
+- [ ] A frame the route cannot read (cross-origin) is reported as an unread frame count, never silently omitted.
 - [ ] `browser_view` is unchanged: same modes, defaults, output shape and ref semantics.
 - [ ] `browser_read {mode:"query"}` returns the passage containing the answer on a long page, and reports how much it did not show (`matched` of `total`).
 - [ ] `query` needs a `query`; an unknown mode is refused with the field named.
@@ -12141,6 +12144,10 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.27 — 2026-11-14
+
+- 扩展 WP-BCTL-002 的快照深度：读取遍历开放的 shadow root，并把同源 frame 的控件按「frame 内编号 + 帧号」纳入同一份快照（嵌套帧按文档顺序编号，最深两层），点击按帧角偏移落在帧内控件上；跨源 frame 以未读取帧数计并在读取结果里带走，不静默省略。这是读取层的覆盖范围变化，写入侧、§2.5 与 §42.1 的结论不变，也不新增任何 CDP 域或权限。
 
 ### v1.0.26 — 2026-11-14
 
