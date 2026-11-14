@@ -18,6 +18,7 @@
     "lab:chrome-hook-trial": "pnpm build:lab && node lab/dist/chrome-hook-trial.mjs",
     "doctor": "node dist/doctor.mjs",
     "fixture:serve": "node benchmarks/harness/server.mjs",
+    "measure:reading": "node benchmarks/harness/measure-reading.mjs",
     "format:check": "prettier --check .",
     "lint": "node scripts/lint.mjs",
     "pilot": "pnpm build:lab && node lab/dist/pilot.mjs",

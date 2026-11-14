@@ -85,19 +85,23 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 | `query`   | Only the passages that answer `query`, ranked in this process        | A question with an answer on the page      |
 | `changed` | Only what the previous `text` read did not already say               | Watching a page after an action            |
 
-`query` is the mode worth reaching for first. Measured on one long page — 40 near-identical sections, three headings, a list of 60 links, one answer — the same browser session gave:
+`query` is the mode worth reaching for first. Measured on one long page — 40 near-identical sections, three headings, a list of 60 links, one answer, one button — the same browser session gave, in characters received by the caller:
 
-| Call                                                            | Characters |
-| --------------------------------------------------------------- | ---------- |
-| `browser_view`                                                  | 5974       |
-| `browser_read {mode:"article", maxChars:24000}`                 | 6061       |
-| `browser_read {mode:"map"}`                                     | 45         |
-| `browser_read {mode:"query", query:"how long do refunds take"}` | 89         |
-| `browser_read {mode:"changed"}` after a click                   | 31         |
+| Call                                                            | Text | Controls | Total |
+| --------------------------------------------------------------- | ---- | -------- | ----- |
+| `browser_view`                                                  | 5999 | 1403     | 7402  |
+| `browser_read {mode:"article", maxChars:24000}`                 | 8126 | 0        | 8126  |
+| `browser_read {mode:"map"}`                                     | 1281 | 1403     | 2684  |
+| `browser_read {mode:"query", query:"how long do refunds take"}` | 423  | 1403     | 1826  |
+| `browser_read {mode:"changed"}` after a click                   | 23   | 0        | 23    |
 
-Each of those was one call, and each took single-digit milliseconds in the page. The number that matters is not that `article` is smaller — on a prose page it is not, because it trades numbered control lines for heading and list markers — but that a question gets answered in 89 characters instead of 5974, and that an outline costs 45.
+Both columns are the call's cost: the text it returns, and the numbered controls that let a following write name what to act on. `article` and `changed` return no controls, so for them one column is the whole call. `map` and `query` do return the page's controls, and on a link-heavy page that is most of what they cost — the answer to the question is 423 characters and the 61 controls that came with it are the other 1403.
 
-Those are one fixture on one machine, not a benchmark; nothing here is a claim about other pages. What repeats on any page is the shape: a question costs the answer, not the page.
+Reproduce this rather than trusting it: `node benchmarks/harness/measure-reading.mjs` measures `packages/browser-control/src/route.ts` against `benchmarks/fixtures/long-page/index.html` in a headless Chrome on this machine.
+
+Which number is a baseline and which is this page's: the ratios are the baseline, because they follow from the shape of each mode rather than from this fixture's prose — `query` receiving 25% of what `browser_view` receives, `changed` after an action costing the change and nothing else. The absolute characters are this page's, and `article` coming back larger than `browser_view` is expected on a prose page: it trades numbered control lines for heading and list markers, and it is for reading or quoting a page, not for saving on a page you were going to read anyway.
+
+Those are one fixture on one machine, not a benchmark; nothing here is a claim about other pages. Each call above took tens of milliseconds in the page. What repeats on any page is the shape: a question costs the answer, not the page — plus, when a write may follow, the addresses to act on it.
 
 Ranking happens in this process with no model, no network and no third-party library. A question is folded to terms (plurals and participles collapse: `refunds` and `refund` are the same, `shipping` and `shipped` both become `ship`), scored against the page's blocks with saturation and length normalization, and the best passages are emitted with the heading they sit under. `query` also reports what it did not show: `passages: 2 of 40 blocks`.
 
