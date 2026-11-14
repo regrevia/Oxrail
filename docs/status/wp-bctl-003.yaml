@@ -1,0 +1,11 @@
+work_package: WP-BCTL-003
+from: PLANNED
+to: IN_PROGRESS
+changed_at: 2026-11-14
+changed_by: lead
+reason: >-
+  The write-side rule is in place and pinned by tests, but the WP cannot reach
+  ACCEPTED before the real-host evidence for WP-BCTL-001 arrives and the live
+  write cases are recorded as evidence.
+evidence_manifest: null
+blocked_by: []

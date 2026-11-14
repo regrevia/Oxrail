@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.27
+# Oxrail — 唯一实现规范（SPEC）v1.0.28
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -6079,6 +6079,7 @@ fixture 不使用真实密码、OTP 或第三方账户。
 | `TEST-BCTL-004` | 浏览器早死与空闲回收 | 启动即死亡在毫秒级报错并给出原因；空闲回收不发生在仍在观察时，`state` 如实报告 `pid`/`idleMs`/`closesInMs` |
 | `TEST-BCTL-005` | 读取模式回答且受预算约束 | 长页面上 `query` 必须返回含答案的段落并报告未展示部分（`matched`/`total`）；四种模式都受限 `maxChars`；`query` 缺问题时拒绝，未知模式指名报错；`browser_view` 的行为与编号语义不变 |
 | `TEST-BCTL-006` | 投影与增量一致性 | `changed` 只与同投影同地址的上一次读取比较；首次读取返回整页；导航后重建基线；页面未变时 `ref` 跨读取保持同一编号 |
+| `TEST-BCTL-007` | 写只能落在读取交出的编号上 | 未读取过的编号、以及读取之后页面已导航的编号，都必须被拒绝并说明属于哪一种，且拒绝发生在启动浏览器之前；拒绝不得落成任何一次输入；不提供任何以坐标为入口的写；命中测试被遮挡时报告遮挡者而不是抛出内部错误 |
 
 `TEST-BCTL-*` 不是 Native parity 用例：不得计入 NIF 矩阵，也不得用于支持任何“等价于 Native”的声明；其覆盖对象是 SEC-52 的路由自身合同。
 
@@ -7641,6 +7642,7 @@ BLOCKED / REJECTED / KILLED may branch from any non-ACCEPTED state
 | [`WP-V1-006`](#wp-v1-006) | Post-release drift and incident monitoring | P0 | `PLANNED` |
 | [`WP-BCTL-001`](#wp-bctl-001) | Opt-in Browser Control route (MCP / CDP) | P2 | `IN_PROGRESS` |
 | [`WP-BCTL-002`](#wp-bctl-002) | Context-efficient Browser reads (`browser_read`) | P1 | `IN_PROGRESS` |
+| [`WP-BCTL-003`](#wp-bctl-003) | Writes addressed by a read (`ref`-only, no coordinates) | P1 | `IN_PROGRESS` |
 | [`WP-RLS-100`](#wp-rls-100) | V1.0 final acceptance | P0 | `PLANNED` |
 
 ## 49.5 工作包卡片
@@ -11967,6 +11969,59 @@ Let a host answer a question about a page, or watch it for changes, without payi
 
 ---
 
+<a id="wp-bctl-003"></a>
+### WP-BCTL-003 — Writes addressed by a read (`ref`-only, no coordinates)
+<!-- wp-meta: MILESTONE=V1.0 PRIORITY=P1 STATUS=IN_PROGRESS -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V1.0` |
+| Priority | `P1` |
+| Status | `IN_PROGRESS` |
+| Depends | `WP-BCTL-001`, `WP-BCTL-002` |
+| Related | `SEC-52`, `§42.1`, `ADR-BROWSERCTL-002`, `KILL-K12`, `KILL-K18`, `KILL-K25`, `KILL-K34`, `TEST-BCTL-007` |
+
+**目标**
+
+Make the existing write side of the route executable under one rule: a write may only land on a control a read handed out, by the number that read returned. The route accepts no coordinate anywhere, so a caller cannot express "press at this point" and the route cannot guess one. This is the narrowing option inside `§42.1` — it is not a separately named Browser Agent or Driver, adds no tool, and claims nothing new about write execution.
+
+**为什么这不是 Computer Use**
+
+Computer Use loops over pictures: capture, decide, press, capture again. This route never parses a picture to choose a target; a screenshot is for a person to look at. The address of a control is the ref a read produced, so `KILL-K18` (rewriting final coordinates, paths, deltas, keys, clicks or focus) is not avoided by discipline but is structurally unreachable — there is no coordinate to rewrite. The cost of a write is bounded by the cost of the read before it, and a DOM tree influences that cost without ever becoming both context and target.
+
+**产物**
+
+- `this.handed` on the route: the refs the last control-returning read handed out, with the url they described
+- preconditions in `click()` and `type()` that run before the browser is started; `nav()` clears the set; `key()` takes no ref and is not gated
+- `tests/browser-control-addressable.test.ts` (no browser), and the live case in `tests/browser-control-live.test.ts`
+- the write-side clause in `docs/adr/ADR-BROWSERCTL-002.md` and the "Writes are addressed by a read" section in `docs/product/browser-control.md`
+
+**验收**
+
+- [ ] No tool and no route method accepts a coordinate or a point on screen, and no code path derives a press point from a screenshot.
+- [ ] A write addressed by a number no read produced is refused, and the refusal says nothing has been read yet.
+- [ ] A write addressed by a number the last read did not contain is refused, and the refusal names the address that read described.
+- [ ] Both refusals happen before the browser is started, so an unaddressable write costs nothing and reads the same whether or not Chrome is running.
+- [ ] A navigation (url, back or reload) clears the handed refs; a ref from before it is refused rather than resolved against the new page.
+- [ ] The legitimate `{ text }` path still works after a read, and the occlusion refusal still names what covers the control.
+- [ ] Hit testing asks the tree the control is in, so a control in an open shadow root is not reported as covered, and an occluded control reports the layer that owns the point instead of an internal error.
+- [ ] `browser_nav` stays an explicit tool; no read navigates as a side effect.
+- [ ] The route is not reported as Hook-visible, Guard-mediated or Native-equivalent, and it does not enter the NIF matrix or a paired benchmark.
+
+**测试 / 证据**
+
+- `TEST-BCTL-007`
+- `tests/browser-control-addressable.test.ts` (refusals, no browser), `tests/browser-control-live.test.ts` (refused numbers, a real click, and a stale ref after back)
+
+**阻断 / Kill**
+
+- `KILL-K12` if the write side needs a reliability claim to be useful.
+- `KILL-K18` if any implementation rewrites final coordinates, paths, deltas, keys, clicks or focus.
+- `KILL-K25` if the route gains a generic input path, a page write, or a debugger write beyond driving its own browser.
+- `KILL-K34` if the route is reported as Hook-visible, Guard-mediated or Native-equivalent.
+
+---
+
 ## 49.18 工作包状态变更格式
 
 ```yaml
@@ -12144,6 +12199,12 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.28 — 2026-11-14
+
+- 新增 WP-BCTL-003 与 TEST-BCTL-007：写侧确立「一次写只能落在一个由读取产生过的编号上」。路由不提供任何以坐标为入口的写——`browser_click` 只收 `ref` 或可见文本，`browser_type` 只收 `ref` 与文本；路由保存上一次读取交出的编号集合与那一页的地址，写之前核对，未读取过的编号与读取后已导航的编号都被拒绝，且拒绝发生在启动浏览器之前。导航（url/back/reload）清空该集合；`browser_key` 不接受编号，不在门内。
+- 该决策是 §42.1 三条路中的窄化选项（选项 2 的实施）：不启动单独命名的 Browser Agent/Driver，不新增工具，不新增 CDP 域，不接管任何 Native 调用，也不改变 §2.5 对写执行的既有约束。与 Computer Use 的差别在算法层：本路由不看图选落点，截图只给人看，因此 KILL-K18 在结构上不可达而不是靠自律避免。
+- 同时修复读取层的一个真实缺陷：命中测试的兜底分支引用了循环外已出作用域的 `own`，被遮挡的控件抛 `ReferenceError` 而不是报告遮挡者；命中测试现在向控件所在的树取值，因此开放 shadow root 内的控件不再被判为被遮挡。
 
 ### v1.0.27 — 2026-11-14
 
@@ -12881,4 +12942,4 @@ Next eligible WP:
 
 ## 52.5 相关 ID
 
-`REQ-BCTL-001`–`REQ-BCTL-004`、`GATE-G16`、`KILL-K34`、`WP-BCTL-001`、`WP-BCTL-002`、`TEST-BCTL-001`–`TEST-BCTL-006`、`ADR-BROWSERCTL-001`、`ADR-BROWSERCTL-002`；实现位于 `packages/browser-control/`。读取层（`browser_read` 的四种模式）只投影已加载页面，不点击、不输入、不导航、不改写坐标，因此不改变本章对写执行的既有约束。
+`REQ-BCTL-001`–`REQ-BCTL-004`、`GATE-G16`、`KILL-K34`、`WP-BCTL-001`、`WP-BCTL-002`、`WP-BCTL-003`、`TEST-BCTL-001`–`TEST-BCTL-007`、`ADR-BROWSERCTL-001`、`ADR-BROWSERCTL-002`；实现位于 `packages/browser-control/`。读取层（`browser_read` 的四种模式）只投影已加载页面，不点击、不输入、不导航、不改写坐标。写侧（WP-BCTL-003）把既有能力收敛为「只能落在读取交出的编号上」，不接受任何坐标、不从截图推导落点、不新增工具或 CDP 域，因此不改变本章对写执行的既有约束，也不构成 Native 的替代声明。
