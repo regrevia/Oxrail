@@ -164,7 +164,7 @@ const TOOLS: readonly ToolSpec[] = [
     name: "browser_click",
     title: "Click a control",
     description:
-      "Activate one control: give its ref from the last browser_view, or its visible text. Pass exactly one of the two. A click usually changes the page, so read again before the next ref-based call.",
+      "Activate one control: give its ref from the last browser_view, or its visible text. Pass exactly one of the two. There is no way to click a coordinate: the ref a read returned is the whole address, so a number no read produced is refused. A click usually changes the page, so read again before the next ref-based call.",
     properties: {
       ref: {
         kind: "integer",
@@ -190,7 +190,7 @@ const TOOLS: readonly ToolSpec[] = [
     name: "browser_type",
     title: "Type into a control",
     description:
-      "Type text into a control: give the text and, when known, the ref of the field from the last browser_view. clear empties the field first; submit presses Enter afterwards. For a bare key press use browser_key.",
+      "Type text into a control: give the text and, when known, the ref of the field from the last browser_view. A ref comes from a read; a number no read produced is refused. clear empties the field first; submit presses Enter afterwards. For a bare key press use browser_key.",
     properties: {
       ref: {
         kind: "integer",

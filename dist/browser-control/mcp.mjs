@@ -1677,6 +1677,15 @@ var init_route = __esm({
        * snapshot would report two different shapes as a change. It carries the
        * address because a page that navigated has nothing to diff against. */
       last = null;
+      /** The numbers the last read handed out, and the page they were on.
+       *
+       * A write may only address a control by a number a read produced: this route
+       * never takes a coordinate from a caller, and never guesses a point from a
+       * picture, so the number is the whole address. Keeping the set is what makes
+       * that a rule instead of a convention — an invented number, or one from a
+       * page that has since navigated, is refused instead of landing on whatever
+       * now happens to answer to it. */
+      handed = null;
       constructor(options) {
         const env = options?.env ?? process.env;
         this.idleWindow = idleMs(env);
@@ -1818,6 +1827,7 @@ var init_route = __esm({
             text: snapshot.text,
             controls: snapshot.controls
           };
+          this.hand(snapshot.url, snapshot.controls);
           return {
             url: snapshot.url,
             title: snapshot.title,
@@ -1868,6 +1878,7 @@ var init_route = __esm({
               snapshotExpression({ mode: "map", maxChars })
             );
             this.touch();
+            this.hand(page2.url, page2.controls);
             return {
               url: page2.url,
               title: page2.title,
@@ -1891,6 +1902,7 @@ var init_route = __esm({
               snapshotExpression({ mode: "map", maxChars })
             );
             this.touch();
+            this.hand(page2.url, page2.controls);
             const text = passagesToText(found);
             return {
               url: page2.url,
@@ -1911,6 +1923,7 @@ var init_route = __esm({
           this.touch();
           const before = this.last !== null && this.last.url === page.url ? this.last : null;
           this.last = { url: page.url, text: page.text, controls: page.controls };
+          this.hand(page.url, page.controls);
           if (before === null)
             return {
               url: page.url,
@@ -2033,12 +2046,15 @@ var init_route = __esm({
      press, so a click there is heard by the page and by nobody the caller
      asked for. */
   const within = (value, limit) => Math.min(Math.max(value, 1), Math.max(limit - 2, 1));
+  /* The tree the control is in answers for its own points: an element inside a
+     shadow root is not returned by document.elementFromPoint at all, so asking
+     the document would report every shadow control as covered. */
+  const root = el.getRootNode();
+  const own = root !== null && typeof root.elementFromPoint === "function" ? root : document;
   const spread = [[0.5, 0.5], [0.3, 0.5], [0.7, 0.5], [0.5, 0.3], [0.5, 0.7]];
   for (const [fx, fy] of spread) {
     const x = within(seenLeft + (seenRight - seenLeft) * fx, innerWidth);
     const y = within(seenTop + (seenBottom - seenTop) * fy, innerHeight);
-    const root = el.getRootNode();
-    const own = root !== null && typeof root.elementFromPoint === "function" ? root : document;
     const hit = own.elementFromPoint(x, y);
     if (hit !== null && (hit === el || el.contains(hit))) return { found: true, x, y, label };
   }
@@ -2180,8 +2196,36 @@ var init_route = __esm({
           page.sessionId
         );
       }
+      /** Record what a read numbered, so a later write can be held to it. */
+      hand(url, controls) {
+        this.handed = {
+          url,
+          refs: new Set(controls.map((control) => control.ref))
+        };
+      }
+      /** Refuse a write that does not come from a read.
+       *
+       * The two failures this names are different, and both are honest: nothing
+       * has been read yet, or the last read of this page did not contain that
+       * number. Neither is answered by trying harder — the answer is to read
+       * again, which is also the only way to get a number that will work. */
+      addressable(ref) {
+        if (this.handed === null)
+          throw new StaleRefError(
+            `control ${ref} cannot be addressed: nothing has been read, so no read produced that number \u2014 call browser_view first`
+          );
+        if (!this.handed.refs.has(ref))
+          throw new StaleRefError(
+            `control ${ref} cannot be addressed: the last read of ${this.handed.url} did not contain it \u2014 call browser_view again and use a number it returns`
+          );
+      }
       async click(target) {
         return this.serial(async () => {
+          if (target.ref !== void 0) this.addressable(target.ref);
+          else if (this.handed === null)
+            throw new StaleRefError(
+              `nothing has been read, so ${JSON.stringify(target.text ?? "")} is not known to be on this page \u2014 call browser_view first`
+            );
           await this.ensure();
           const box = await this.locate(target);
           await this.mouseClick(box.x, box.y);
@@ -2266,6 +2310,7 @@ var init_route = __esm({
       }
       async type(target) {
         return this.serial(async () => {
+          if (target.ref !== void 0) this.addressable(target.ref);
           await this.ensure();
           if (target.ref !== void 0) {
             const ok = await this.focus(target.ref);
@@ -2355,6 +2400,8 @@ var init_route = __esm({
             await cdp.send("Page.reload", {}, page.sessionId);
             await this.waitIdle();
           }
+          if (options.url !== void 0 || options.back === true || options.reload === true)
+            this.handed = null;
           this.touch();
           return this.state();
         });
@@ -2560,7 +2607,7 @@ var TOOLS = [
   {
     name: "browser_click",
     title: "Click a control",
-    description: "Activate one control: give its ref from the last browser_view, or its visible text. Pass exactly one of the two. A click usually changes the page, so read again before the next ref-based call.",
+    description: "Activate one control: give its ref from the last browser_view, or its visible text. Pass exactly one of the two. There is no way to click a coordinate: the ref a read returned is the whole address, so a number no read produced is refused. A click usually changes the page, so read again before the next ref-based call.",
     properties: {
       ref: {
         kind: "integer",
@@ -2585,7 +2632,7 @@ var TOOLS = [
   {
     name: "browser_type",
     title: "Type into a control",
-    description: "Type text into a control: give the text and, when known, the ref of the field from the last browser_view. clear empties the field first; submit presses Enter afterwards. For a bare key press use browser_key.",
+    description: "Type text into a control: give the text and, when known, the ref of the field from the last browser_view. A ref comes from a read; a number no read produced is refused. clear empties the field first; submit presses Enter afterwards. For a bare key press use browser_key.",
     properties: {
       ref: {
         kind: "integer",

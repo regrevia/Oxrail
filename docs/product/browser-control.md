@@ -72,7 +72,7 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 | `browser_login` | Report whether the route's own profile holds saved sign-ins                                   |
 | `browser_close` | Stop the route's Chrome and return the final state                                            |
 
-`browser_view` renders each control as a line such as `[12] button "Sign in"`. The `12` is the `ref` that `browser_click` and `browser_type` accept until the page changes or is read again; using an old `ref` fails with a message telling the model to read the page again.
+`browser_view` renders each control as a line such as `[12] button "Sign in"`. The `12` is the `ref` that `browser_click` and `browser_type` accept. It stays valid while the control is still on the page, including across a re-read that returns it again; a number that no read produced, or one whose control the last read did not return, fails with a message telling the model to read the page again.
 
 ## Reading without pasting the page
 
@@ -126,11 +126,23 @@ The route holds one browser for the life of the host session. When the session e
 
 Screenshots are written under `<state dir>/shots` and returned both as an image and as a path, so a host that cannot show images can still open the file.
 
+## Writes are addressed by a read
+
+There is no way to hand this route a coordinate. `browser_click` takes a `ref` or some visible text, `browser_type` takes a `ref` and the text, and neither accepts a point on screen — so the only way to act on a page is to read it first, and the numbers a read returns are the whole address. A number that no read produced, or one from before the page navigated, is refused rather than tried:
+
+```
+control 12 cannot be addressed: the last read of https://example.com/ did not contain it — call browser_view again and use a number it returns
+```
+
+This is the difference in kind from a Computer Use loop, which looks at pixels and then decides where to press. Nothing here looks at a picture to choose a target: a screenshot is for a person to see, never an input source. Two consequences are worth stating plainly. A write costs whatever the read before it cost, so a page that is expensive to read is expensive to act on. And a page that changes under the read cannot be acted on by a stale number — that is a refusal, not a near miss.
+
+`browser_nav` is a write of the same kind and stays an explicit call of its own: no read navigates, and a navigation clears the numbers, because they described the page that was there.
+
 ## Pixels and hit testing
 
-`browser_shot` captures in CSS pixels at any device pixel ratio, so a coordinate read off the picture can be handed straight back to `browser_click`. A viewport capture is exactly `window.innerWidth` by `window.innerHeight`, and `fullPage` is the viewport width by the full document height; both account for how far the page is scrolled.
+`browser_shot` captures in CSS pixels at any device pixel ratio, so a picture, a person's annotation and the hit test below all describe the same space. A viewport capture is exactly `window.innerWidth` by `window.innerHeight`, and `fullPage` is the viewport width by the full document height; both account for how far the page is scrolled. The picture is for reading and for showing to a person; it is not a way to address a control.
 
-`browser_click` resolves a control, scrolls it into view, and hit-tests up to five points inside it with `document.elementFromPoint`, centre first. The scroll is instant even on a page that sets `scroll-behavior:smooth`: an animated scroll reports the rectangle the control had before it moved, and a point taken from that rectangle is somewhere else by the time the press is sent. Only the part of the control the viewport actually shows is sampled, so a point is never clamped into a place the control does not occupy. A point counts when it belongs to the control or to one of its descendants — the press bubbles back up — but not to an ancestor, because `body` contains every control and an element painted under its parent is not the element the caller asked for. A control covered only in its middle still clicks at a reachable point. When every sample is covered the call refuses before any input is dispatched and names what is in the way:
+`browser_click` resolves a control, scrolls it into view, and hit-tests up to five points inside it with `elementFromPoint`, centre first. The hit test asks the tree the control is actually in — an element inside an open shadow root is not returned by `document.elementFromPoint` at all, so asking the document would report every such control as covered. The scroll is instant even on a page that sets `scroll-behavior:smooth`: an animated scroll reports the rectangle the control had before it moved, and a point taken from that rectangle is somewhere else by the time the press is sent. Only the part of the control the viewport actually shows is sampled, so a point is never clamped into a place the control does not occupy. A point counts when it belongs to the control or to one of its descendants — the press bubbles back up — but not to an ancestor, because `body` contains every control and an element painted under its parent is not the element the caller asked for. A control covered only in its middle still clicks at a reachable point. When every sample is covered the call refuses before any input is dispatched and names what is in the way:
 
 ```
 "Continue" cannot be clicked because it is behind div#sheet "Close Sign up to continue". Close or dismiss what covers it, then call browser_view and retry.

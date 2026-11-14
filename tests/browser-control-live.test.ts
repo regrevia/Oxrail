@@ -345,4 +345,46 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
       }
     },
   );
+
+  it(
+    "only clicks a number a read gave, and reports a stale one as stale",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-addressable-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      try {
+        await route.open({ url: page });
+
+        // A number nobody read is refused, and it does not land anywhere.
+        await expect(route.click({ ref: 9999 })).rejects.toThrow(
+          /browser_view/u,
+        );
+        expect((await route.state()).title).toBe("Oxrail control");
+
+        const snapshot = await route.read({ maxChars: 4_000 });
+        const button = snapshot.controls.find(
+          (control) => control.name === "Press me",
+        );
+        if (button === undefined) throw new Error("no button control");
+        await route.click({ ref: button.ref });
+        expect((await route.state()).title).toBe("clicked");
+
+        // The same number after a navigation addresses nothing: the page that
+        // handed it out is gone, and a fresh page must not answer to it.
+        await route.nav({ back: true });
+        await expect(route.click({ ref: button.ref })).rejects.toThrow(
+          /browser_view/u,
+        );
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

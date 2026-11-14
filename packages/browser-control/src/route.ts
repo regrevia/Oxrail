@@ -436,6 +436,15 @@ export class CdpBrowserRoute implements BrowserRoute {
     text: string;
     controls: readonly Control[];
   } | null = null;
+  /** The numbers the last read handed out, and the page they were on.
+   *
+   * A write may only address a control by a number a read produced: this route
+   * never takes a coordinate from a caller, and never guesses a point from a
+   * picture, so the number is the whole address. Keeping the set is what makes
+   * that a rule instead of a convention — an invented number, or one from a
+   * page that has since navigated, is refused instead of landing on whatever
+   * now happens to answer to it. */
+  private handed: { url: string; refs: ReadonlySet<number> } | null = null;
 
   constructor(options?: { env?: NodeJS.ProcessEnv }) {
     const env = options?.env ?? process.env;
@@ -596,6 +605,7 @@ export class CdpBrowserRoute implements BrowserRoute {
         text: snapshot.text,
         controls: snapshot.controls,
       };
+      this.hand(snapshot.url, snapshot.controls);
       return {
         url: snapshot.url,
         title: snapshot.title,
@@ -654,6 +664,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           snapshotExpression({ mode: "map", maxChars }),
         );
         this.touch();
+        this.hand(page.url, page.controls);
         return {
           url: page.url,
           title: page.title,
@@ -677,6 +688,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           snapshotExpression({ mode: "map", maxChars }),
         );
         this.touch();
+        this.hand(page.url, page.controls);
         const text = passagesToText(found);
         return {
           url: page.url,
@@ -701,6 +713,7 @@ export class CdpBrowserRoute implements BrowserRoute {
       const before =
         this.last !== null && this.last.url === page.url ? this.last : null;
       this.last = { url: page.url, text: page.text, controls: page.controls };
+      this.hand(page.url, page.controls);
       /* No earlier read to compare against — or the page navigated since, in
          which case everything is new: the honest answer is the whole page,
          not "nothing changed". */
@@ -847,12 +860,15 @@ export class CdpBrowserRoute implements BrowserRoute {
      press, so a click there is heard by the page and by nobody the caller
      asked for. */
   const within = (value, limit) => Math.min(Math.max(value, 1), Math.max(limit - 2, 1));
+  /* The tree the control is in answers for its own points: an element inside a
+     shadow root is not returned by document.elementFromPoint at all, so asking
+     the document would report every shadow control as covered. */
+  const root = el.getRootNode();
+  const own = root !== null && typeof root.elementFromPoint === "function" ? root : document;
   const spread = [[0.5, 0.5], [0.3, 0.5], [0.7, 0.5], [0.5, 0.3], [0.5, 0.7]];
   for (const [fx, fy] of spread) {
     const x = within(seenLeft + (seenRight - seenLeft) * fx, innerWidth);
     const y = within(seenTop + (seenBottom - seenTop) * fy, innerHeight);
-    const root = el.getRootNode();
-    const own = root !== null && typeof root.elementFromPoint === "function" ? root : document;
     const hit = own.elementFromPoint(x, y);
     if (hit !== null && (hit === el || el.contains(hit))) return { found: true, x, y, label };
   }
@@ -1019,8 +1035,42 @@ export class CdpBrowserRoute implements BrowserRoute {
     );
   }
 
+  /** Record what a read numbered, so a later write can be held to it. */
+  private hand(url: string, controls: readonly Control[]): void {
+    this.handed = {
+      url,
+      refs: new Set(controls.map((control) => control.ref)),
+    };
+  }
+
+  /** Refuse a write that does not come from a read.
+   *
+   * The two failures this names are different, and both are honest: nothing
+   * has been read yet, or the last read of this page did not contain that
+   * number. Neither is answered by trying harder — the answer is to read
+   * again, which is also the only way to get a number that will work. */
+  private addressable(ref: number): void {
+    if (this.handed === null)
+      throw new StaleRefError(
+        `control ${ref} cannot be addressed: nothing has been read, so no read produced that number — call browser_view first`,
+      );
+    if (!this.handed.refs.has(ref))
+      throw new StaleRefError(
+        `control ${ref} cannot be addressed: the last read of ${this.handed.url} did not contain it — call browser_view again and use a number it returns`,
+      );
+  }
+
   async click(target: { ref?: number; text?: string }): Promise<ToolResult> {
     return this.serial(async () => {
+      /* A number the caller made up is not an address. A text this page has is
+         one only if a read said so, so a click by text still needs a read.
+         Checked before the browser is opened: a write that cannot be addressed
+         is answered the same way whether or not Chrome is already running. */
+      if (target.ref !== undefined) this.addressable(target.ref);
+      else if (this.handed === null)
+        throw new StaleRefError(
+          `nothing has been read, so ${JSON.stringify(target.text ?? "")} is not known to be on this page — call browser_view first`,
+        );
       await this.ensure();
       const box = await this.locate(target);
       await this.mouseClick(box.x, box.y);
@@ -1121,6 +1171,7 @@ export class CdpBrowserRoute implements BrowserRoute {
     clear?: boolean;
   }): Promise<ToolResult> {
     return this.serial(async () => {
+      if (target.ref !== undefined) this.addressable(target.ref);
       await this.ensure();
       if (target.ref !== undefined) {
         const ok = await this.focus(target.ref);
@@ -1216,6 +1267,16 @@ export class CdpBrowserRoute implements BrowserRoute {
         await cdp.send("Page.reload", {}, page.sessionId);
         await this.waitIdle();
       }
+      /* Whatever the numbers meant, they meant it on the page that was here
+         before: a navigation drops the page-side store, so they address
+         nothing now. Saying so beats letting a fresh page answer to a stale
+         number. */
+      if (
+        options.url !== undefined ||
+        options.back === true ||
+        options.reload === true
+      )
+        this.handed = null;
       this.touch();
       return this.state();
     });
