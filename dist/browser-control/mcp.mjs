@@ -2120,8 +2120,11 @@ var init_route = __esm({
   const el = inside.querySelector('[data-oxrail-ref="${local}"]');
   if (!el) return { found: false, frames: holders.length };
   const label = (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("title") || "").replace(/\\s+/g, " ").trim().slice(0, 80);
-  const own = el.getBoundingClientRect();
-  if (own.width < 2 || own.height < 2) return { found: true, frames: holders.length, label, blocked: "it has no area on screen to click" };
+  /* Named for what it is, because 'own' already means the tree the control is
+     in over in locate(); one name for two things is how the occlusion path
+     came to reference a binding that had gone out of scope. */
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return { found: true, frames: holders.length, label, blocked: "it has no area on screen to click" };
   let x = 0, y = 0, node = holder, guard = 0, top = holder;
   while (node && guard < 8) {
     const box = node.getBoundingClientRect();
@@ -2138,7 +2141,7 @@ var init_route = __esm({
     if (node) top = node;
     guard += 1;
   }
-  const at = { x: x + own.left + own.width / 2, y: y + own.top + own.height / 2 };
+  const at = { x: x + rect.left + rect.width / 2, y: y + rect.top + rect.height / 2 };
   /* The point has to be inside the frame's own visible box, and the frame's
      box has to be on screen, or the press lands on whatever is above it. */
   const box = holder.getBoundingClientRect();
