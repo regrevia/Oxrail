@@ -161,6 +161,15 @@ describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
         /* Nothing changed between two reads of a static page. */
         expect(secondChanged.text).toBe("(no change since the last read)");
 
+        /* Which modes hand controls decides whether a write can follow them,
+           so it is behaviour, not an implementation detail: map and query
+           return the page's controls, article hands none, and changed hands
+           the page even though it only lists what is new. */
+        expect(map.controls.length).toBeGreaterThan(0);
+        expect(answer.controls.length).toBeGreaterThan(0);
+        expect(article.controls).toEqual([]);
+        expect(article.text.length).toBeGreaterThan(0);
+
         /* The point of the whole layer: a page that is cheap to read stays
            cheap to read, so the budget is spent on the answer. */
         expect(queryMs).toBeLessThan(2_000);
