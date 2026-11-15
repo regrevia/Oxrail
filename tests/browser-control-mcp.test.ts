@@ -491,12 +491,17 @@ describe("MCP server", () => {
     expect(text).toContain("controls: 0");
     expect(text).toContain("truncated: true");
 
-    /* The answer mode carries the question and its own counts. */
+    /* The answer mode carries the question and its own counts. The controls
+       come back with it: a read that numbers nothing makes every write on the
+       page unaddressable, so the column and the refs travel together. */
     harness.route.digestImpl = async () => ({
       ...harness.route.snapshot,
       mode: "query",
       text: "## Returns\nRefunds are paid within three working days.",
-      controls: [],
+      controls: [
+        { ref: 1, role: "button", name: "Track parcel" },
+        { ref: 2, role: "link", name: "Start a return" },
+      ],
       truncated: false,
       chars: 52,
       words: 812,
@@ -527,6 +532,10 @@ describe("MCP server", () => {
     expect(answer).toContain("words: 812");
     expect(answer).toContain("passages: 1 of 40 blocks");
     expect(answer).not.toContain("truncated");
+    /* Both numbered controls came back with the answer, so the answer itself
+       is addressable rather than only readable. */
+    expect(answer).toContain(`[1] button "Track parcel"`);
+    expect(answer).toContain(`[2] link "Start a return"`);
     await harness.end();
   });
 
