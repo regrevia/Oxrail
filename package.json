@@ -38,12 +38,17 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:lab && pnpm package:product && pnpm validate:boundaries && pnpm validate:product-artifact && node scripts/validate-plugin.mjs --root release/oxrail && pnpm validate:plugin && pnpm validate:spec && pnpm verify:evidence && pnpm secret:scan"
   },
   "devDependencies": {
-    "@playwright/test": "1.55.0",
+    "@playwright/test": "1.55.1",
     "@types/node": "24.3.0",
     "esbuild": "0.25.9",
     "prettier": "3.6.2",
     "typescript": "5.9.2",
-    "vitest": "3.2.4",
-    "zod": "4.1.5"
+    "vitest": "3.2.6",
+    "zod": "4.6.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "7.3.7"
+    }
   }
 }
