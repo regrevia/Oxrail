@@ -289,6 +289,46 @@ for (let offset = 0; offset < workEntries.length; offset += 1) {
   workPackage.end_line = endIndex === -1 ? lines.length : endIndex;
 }
 
+/* `counts` used to be hand-edited, so it drifted from the collections it
+   describes: it was the only place in the index that could disagree with the
+   index. Counting what is actually there makes the summary a fact of the file
+   rather than a thing to remember. */
+const counted = (value) =>
+  value === undefined || value === null
+    ? 0
+    : Array.isArray(value)
+      ? value.length
+      : Object.keys(value).length;
+index.counts = {
+  ...index.counts,
+  sections: counted(index.sections),
+  requirements: counted(index.requirements),
+  gates: counted(index.gates),
+  kill_criteria: counted(index.kill_criteria),
+  work_packages: counted(index.work_packages),
+  tests: counted(index.tests),
+  evidence_ids: counted(index.evidence),
+  adrs: counted(index.architecture_decisions),
+};
+
+/* `coverage` is the same kind of claim, one level down: it says how many
+   requirements and gates are actually wired to work. It was also typed by
+   hand, and also behind by the packages added since. Every figure below is a
+   property of the collections, so derive it and stop maintaining it. */
+const nonEmpty = (value) => counted(value) > 0;
+const wired = (entries, field) =>
+  Object.values(entries).filter((entry) => nonEmpty(entry[field] ?? [])).length;
+index.coverage = {
+  ...index.coverage,
+  requirements_with_primary_work_packages: wired(
+    index.requirements,
+    "primary_work_packages",
+  ),
+  requirements_with_linked_tests: wired(index.requirements, "linked_tests"),
+  gates_with_work_packages: wired(index.gates, "work_packages"),
+  kill_criteria_with_work_packages: wired(index.kill_criteria, "work_packages"),
+};
+
 const output = `${JSON.stringify(index, null, 2)}\n`;
 await writeFile("spec/OXRAIL_SPEC_INDEX.json", output);
 await writeFile("docs/generated/spec-index.json", output);

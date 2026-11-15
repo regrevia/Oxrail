@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.28
+# Oxrail — 唯一实现规范（SPEC）v1.0.29
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -11993,7 +11993,7 @@ Computer Use loops over pictures: capture, decide, press, capture again. This ro
 
 - `this.handed` on the route: the refs the last control-returning read handed out, with the url they described
 - preconditions in `click()` and `type()` that run before the browser is started; `nav()` clears the set; `key()` takes no ref and is not gated
-- `tests/browser-control-addressable.test.ts` (no browser), and the live case in `tests/browser-control-live.test.ts`
+- `tests/browser-control-addressable.test.ts` (no browser), the live case in `tests/browser-control-live.test.ts`, and the hit-test cases in `tests/browser-control-digest-live.test.ts`
 - the write-side clause in `docs/adr/ADR-BROWSERCTL-002.md` and the "Writes are addressed by a read" section in `docs/product/browser-control.md`
 
 **验收**
@@ -12041,7 +12041,7 @@ blocked_by: []
 
 一个里程碑只有其 `WP-RLS-*` 进入 `ACCEPTED` 才完成。某个功能 WP 完成但 release WP 未接受，不得发布该里程碑版本号。
 
-本总账共定义 **100 个工作包**。
+本总账定义的工作包数量不以本文中的固定数字为准：`spec/OXRAIL_SPEC_INDEX.json` 的 `counts.work_packages` 与 `work_packages` 集合是唯一计数来源，两者由生成器从 `###`/`####` 标题实际算出，不再手工填写。任何在此处写死的总数都会在工作包增删后失真（本句此前写作 100，而实际为 110），因此不再重复计数。
 
 ---
 
@@ -12199,6 +12199,13 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.29 — 2026-11-15
+
+- `WP-BCTL-003` 的第七条验收（命中测试问控件所在的那棵树）此前的测试只钉住了「开放 shadow root 里的控件不被判为遮挡」这件事的一半，另一半「被遮挡时点名覆盖者」只有实现没有断言。现补一条活测：在连续两层的页面里放一个被覆盖的控件，断言点击被拒绝时文案带出覆盖元素自身的标签、id 与文字，并在事后确认这次按压没有落到下面的控件上。`Deliverables` 同步记入该测试文件。
+- 删除 §49.19 中写死的工作包总数。该数字只存在于正文一处（写作 100），既无生成器维护也无校验器检查，而正文实际定义了 110 个工作包；机器索引的 `counts.work_packages` 同样停留在 108。现在计数只以 `spec/OXRAIL_SPEC_INDEX.json` 为准，正文不再重复声明总数。
+- 索引的 `counts` 与 `coverage` 改为由生成器从集合本身算出，不再手工填写。此前 `counts` 的 `work_packages`（108）、`tests`（237）、`adrs`（3）与 `coverage` 的四项（119/119/16/31）都落后于实际集合；一处摘要与被摘要的数据放在同一文件里却不一致，是该文件里最容易发生也最难发现的失真。
+- `scripts/validate-spec.mjs` 增加对应校验：`counts` 的八项与 `coverage` 的四项必须与集合本身一致，手改摘要将无法通过校验；把数字改对只能经由生成器。
 
 ### v1.0.28 — 2026-11-14
 

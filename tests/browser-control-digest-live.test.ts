@@ -70,6 +70,16 @@ const composed = fixturePage(`<button id="plain">Plain button</button>
 <p>Widget price: 42 euros.</p>
 <button id="buy" onclick="document.getElementById('said').textContent='Bought'">Buy now</button>
 <p id="said">Not bought</p></body></html>`)}"></iframe>
+<style>
+  /* Sits on top of the button below it, so a press at that button's own point
+     lands on this layer instead. Absolute and sized in the same flow. */
+  #cover { position: absolute; top: 0; left: 0; width: 100%; height: 3rem;
+           background: rgba(0, 0, 0, 0.2); }
+</style>
+<div style="position: relative">
+  <button id="hidden-behind" onclick="document.title='never'">Blocked action</button>
+  <div id="cover">Banner over the button</div>
+</div>
 <script>
   const root = document.getElementById("host").attachShadow({ mode: "open" });
   root.innerHTML = '<p>Account</p><button id="deep">Delete account</button>';
@@ -241,6 +251,24 @@ describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
         if (deep !== undefined) {
           const clicked = await route.click({ ref: deep.ref });
           expect(JSON.stringify(clicked)).toContain("Delete account");
+        }
+
+        /* A covered control is refused, and the refusal names the layer that
+           owns the point rather than reporting an internal error: "something
+           covers it" leaves the reader guessing which thing to dismiss. The
+           label carries the covering element's tag, id and its own words. */
+        const covered = view.controls.find(
+          (control) => control.name === "Blocked action",
+        );
+        expect(covered).toBeDefined();
+        if (covered !== undefined) {
+          await expect(route.click({ ref: covered.ref })).rejects.toThrow(
+            /cannot be clicked because it is behind div#cover "Banner over the button"/u,
+          );
+          /* The point did not reach the button underneath: its handler would
+             have changed the title. */
+          const stillThere = await route.read({});
+          expect(stillThere.title).toBe("Composed");
         }
       } finally {
         await route.close();

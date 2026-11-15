@@ -85,6 +85,55 @@ for (const match of canonical.matchAll(concreteId)) {
     failures.push(`stable ID missing from index: ${match[0]}`);
 }
 
+/* `counts` and `coverage` summarise collections that sit in the same file, so
+   they are checkable rather than merely stated: a summary that disagrees with
+   the thing it summarises is the cheapest kind of lie, and it was how 108 was
+   reported for 110 work packages. Keeping the check here means a hand edit
+   cannot pass, and the generator is the only way to move the numbers. */
+const counted = (value) =>
+  value === undefined || value === null
+    ? 0
+    : Array.isArray(value)
+      ? value.length
+      : Object.keys(value).length;
+const totals = {
+  sections: counted(index.sections),
+  requirements: counted(index.requirements),
+  gates: counted(index.gates),
+  kill_criteria: counted(index.kill_criteria),
+  work_packages: counted(index.work_packages),
+  tests: counted(index.tests),
+  evidence_ids: counted(index.evidence),
+  adrs: counted(index.architecture_decisions),
+};
+for (const [field, actual] of Object.entries(totals)) {
+  const stated = index.counts?.[field];
+  if (stated !== actual)
+    failures.push(
+      `index counts.${field} says ${stated}, the collection holds ${actual}`,
+    );
+}
+const nonEmpty = (value) => counted(value) > 0;
+const wired = (entries, field) =>
+  Object.values(entries ?? {}).filter((entry) => nonEmpty(entry[field] ?? []))
+    .length;
+const derivedCoverage = {
+  requirements_with_primary_work_packages: wired(
+    index.requirements,
+    "primary_work_packages",
+  ),
+  requirements_with_linked_tests: wired(index.requirements, "linked_tests"),
+  gates_with_work_packages: wired(index.gates, "work_packages"),
+  kill_criteria_with_work_packages: wired(index.kill_criteria, "work_packages"),
+};
+for (const [field, actual] of Object.entries(derivedCoverage)) {
+  const stated = index.coverage?.[field];
+  if (stated !== actual)
+    failures.push(
+      `index coverage.${field} says ${stated}, the index derives ${actual}`,
+    );
+}
+
 if (failures.length) {
   console.error(failures.join("\n"));
   process.exit(1);
