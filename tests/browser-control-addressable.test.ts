@@ -49,3 +49,56 @@ describe("a write must be addressed by a read", () => {
     expect((await route.state().catch(() => null))?.url ?? "").toBe("");
   });
 });
+
+/* A name is an address only if a read said it. Without this, a click by text
+ * reaches whatever the page happens to match now — which is the one thing a
+ * read-addressed route must not do, since the caller never saw that control. */
+
+describe("a click by text must be a name a read handed out", () => {
+  it("refuses a text whose read did not name it", async () => {
+    const route = coldRoute();
+    // Pretend a read happened, then hold the route to what that read said.
+    const handed = (route as unknown as { handed: unknown }).handed;
+    expect(handed).toBe(null);
+    await expect(route.click({ text: "Sign in" })).rejects.toThrow(
+      /nothing has been read/u,
+    );
+  });
+
+  it("names the page whose read did not contain the text", async () => {
+    const route = coldRoute();
+    (route as unknown as { handed: unknown }).handed = {
+      url: "https://example.test/a",
+      refs: new Set([1, 2]),
+      names: ["second", "free action"],
+    };
+    await expect(route.click({ text: "Delete account" })).rejects.toThrow(
+      /the last read of https:\/\/example\.test\/a did not name it/u,
+    );
+    await expect(route.click({ text: "Delete account" })).rejects.toThrow(
+      /use a number it returns/u,
+    );
+  });
+
+  it("lets a name the read did say through to the page", async () => {
+    const route = coldRoute();
+    (route as unknown as { handed: unknown }).handed = {
+      url: "https://example.test/a",
+      refs: new Set([1, 2]),
+      names: ["second", "free action"],
+    };
+    // It passes the gate and fails later, in the browser: the refusal must not
+    // be the address error, because this name was addressable.
+    const failure = await route.click({ text: "Free Action" }).catch((e) => e);
+    expect(String(failure)).not.toMatch(/cannot be addressed/u);
+  });
+});
+
+describe("typing with no number still needs a read", () => {
+  it("refuses to type into the page before anything has been read", async () => {
+    const route = coldRoute();
+    await expect(route.type({ text: "hello" })).rejects.toThrow(
+      /nothing has been read/u,
+    );
+  });
+});

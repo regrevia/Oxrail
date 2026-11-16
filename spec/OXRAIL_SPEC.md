@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.30
+# Oxrail — 唯一实现规范（SPEC）v1.0.31
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -12003,7 +12003,8 @@ Computer Use loops over pictures: capture, decide, press, capture again. This ro
 - [ ] A write addressed by a number the last read did not contain is refused, and the refusal names the address that read described.
 - [ ] Both refusals happen before the browser is started, so an unaddressable write costs nothing and reads the same whether or not Chrome is running.
 - [ ] A navigation (url, back or reload) clears the handed refs; a ref from before it is refused rather than resolved against the new page.
-- [ ] The legitimate `{ text }` path still works after a read, and the occlusion refusal still names what covers the control.
+- [ ] A write addressed by a text the last read did not name is refused, and the refusal names the address that read described; a text it did name still reaches the page, and the occlusion refusal still names what covers the control.
+- [ ] Typing with no `ref` needs a read behind it, so keystrokes are never sent to a control the caller has not seen; the legitimate path of reading, clicking, then typing without a `ref` still works.
 - [ ] Hit testing asks the tree the control is in, so a control in an open shadow root is not reported as covered, and an occluded control reports the layer that owns the point instead of an internal error.
 - [ ] `browser_nav` stays an explicit tool; no read navigates as a side effect.
 - [ ] The route is not reported as Hook-visible, Guard-mediated or Native-equivalent, and it does not enter the NIF matrix or a paired benchmark.
@@ -12011,7 +12012,7 @@ Computer Use loops over pictures: capture, decide, press, capture again. This ro
 **测试 / 证据**
 
 - `TEST-BCTL-007`
-- `tests/browser-control-addressable.test.ts` (refusals, no browser), `tests/browser-control-live.test.ts` (refused numbers, a real click, and a stale ref after back)；活测要真实浏览器，`OXRAIL_BROWSER_LIVE=1` 才跑，CI 的 `live-browser-regression` job 每次推送到 `dev`/`main` 都设它并在用例全被跳过时判失败，没有 Chrome 的机器不能报成绿
+- `tests/browser-control-addressable.test.ts` (refusals, no browser, including the text and no-ref typing gates), `tests/browser-control-live.test.ts` (refused numbers, a real click, a click by a name a read gave, and a stale ref after back)；活测要真实浏览器，`OXRAIL_BROWSER_LIVE=1` 才跑，CI 的 `live-browser-regression` job 每次推送到 `dev`/`main` 都设它并在用例全被跳过时判失败，没有 Chrome 的机器不能报成绿
 
 **阻断 / Kill**
 
@@ -12199,6 +12200,10 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.31 — 2026-11-17
+
+`§2.5` 的写操作门控原本只对编号成立：`browser_click` 的文本分支只要求“发生过一次读取”，从不检查那个文本是否出现在那次读取交出的控件名里，也不比较读取时的地址；不带 `ref` 的输入完全不看读取状态。这意味着一个调用方可以点名一个它没见过的控件，并把键击打进页面自己决定聚焦的地方——与“写操作只能引用上一次读取返回的地址”这一条相矛盾。本条把两侧补齐：文本必须在最后一次读取交出的控件名里出现，不带 `ref` 的输入要求此前发生过读取。
 
 ### v1.0.30 — 2026-11-16
 

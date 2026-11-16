@@ -59,6 +59,15 @@ const MIN_IDLE_MS = 60_000;
 const LOAD_TIMEOUT_MS = 20_000;
 
 /** Read the idle window from the environment, bounded the way `rest.js` is. */
+/** Compare a name the way a lookup does: both sides folded the same way.
+ *
+ * A click by text is only allowed to reach a name a read said out loud, so the
+ * comparison here has to be the one the read's caller would recognise, not a
+ * second opinion about spacing or case. */
+function normalizeName(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
 export function idleMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.OXRAIL_BROWSER_IDLE_MS);
   if (!Number.isFinite(raw)) return DEFAULT_IDLE_MS;
@@ -444,7 +453,11 @@ export class CdpBrowserRoute implements BrowserRoute {
    * that a rule instead of a convention — an invented number, or one from a
    * page that has since navigated, is refused instead of landing on whatever
    * now happens to answer to it. */
-  private handed: { url: string; refs: ReadonlySet<number> } | null = null;
+  private handed: {
+    url: string;
+    refs: ReadonlySet<number>;
+    names: readonly string[];
+  } | null = null;
 
   constructor(options?: { env?: NodeJS.ProcessEnv }) {
     const env = options?.env ?? process.env;
@@ -1043,6 +1056,9 @@ export class CdpBrowserRoute implements BrowserRoute {
     this.handed = {
       url,
       refs: new Set(controls.map((control) => control.ref)),
+      /* The names this read handed out, normalised the same way a lookup is,
+         so a click by text can be held to what the read actually said. */
+      names: controls.map((control) => normalizeName(control.name)),
     };
   }
 
@@ -1070,10 +1086,18 @@ export class CdpBrowserRoute implements BrowserRoute {
          Checked before the browser is opened: a write that cannot be addressed
          is answered the same way whether or not Chrome is already running. */
       if (target.ref !== undefined) this.addressable(target.ref);
-      else if (this.handed === null)
-        throw new StaleRefError(
-          `nothing has been read, so ${JSON.stringify(target.text ?? "")} is not known to be on this page — call browser_view first`,
-        );
+      else {
+        const needle = normalizeName(target.text ?? "");
+        const said = this.handed?.names.some((name) => name.includes(needle));
+        if (this.handed === null)
+          throw new StaleRefError(
+            `nothing has been read, so ${JSON.stringify(target.text ?? "")} is not known to be on this page — call browser_view first`,
+          );
+        if (said !== true)
+          throw new StaleRefError(
+            `control ${JSON.stringify(target.text ?? "")} cannot be addressed: the last read of ${this.handed.url} did not name it — call browser_view again and use a number it returns`,
+          );
+      }
       await this.ensure();
       const box = await this.locate(target);
       await this.mouseClick(box.x, box.y);
@@ -1175,6 +1199,15 @@ export class CdpBrowserRoute implements BrowserRoute {
   }): Promise<ToolResult> {
     return this.serial(async () => {
       if (target.ref !== undefined) this.addressable(target.ref);
+      /* Typing without a number goes to whatever has focus, so the caller has
+         to have focused it by reading and then clicking. With nothing read at
+         all there is no such control, and the keystrokes would land on
+         whatever the page decided to focus on its own. */ else if (
+        this.handed === null
+      )
+        throw new StaleRefError(
+          `nothing has been read, so there is no control to type into — call browser_view first`,
+        );
       await this.ensure();
       if (target.ref !== undefined) {
         const ok = await this.focus(target.ref);

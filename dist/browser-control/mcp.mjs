@@ -1333,6 +1333,9 @@ __export(route_exports, {
 });
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, statSync as statSync2, writeFileSync } from "node:fs";
 import { join } from "node:path";
+function normalizeName(value) {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
 function idleMs(env = process.env) {
   const raw = Number(env.OXRAIL_BROWSER_IDLE_MS);
   if (!Number.isFinite(raw)) return DEFAULT_IDLE_MS;
@@ -2203,7 +2206,10 @@ var init_route = __esm({
       hand(url, controls) {
         this.handed = {
           url,
-          refs: new Set(controls.map((control) => control.ref))
+          refs: new Set(controls.map((control) => control.ref)),
+          /* The names this read handed out, normalised the same way a lookup is,
+             so a click by text can be held to what the read actually said. */
+          names: controls.map((control) => normalizeName(control.name))
         };
       }
       /** Refuse a write that does not come from a read.
@@ -2225,10 +2231,18 @@ var init_route = __esm({
       async click(target) {
         return this.serial(async () => {
           if (target.ref !== void 0) this.addressable(target.ref);
-          else if (this.handed === null)
-            throw new StaleRefError(
-              `nothing has been read, so ${JSON.stringify(target.text ?? "")} is not known to be on this page \u2014 call browser_view first`
-            );
+          else {
+            const needle = normalizeName(target.text ?? "");
+            const said = this.handed?.names.some((name) => name.includes(needle));
+            if (this.handed === null)
+              throw new StaleRefError(
+                `nothing has been read, so ${JSON.stringify(target.text ?? "")} is not known to be on this page \u2014 call browser_view first`
+              );
+            if (said !== true)
+              throw new StaleRefError(
+                `control ${JSON.stringify(target.text ?? "")} cannot be addressed: the last read of ${this.handed.url} did not name it \u2014 call browser_view again and use a number it returns`
+              );
+          }
           await this.ensure();
           const box = await this.locate(target);
           await this.mouseClick(box.x, box.y);
@@ -2314,6 +2328,10 @@ var init_route = __esm({
       async type(target) {
         return this.serial(async () => {
           if (target.ref !== void 0) this.addressable(target.ref);
+          else if (this.handed === null)
+            throw new StaleRefError(
+              `nothing has been read, so there is no control to type into \u2014 call browser_view first`
+            );
           await this.ensure();
           if (target.ref !== void 0) {
             const ok = await this.focus(target.ref);
