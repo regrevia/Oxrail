@@ -58,15 +58,26 @@ jobs:
           google-chrome --version
       - name: Run every live case against that Chrome
         run: |
-          set -o pipefail
           OXRAIL_BROWSER_LIVE=1 pnpm vitest run \
+            --reporter=json --outputFile=live.json \
             tests/browser-control-live.test.ts \
-            tests/browser-control-digest-live.test.ts 2>&1 | tee live.log
+            tests/browser-control-digest-live.test.ts
       - name: Refuse a run where the cases skipped
         run: |
-          if grep -qE "Tests +[1-9][0-9]* passed" live.log; then exit 0; fi
-          echo "no live case ran; the suite skips when the route cannot find a Chrome"
-          exit 1
+          # The live files skip themselves when they cannot find a Chrome, and a
+          # skipped suite still exits 0. Read the reporter's own count instead of
+          # the rendered summary, which carries colour codes between the label and
+          # the number and cannot be matched reliably.
+          node -e '
+            const report = require("./live.json");
+            const ran = report.numPassedTests;
+            const skipped = report.numPendingTests;
+            console.log(`live cases passed: ${ran}, skipped: ${skipped}`);
+            if (ran === 0 || skipped > 0) {
+              console.error("a live case did not run; skipping is not passing");
+              process.exit(1);
+            }
+          '
 
   milestone-browser-regression:
     if: github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.base_ref == 'main')
