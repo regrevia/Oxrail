@@ -158,7 +158,7 @@ This is the difference in kind from a Computer Use loop, which looks at pixels a
 
 A control with no area on screen is reported separately: `"…" cannot be clicked: it has no area on screen to click.` So is a control that stays out of the viewport after scrolling: `"…" cannot be clicked because it is outside the visible area even after scrolling it into view.` These messages are a fact about the page, not a retry suggestion; the fix is to dismiss the layer or scroll the thing into view, then read the page again.
 
-Both halves of that refusal are covered by live tests against a real Chrome: a control inside an open shadow root is numbered and clicked rather than reported as covered, and a control under a layering element is refused with the covering element's own tag, id and words, with the page checked afterwards to confirm the press never reached the control underneath.
+Both halves of that refusal are covered by live tests against a real Chrome: a control inside an open shadow root is numbered and clicked rather than reported as covered, and a control under a layering element is refused with the covering element's own tag, id and words, with the page checked afterwards to confirm the press never reached the control underneath. Those cases need a browser, so they run only when `OXRAIL_BROWSER_LIVE=1` is set — and CI sets it on every push to `dev` and `main`, then fails the run if the cases skipped rather than ran, so a machine without Chrome cannot report them green.
 
 ## Not claimed
 

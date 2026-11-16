@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.29
+# Oxrail — 唯一实现规范（SPEC）v1.0.30
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -12011,7 +12011,7 @@ Computer Use loops over pictures: capture, decide, press, capture again. This ro
 **测试 / 证据**
 
 - `TEST-BCTL-007`
-- `tests/browser-control-addressable.test.ts` (refusals, no browser), `tests/browser-control-live.test.ts` (refused numbers, a real click, and a stale ref after back)
+- `tests/browser-control-addressable.test.ts` (refusals, no browser), `tests/browser-control-live.test.ts` (refused numbers, a real click, and a stale ref after back)；活测要真实浏览器，`OXRAIL_BROWSER_LIVE=1` 才跑，CI 的 `live-browser-regression` job 每次推送到 `dev`/`main` 都设它并在用例全被跳过时判失败，没有 Chrome 的机器不能报成绿
 
 **阻断 / Kill**
 
@@ -12199,6 +12199,11 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.30 — 2026-11-16
+
+- 活测（`tests/browser-control-live.test.ts`、`tests/browser-control-digest-live.test.ts`）此前只在有真实 Chrome 的机器上手动跑：`pnpm check` 全部跳过，CI 只有 `main` 才跑浏览器相关 job，于是 `dev` 上每次推送都不跑任何浏览器路径。新增 CI job `live-browser-regression`，安装 Chrome、设 `OXRAIL_BROWSER_LIVE=1`、跑两个活测文件，并在输出里没有一条 passed 时判失败——跳过不等于通过。
+- WP-BCTL-003 的测试/证据行补上这一条前置与守护，使「活测覆盖」这句话可核验。
 
 ### v1.0.29 — 2026-11-15
 
