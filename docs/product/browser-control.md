@@ -85,7 +85,7 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 | `query`   | Only the passages that answer `query`, ranked in this process, plus controls | A question with an answer on the page      |
 | `changed` | Only what the previous `text` read did not already say                       | Watching a page after an action            |
 
-A read is also what makes its page writable: the controls it returns are the refs `browser_click` and `browser_type` will accept, and nothing else is. `map` and `query` return them, so a question can be followed by a click on the answer's page. `changed` returns only the controls that are new since the last read, but it hands the page's whole set, so a write can follow it too. `article` returns and hands no controls — it is for reading and quoting, not for acting — and it leaves the refs from the last read that had them still valid, because the page has not gone anywhere.
+A read is also what makes its page writable: the controls it returns are the refs `browser_click` and `browser_type` will accept, and a number from no read is refused. `map` and `query` return them, so a question can be followed by a click on the answer's page. `changed` returns only the controls that are new since the last read, but it hands the page's whole set, so a write can follow it too. `article` returns and hands no controls — it is for reading and quoting, not for acting — and it leaves the refs from the last read that had them still valid, because the page has not gone anywhere.
 
 That is why `map` and `query` are not free on a page with many links, and why `query` on such a page still costs its 61 `[n]` lines.
 
@@ -136,7 +136,7 @@ Screenshots are written under `<state dir>/shots` and returned both as an image 
 
 ## Writes are addressed by a read
 
-There is no way to hand this route a coordinate. `browser_click` takes a `ref` or some visible text, `browser_type` takes a `ref` and the text, and neither accepts a point on screen — so the only way to act on a page is to read it first, and the numbers a read returns are the whole address. A number that no read produced, or one from before the page navigated, is refused rather than tried:
+There is no way to hand this route a coordinate. `browser_click` takes a `ref` or some visible text, `browser_type` takes a `ref` and the text, and neither accepts a point on screen — so a write that acts on a control has to name it with a number a read returned, and the numbers are the whole address. Two calls act on the page without one: `browser_key` presses a named key, and that key goes wherever the page already put its focus, which is nothing a read can number; `browser_nav` changes the page rather than touching a control in it. A number that no read produced, or one from before the page navigated, is refused rather than tried:
 
 ```
 control 12 cannot be addressed: the last read of https://example.com/ did not contain it — call browser_view again and use a number it returns
