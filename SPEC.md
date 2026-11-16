@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.31
+# Oxrail — 唯一实现规范（SPEC）v1.0.32
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -12004,6 +12004,7 @@ Computer Use loops over pictures: capture, decide, press, capture again. This ro
 - [ ] Both refusals happen before the browser is started, so an unaddressable write costs nothing and reads the same whether or not Chrome is running.
 - [ ] A navigation (url, back or reload) clears the handed refs; a ref from before it is refused rather than resolved against the new page.
 - [ ] A write addressed by a text the last read did not name is refused, and the refusal names the address that read described; a text it did name still reaches the page, and the occlusion refusal still names what covers the control.
+- [ ] A selector that is empty after whitespace is refused before the gate can compare it, so it can never match every name.
 - [ ] Typing with no `ref` needs a read behind it, so keystrokes are never sent to a control the caller has not seen; the legitimate path of reading, clicking, then typing without a `ref` still works.
 - [ ] Hit testing asks the tree the control is in, so a control in an open shadow root is not reported as covered, and an occluded control reports the layer that owns the point instead of an internal error.
 - [ ] `browser_nav` stays an explicit tool; no read navigates as a side effect.
@@ -12200,6 +12201,10 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.32 — 2026-11-17
+
+v1.0.31 的文本门控用包含匹配，而包含匹配对空串恒真：`browser_click` 收到空或纯空白的 `text` 时，归一化得到 `""`，任何一次读取交出的名字都"包含"它，于是门控放行，点击落到页面上第一个可点控件。这不是调用方的疏漏，而是门控本身对空选择器没有定义。本条把空选择器定义成一个无效地址，在任何比较之前就拒绝。
 
 ### v1.0.31 — 2026-11-17
 

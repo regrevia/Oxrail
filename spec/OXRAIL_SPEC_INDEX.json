@@ -2,8 +2,8 @@
   "schema_version": 1,
   "generated_at": "2026-11-16",
   "canonical_file": "OXRAIL_SPEC.md",
-  "spec_version": "1.0.31",
-  "spec_sha256": "86cffd04b80e3c011eacdf8a035d393ffe2317758c6a29000dd69ad453e39b3a",
+  "spec_version": "1.0.32",
+  "spec_sha256": "4ffceff7ae0f1612fab065b34170ecc63b42395b7c82c3e2859f855f36f09094",
   "counts": {
     "sections": 53,
     "requirements": 131,
@@ -619,7 +619,7 @@
       "title": "V1.0 工作包任务单总账",
       "anchor": "sec-49",
       "start_line": 7449,
-      "end_line": 12048,
+      "end_line": 12049,
       "keywords": [
         "work-packages",
         "task-ledger",
@@ -631,8 +631,8 @@
       "number": 50,
       "title": "文档实时维护、变更与归档协议",
       "anchor": "sec-50",
-      "start_line": 12049,
-      "end_line": 12458,
+      "start_line": 12050,
+      "end_line": 12463,
       "keywords": [
         "living-spec",
         "maintenance",
@@ -644,14 +644,14 @@
     "SEC-51": {
       "anchor": "sec-51",
       "title": "产品 Skill 与内部 Lab 分离实施合同",
-      "start_line": 12459,
-      "end_line": 12924
+      "start_line": 12464,
+      "end_line": 12929
     },
     "SEC-52": {
       "anchor": "sec-52",
       "title": "Opt-in Browser Control 路由（MCP / CDP）",
-      "start_line": 12925,
-      "end_line": 12963
+      "start_line": 12930,
+      "end_line": 12968
     }
   },
   "requirements": {
@@ -1503,7 +1503,7 @@
       "locations": [
         158,
         8814,
-        12109
+        12110
       ]
     },
     "REQ-NIF-011": {
@@ -2078,7 +2078,7 @@
       "locations": [
         186,
         10607,
-        12398
+        12403
       ]
     },
     "REQ-CRED-002": {
@@ -2358,7 +2358,7 @@
         4444,
         8479,
         10024,
-        12391
+        12396
       ]
     },
     "REQ-SEC-002": {
@@ -4795,7 +4795,7 @@
         7989,
         8254,
         8855,
-        12409
+        12414
       ]
     },
     "REQ-HOST-008": {
@@ -5011,7 +5011,7 @@
         137,
         8254,
         10607,
-        12398
+        12403
       ]
     },
     "REQ-BCTL-001": {
@@ -5027,9 +5027,9 @@
       ],
       "locations": [
         11882,
-        12239,
-        12943,
-        12962
+        12244,
+        12948,
+        12967
       ]
     },
     "REQ-BCTL-002": {
@@ -5045,7 +5045,7 @@
       ],
       "locations": [
         11882,
-        12944
+        12949
       ]
     },
     "REQ-BCTL-003": {
@@ -5061,7 +5061,7 @@
       ],
       "locations": [
         11882,
-        12945
+        12950
       ]
     },
     "REQ-BCTL-004": {
@@ -5077,9 +5077,9 @@
       ],
       "locations": [
         11882,
-        12239,
-        12946,
-        12962
+        12244,
+        12951,
+        12967
       ]
     }
   },
@@ -5297,7 +5297,7 @@
         10607,
         10638,
         10692,
-        12398
+        12403
       ]
     },
     "GATE-G16": {
@@ -5311,9 +5311,9 @@
       "locations": [
         7057,
         11882,
-        12239,
-        12930,
-        12962
+        12244,
+        12935,
+        12967
       ]
     }
   },
@@ -5554,7 +5554,7 @@
         11929,
         11965,
         11982,
-        12019
+        12020
       ]
     },
     "KILL-K13": {
@@ -5668,8 +5668,8 @@
         11966,
         11982,
         11990,
-        12020,
-        12223
+        12021,
+        12228
       ]
     },
     "KILL-K19": {
@@ -5722,7 +5722,7 @@
         9878,
         9966,
         10426,
-        12111
+        12112
       ]
     },
     "KILL-K22": {
@@ -5784,7 +5784,7 @@
         9233,
         10259,
         11982,
-        12021
+        12022
       ]
     },
     "KILL-K26": {
@@ -5842,7 +5842,7 @@
       "locations": [
         7052,
         10658,
-        12398
+        12403
       ]
     },
     "KILL-K30": {
@@ -5915,10 +5915,10 @@
         11929,
         11967,
         11982,
-        12022,
-        12239,
-        12930,
-        12962
+        12023,
+        12244,
+        12935,
+        12967
       ]
     }
   },
@@ -9879,8 +9879,8 @@
       "title": "合同与现状冻结",
       "status": "READY",
       "depends_on": [],
-      "start_line": 12570,
-      "end_line": 12582
+      "start_line": 12575,
+      "end_line": 12587
     },
     "WP-LAB-001": {
       "anchor": "wp-lab-001",
@@ -9889,8 +9889,8 @@
       "depends_on": [
         "WP-LAB-000"
       ],
-      "start_line": 12583,
-      "end_line": 12601
+      "start_line": 12588,
+      "end_line": 12606
     },
     "WP-LAB-002": {
       "anchor": "wp-lab-002",
@@ -9899,8 +9899,8 @@
       "depends_on": [
         "WP-LAB-001"
       ],
-      "start_line": 12602,
-      "end_line": 12620
+      "start_line": 12607,
+      "end_line": 12625
     },
     "WP-LAB-003": {
       "anchor": "wp-lab-003",
@@ -9909,8 +9909,8 @@
       "depends_on": [
         "WP-LAB-002"
       ],
-      "start_line": 12621,
-      "end_line": 12637
+      "start_line": 12626,
+      "end_line": 12642
     },
     "WP-LAB-004": {
       "anchor": "wp-lab-004",
@@ -9919,8 +9919,8 @@
       "depends_on": [
         "WP-LAB-003"
       ],
-      "start_line": 12638,
-      "end_line": 12658
+      "start_line": 12643,
+      "end_line": 12663
     },
     "WP-LAB-005": {
       "anchor": "wp-lab-005",
@@ -9929,8 +9929,8 @@
       "depends_on": [
         "WP-LAB-004"
       ],
-      "start_line": 12659,
-      "end_line": 12679
+      "start_line": 12664,
+      "end_line": 12684
     },
     "WP-LAB-006": {
       "anchor": "wp-lab-006",
@@ -9939,8 +9939,8 @@
       "depends_on": [
         "WP-LAB-005"
       ],
-      "start_line": 12680,
-      "end_line": 12694
+      "start_line": 12685,
+      "end_line": 12699
     },
     "WP-LAB-007": {
       "anchor": "wp-lab-007",
@@ -9954,8 +9954,8 @@
         "WP-LAB-005",
         "WP-LAB-006"
       ],
-      "start_line": 12695,
-      "end_line": 12707
+      "start_line": 12700,
+      "end_line": 12712
     },
     "WP-BCTL-002": {
       "title": "Context-efficient Browser reads (`browser_read`)",
@@ -10026,6 +10026,7 @@
         "Both refusals happen before the browser is started, so an unaddressable write costs nothing and reads the same whether or not Chrome is running.",
         "A navigation (url, back or reload) clears the handed refs; a ref from before it is refused rather than resolved against the new page.",
         "A write addressed by a text the last read did not name is refused, and the refusal names the address that read described; a text it did name still reaches the page, and the occlusion refusal still names what covers the control.",
+        "A selector that is empty after whitespace is refused before the gate can compare it, so it can never match every name.",
         "Typing with no `ref` needs a read behind it, so keystrokes are never sent to a control the caller has not seen; the legitimate path of reading, clicking, then typing without a `ref` still works.",
         "Hit testing asks the tree the control is in, so a control in an open shadow root is not reported as covered, and an occluded control reports the layer that owns the point instead of an internal error.",
         "`browser_nav` stays an explicit tool; no read navigates as a side effect.",
@@ -10045,7 +10046,7 @@
         "WP-BCTL-002"
       ],
       "start_line": 11972,
-      "end_line": 12025,
+      "end_line": 12026,
       "tests": [
         "TEST-BCTL-007"
       ],
@@ -10251,7 +10252,7 @@
         11200,
         11242,
         11325,
-        12109
+        12110
       ],
       "sections": [
         "SEC-28",
@@ -11497,7 +11498,7 @@
       "locations": [
         6306,
         10639,
-        12398
+        12403
       ],
       "sections": [
         "SEC-35",
@@ -11585,7 +11586,7 @@
         9615,
         9786,
         9830,
-        12300
+        12305
       ],
       "sections": [
         "SEC-35",
@@ -12359,7 +12360,7 @@
       "locations": [
         6397,
         10639,
-        12398
+        12403
       ],
       "sections": [
         "SEC-36",
@@ -12472,7 +12473,7 @@
         6406,
         10645,
         10702,
-        12293
+        12298
       ],
       "sections": [
         "SEC-36",
@@ -12488,7 +12489,7 @@
         6407,
         10646,
         10703,
-        12287
+        12292
       ],
       "sections": [
         "SEC-36",
@@ -12504,7 +12505,7 @@
         6408,
         10647,
         10704,
-        12281
+        12286
       ],
       "sections": [
         "SEC-36",
@@ -12520,7 +12521,7 @@
         6409,
         10648,
         10705,
-        12275
+        12280
       ],
       "sections": [
         "SEC-36",
@@ -12536,7 +12537,7 @@
         6410,
         10649,
         10706,
-        12269
+        12274
       ],
       "sections": [
         "SEC-36",
@@ -12552,7 +12553,7 @@
         6411,
         10650,
         10707,
-        12263
+        12268
       ],
       "sections": [
         "SEC-36",
@@ -12568,7 +12569,7 @@
         6412,
         10651,
         10708,
-        12257
+        12262
       ],
       "sections": [
         "SEC-36",
@@ -12584,7 +12585,7 @@
         6413,
         10652,
         10709,
-        12251
+        12256
       ],
       "sections": [
         "SEC-36",
@@ -12777,7 +12778,7 @@
         8016,
         8287,
         8884,
-        12409
+        12414
       ],
       "sections": [
         "SEC-10",
@@ -12896,142 +12897,142 @@
       "title": "扫描产品依赖图和安装产物",
       "expected": "无Lab、benchmark、Demo运行依赖及实验CLI",
       "locations": [
-        12244,
-        12856
+        12249,
+        12861
       ]
     },
     "TEST-LAB-002": {
       "title": "只保留产品安装根运行",
       "expected": "不寻找Lab，不创建Lab数据目录，能力状态诚实",
       "locations": [
-        12857
+        12862
       ]
     },
     "TEST-LAB-003": {
       "title": "设置遗留实验环境变量运行产品",
       "expected": "不能启动实验采集或Demo",
       "locations": [
-        12858
+        12863
       ]
     },
     "TEST-LAB-004": {
       "title": "完全没有Oxrail时启动Lab",
       "expected": "可采集受控宿主事件；真实主机项单独记录",
       "locations": [
-        12859
+        12864
       ]
     },
     "TEST-LAB-005": {
       "title": "检查baseline的新会话/配置",
       "expected": "没有产品Skill/Hook/任务上下文残留；无法证明则BLOCKED",
       "locations": [
-        12860
+        12865
       ]
     },
     "TEST-LAB-006": {
       "title": "监控OFF启动新会话",
       "expected": "无Lab监控Hook/collector；不冒充有详细轨迹",
       "locations": [
-        12861
+        12866
       ]
     },
     "TEST-LAB-007": {
       "title": "对Lab适配器投递各类合法/非法事件",
       "expected": "不返回allow/deny/模型上下文、不改写原调用",
       "locations": [
-        12862
+        12867
       ]
     },
     "TEST-LAB-008": {
       "title": "collector退出、断链、慢盘、满盘",
       "expected": "不影响浏览器权限或动作；报告数据不完整",
       "locations": [
-        12863
+        12868
       ]
     },
     "TEST-LAB-009": {
       "title": "重复/乱序/缺失Pre/Post、并发子代理",
       "expected": "幂等、正确关联、不伪造执行与完成",
       "locations": [
-        12864
+        12869
       ]
     },
     "TEST-LAB-010": {
       "title": "复合工具只暴露事务事件",
       "expected": "不输出逐点击或逐键精确统计",
       "locations": [
-        12865
+        12870
       ]
     },
     "TEST-LAB-011": {
       "title": "宿主不提供Token/用量混合多个run",
       "expected": "值为null并有原因，不输出假精确总量",
       "locations": [
-        12866
+        12871
       ]
     },
     "TEST-LAB-012": {
       "title": "秘密诱饵藏入输入/URL/header/异常字段",
       "expected": "trace、IPC持久化、日志、临时/崩溃文件零泄漏",
       "locations": [
-        12867
+        12872
       ]
     },
     "TEST-LAB-013": {
       "title": "登录fixture期间采集",
       "expected": "只有许可阶段元数据，无截图/输入值/键盘/剪贴板",
       "locations": [
-        12868
+        12873
       ]
     },
     "TEST-LAB-014": {
       "title": "持有Handoff租约时关闭/删除Lab",
       "expected": "产品安全锁不解除、不绕过验证恢复Agent",
       "locations": [
-        12869
+        12874
       ]
     },
     "TEST-LAB-015": {
       "title": "A/B任一环境字段/初态/监控hash不一致",
       "expected": "比较拒绝或标不可比，不自动忽略",
       "locations": [
-        12870
+        12875
       ]
     },
     "TEST-LAB-016": {
       "title": "Guard请求实际为ADVISORY/BYPASSED",
       "expected": "TREATMENT_NOT_ACTIVE，不计为Guard成绩",
       "locations": [
-        12871
+        12876
       ]
     },
     "TEST-LAB-017": {
       "title": "真实宿主四象限smoke",
       "expected": "有实际证据的分别通过；未跑不能PASS",
       "locations": [
-        12872
+        12877
       ]
     },
     "TEST-LAB-018": {
       "title": "实际插件安装及源目录移除",
       "expected": "安装根无实验残留且路径/hash正确",
       "locations": [
-        12873
+        12878
       ]
     },
     "TEST-LAB-019": {
       "title": "尝试由任务Agent读实验计划/报告",
       "expected": "正式隔离路径应拒绝；否则标隔离未证明",
       "locations": [
-        12874
+        12879
       ]
     },
     "TEST-LAB-020": {
       "title": "Lab purge与旧Demo迁移",
       "expected": "不越界删除产品状态、Keychain或历史release evidence",
       "locations": [
-        12244,
-        12875
+        12249,
+        12880
       ]
     },
     "TEST-BCTL-001": {
@@ -13040,8 +13041,8 @@
         11882,
         11893,
         11908,
-        12239,
-        12962
+        12244,
+        12967
       ],
       "sections": [
         "SEC-52"
@@ -13086,7 +13087,7 @@
         11882,
         11893,
         11908,
-        12239
+        12244
       ],
       "sections": [
         "SEC-52"
@@ -13111,8 +13112,8 @@
         11929,
         11940,
         11959,
-        12232,
-        12233
+        12237,
+        12238
       ]
     },
     "TEST-BCTL-006": {
@@ -13129,8 +13130,8 @@
         11929,
         11940,
         11959,
-        12232,
-        12233
+        12237,
+        12238
       ]
     },
     "TEST-BCTL-007": {
@@ -13145,9 +13146,9 @@
       "locations": [
         6082,
         11982,
-        12014,
-        12222,
-        12962
+        12015,
+        12227,
+        12967
       ]
     }
   },
@@ -13336,7 +13337,7 @@
       "title": "产品与内部 Lab 独立交付",
       "path": "docs/adr/ADR-LAB-001.md",
       "locations": [
-        12577
+        12582
       ]
     },
     "ADR-BROWSERCTL-001": {
@@ -13345,9 +13346,9 @@
       "locations": [
         11882,
         11892,
-        12239,
-        12930,
-        12962
+        12244,
+        12935,
+        12967
       ]
     },
     "ADR-BROWSERCTL-002": {
@@ -13358,8 +13359,8 @@
         11939,
         11982,
         11997,
-        12232,
-        12962
+        12237,
+        12967
       ]
     }
   },

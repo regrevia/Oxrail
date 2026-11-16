@@ -2233,6 +2233,10 @@ var init_route = __esm({
           if (target.ref !== void 0) this.addressable(target.ref);
           else {
             const needle = normalizeName(target.text ?? "");
+            if (needle === "")
+              throw new StaleRefError(
+                `a click needs a number or some text to find the control by, and ${JSON.stringify(target.text ?? "")} has neither`
+              );
             const said = this.handed?.names.some((name) => name.includes(needle));
             if (this.handed === null)
               throw new StaleRefError(

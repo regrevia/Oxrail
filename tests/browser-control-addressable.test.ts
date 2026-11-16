@@ -80,6 +80,19 @@ describe("a click by text must be a name a read handed out", () => {
     );
   });
 
+  it("refuses an empty selector even after a read", async () => {
+    /* Every name contains the empty string, so an empty selector would pass a
+       containment check against any read and then land on whatever control
+       happens to come first. */
+    const route = coldRoute();
+    (route as unknown as { handed: unknown }).handed = {
+      url: "https://example.test/a",
+      refs: new Set([1, 2]),
+      names: ["second", "free action"],
+    };
+    await expect(route.click({ text: "   " })).rejects.toThrow(/has neither/u);
+  });
+
   it("lets a name the read did say through to the page", async () => {
     const route = coldRoute();
     (route as unknown as { handed: unknown }).handed = {

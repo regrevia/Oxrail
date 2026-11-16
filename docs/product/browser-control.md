@@ -142,6 +142,12 @@ There is no way to hand this route a coordinate. `browser_click` takes a `ref` o
 control "Delete account" cannot be addressed: the last read of https://example.com/ did not name it — call browser_view again and use a number it returns
 ```
 
+A selector that is empty or only whitespace is refused before that comparison, because every name contains the empty string and a containment check would pass against any read at all:
+
+```
+a click needs a number or some text to find the control by, and "   " has neither
+```
+
 Typing with no `ref` goes to whatever has focus, so it also needs a read behind it: the way to focus a control is to read the page and click it. Two calls act on the page with no address at all, and both say so: `browser_key` presses a named key, and that key goes wherever the page already put its focus, which is nothing a read can number; `browser_nav` changes the page rather than touching a control in it. A number that no read produced, or one from before the page navigated, is refused rather than tried:
 
 ```

@@ -1088,6 +1088,13 @@ export class CdpBrowserRoute implements BrowserRoute {
       if (target.ref !== undefined) this.addressable(target.ref);
       else {
         const needle = normalizeName(target.text ?? "");
+        /* An empty selector is not an address: every name contains the empty
+           string, so letting it through would hand back the first control on
+           the page instead of the one the caller meant. */
+        if (needle === "")
+          throw new StaleRefError(
+            `a click needs a number or some text to find the control by, and ${JSON.stringify(target.text ?? "")} has neither`,
+          );
         const said = this.handed?.names.some((name) => name.includes(needle));
         if (this.handed === null)
           throw new StaleRefError(
