@@ -58,8 +58,12 @@ jobs:
           google-chrome --version
       - name: Run every live case against that Chrome
         run: |
+          # Two reporters on purpose: the default one puts the failing case and
+          # its message in the job log, the JSON one is what the next step reads.
+          # With the JSON reporter alone a failure here says only that it wrote a
+          # report, which is not enough to tell a real failure from a flaky one.
           OXRAIL_BROWSER_LIVE=1 pnpm vitest run \
-            --reporter=json --outputFile=live.json \
+            --reporter=default --reporter=json --outputFile.json=live.json \
             tests/browser-control-live.test.ts \
             tests/browser-control-digest-live.test.ts
       - name: Refuse a run where the cases skipped
