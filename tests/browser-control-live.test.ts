@@ -207,6 +207,127 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
   );
 
   it(
+    "types into a control the read numbered and the caller focused",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      /* The legitimate shape: read, click the field the read numbered, then
+         type without a number. The gate must let this through. */
+      const form = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>typed</title></head>
+<body>
+  <input id="f" placeholder="email" oninput="document.title=this.value||'empty'">
+</body></html>`)}`;
+      try {
+        await route.open({ url: form });
+        const read = await route.read({ maxChars: 2_000 });
+        const field = read.controls.find((c) => c.role === "textbox");
+        if (field === undefined) throw new Error("no textbox control");
+        await route.click({ ref: field.ref });
+        await route.type({ text: "hello@example.test" });
+        expect((await route.state()).title).toBe("hello@example.test");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "refuses to type into a control the page focused on its own",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      /* The field is hidden when the page is read, so that read never
+         numbered it; the button reveals it and the page then focuses it. The
+         focus is real, and it is on a control the caller was never handed. */
+      const own = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>self focus</title></head>
+<body>
+  <input id="ghost" style="display:none" oninput="document.title=this.value||'empty'">
+  <button onclick="const g=document.getElementById('ghost');g.style.display='block';g.focus()">Reveal</button>
+</body></html>`)}`;
+      try {
+        await route.open({ url: own });
+        const read = await route.read({ maxChars: 2_000 });
+        const reveal = read.controls.find((c) => c.name === "Reveal");
+        if (reveal === undefined) throw new Error("no reveal control");
+        await route.click({ ref: reveal.ref });
+        await expect(route.type({ text: "should not land" })).rejects.toThrow(
+          /not one the last read/u,
+        );
+        expect((await route.state()).title).toBe("self focus");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "refuses to type into a control the last read did not include",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      /* The field is numbered by the first read, hidden for the second one, so
+         it is absent from the list that second read handed out — and its number
+         survives on the element. Focusing it afterwards must still be refused:
+         the number is older than the read that would be trusted. */
+      const hidden = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>stale focus</title></head>
+<body>
+  <input id="ghost" oninput="document.title=this.value||'empty'">
+  <button id="hide" onclick="document.getElementById('ghost').style.display='none'">Hide</button>
+  <button id="back" onclick="const g=document.getElementById('ghost');g.style.display='';g.focus()">Back</button>
+</body></html>`)}`;
+      try {
+        await route.open({ url: hidden });
+        const first = await route.read({ maxChars: 2_000 });
+        const ghost = first.controls.find((c) => c.role === "textbox");
+        if (ghost === undefined) throw new Error("no textbox in first read");
+        const hide = first.controls.find((c) => c.name === "Hide");
+        if (hide === undefined) throw new Error("no hide control");
+        await route.click({ ref: hide.ref });
+
+        const second = await route.read({ maxChars: 2_000 });
+        expect(second.controls.every((c) => c.ref !== ghost.ref)).toBe(true);
+        const back = second.controls.find((c) => c.name === "Back");
+        if (back === undefined) throw new Error("no back control");
+        await route.click({ ref: back.ref });
+
+        await expect(route.type({ text: "should not land" })).rejects.toThrow(
+          /not one the last read/u,
+        );
+        expect((await route.state()).title).toBe("stale focus");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
     "captures the screenshot in the same pixel space as the click",
     { timeout: 90_000 },
     async () => {

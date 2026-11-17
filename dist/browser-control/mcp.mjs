@@ -2343,6 +2343,27 @@ var init_route = __esm({
               throw new StaleRefError(
                 `the page changed; control ${target.ref} is gone \u2014 call browser_view again`
               );
+          } else {
+            const focus = await this.evaluate(`(() => {
+  let el = document.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement)
+    el = el.shadowRoot.activeElement;
+  if (!el || el === document.body || el === document.documentElement)
+    return { anywhere: false, ref: null };
+  for (let node = el; node; node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null) {
+    const own = node.getAttribute && node.getAttribute("data-oxrail-ref");
+    if (own !== null && own !== undefined) return { anywhere: true, ref: Number(own) };
+  }
+  return { anywhere: true, ref: null };
+})()`);
+            if (!focus.anywhere)
+              throw new StaleRefError(
+                `nothing on this page has focus, so there is no control to type into \u2014 read the page, then click the control you mean`
+              );
+            if (this.handed === null || focus.ref === null || !this.handed.refs.has(focus.ref))
+              throw new StaleRefError(
+                `the focused control is not one the last read of ${this.handed?.url ?? "this page"} numbered \u2014 read the page again and click the control you mean`
+              );
           }
           if (target.clear === true) {
             await this.evaluate(`(() => {

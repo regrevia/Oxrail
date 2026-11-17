@@ -148,7 +148,13 @@ A selector that is empty or only whitespace is refused before that comparison, b
 a click needs a number or some text to find the control by, and "   " has neither
 ```
 
-Typing with no `ref` goes to whatever has focus, so it also needs a read behind it: the way to focus a control is to read the page and click it. Two calls act on the page with no address at all, and both say so: `browser_key` presses a named key, and that key goes wherever the page already put its focus, which is nothing a read can number; `browser_nav` changes the page rather than touching a control in it. A number that no read produced, or one from before the page navigated, is refused rather than tried:
+Typing with no `ref` goes to whatever has focus, so the focus itself has to be an address the read produced: the control that holds it must be one the last read numbered. A control the page focused on its own, or one whose number is older than the read in hand, is refused rather than typed into, because neither is something the caller chose:
+
+```
+the focused control is not one the last read of https://example.com/ numbered — read the page again and click the control you mean
+```
+
+That refusal happens after the page is open and before a single key is sent, so nothing lands. It is covered live: one case reveals and focuses a field that no read ever numbered, another focuses a field whose number was dropped from the read in hand, and both show the page unchanged afterwards. Two calls act on the page with no address at all, and both say so: `browser_key` presses a named key, and that key goes wherever the page already put its focus, which is nothing a read can number; `browser_nav` changes the page rather than touching a control in it. A number that no read produced, or one from before the page navigated, is refused rather than tried:
 
 ```
 control 12 cannot be addressed: the last read of https://example.com/ did not contain it — call browser_view again and use a number it returns

@@ -1,4 +1,4 @@
-# Oxrail — 唯一实现规范（SPEC）v1.0.32
+# Oxrail — 唯一实现规范（SPEC）v1.0.33
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
@@ -12005,7 +12005,7 @@ Computer Use loops over pictures: capture, decide, press, capture again. This ro
 - [ ] A navigation (url, back or reload) clears the handed refs; a ref from before it is refused rather than resolved against the new page.
 - [ ] A write addressed by a text the last read did not name is refused, and the refusal names the address that read described; a text it did name still reaches the page, and the occlusion refusal still names what covers the control.
 - [ ] A selector that is empty after whitespace is refused before the gate can compare it, so it can never match every name.
-- [ ] Typing with no `ref` needs a read behind it, so keystrokes are never sent to a control the caller has not seen; the legitimate path of reading, clicking, then typing without a `ref` still works.
+- [ ] Typing with no `ref` needs a read behind it, and the control that actually holds focus must be one the last read numbered: keystrokes are never sent to a control the caller has not seen, including one the page focused by itself after the read. The legitimate path of reading, clicking, then typing without a `ref` still works.
 - [ ] Hit testing asks the tree the control is in, so a control in an open shadow root is not reported as covered, and an occluded control reports the layer that owns the point instead of an internal error.
 - [ ] `browser_nav` stays an explicit tool; no read navigates as a side effect.
 - [ ] The route is not reported as Hook-visible, Guard-mediated or Native-equivalent, and it does not enter the NIF matrix or a paired benchmark.
@@ -12201,6 +12201,10 @@ NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.33 — 2026-11-17
+
+v1.0.31 给不带 `ref` 的输入只留了一个条件：此前发生过一次读取。这条太弱——读一次之后，页面自己把焦点放到任何一个控件上（`autofocus`、脚本、弹层自动聚焦），这个控件的键击就与「调用方见过的地址」无关了。本条要求真正持有焦点的控件必须是最后一次读取编过号的；页面自行聚焦的控件、或编号已被更新的那一次读取排除在外的控件，都在发送任何按键之前拒绝，并且拒绝发生在打开页面之后，因此页面上什么也不会落下。
 
 ### v1.0.32 — 2026-11-17
 
