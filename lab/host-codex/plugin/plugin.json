@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "oxrail-lab-codex-hook",
+  "version": "0.1.0-alpha.5",
+  "description": "Internal, neutral Codex Hook visibility probe for controlled Oxrail Lab runs"
+}

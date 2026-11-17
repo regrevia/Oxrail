@@ -2,8 +2,38 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  deterministicDigest,
+  type ActionEnvelope,
+  type BrowserTaskState,
+  type HostProfile,
+  type PolicyDecision,
+} from "../../protocol/src/index.js";
+import {
+  actionIdentity,
+  browserOwnershipDecision,
+  completePendingTool,
+  completeToolCallPost,
+  compareHandoffGates,
+  credentialToolFencePost,
+  credentialToolFencePre,
+  createLocalDigestProtector,
+  createBrowserTaskState,
+  migrateLegacyActionSignatureBaseline,
+  readHandoffGate,
+  recordToolCallPre,
+  retireCompletedToolCalls,
+  stageToolDecision,
+  transitionBrowserTaskStateWithRetry,
+} from "../../core/src/index.js";
+import {
+  buildPreToolUseOutput,
+  runGuardPreToolUse,
+  type PreToolUseOutput,
+} from "./guard.js";
 import { classifyTool } from "./matcher.js";
 import { loadHostProfile } from "./profile.js";
+import { loadToolSchemaRegistryBundle } from "./registry-bundle.js";
 import {
   digestSessionId,
   digestToolUseId,
@@ -14,19 +44,23 @@ import {
   type HookEventName,
 } from "./state.js";
 
-export type HookOutput = Record<string, never> | { systemMessage: string };
+export type HookOutput = PreToolUseOutput | { systemMessage: string };
 
 interface HookInput {
   hook_event_name: HookEventName;
   session_id?: string;
+  tool_input?: unknown;
   tool_name?: string;
   tool_use_id?: string;
+  turn_id?: string;
 }
 
 export interface HookEnvironment {
   now?: () => number;
   pluginData: string;
   pluginRoot: string;
+  /** Must be supplied only by a trusted external attestation verifier. */
+  verifyGuardActivation?: (profile: HostProfile) => boolean | Promise<boolean>;
 }
 
 const isHookInput = (value: unknown): value is HookInput => {
@@ -35,11 +69,34 @@ const isHookInput = (value: unknown): value is HookInput => {
   return (
     typeof input.hook_event_name === "string" &&
     HOOK_EVENTS.includes(input.hook_event_name as HookEventName) &&
-    (input.session_id === undefined || typeof input.session_id === "string") &&
-    (input.tool_name === undefined || typeof input.tool_name === "string") &&
-    (input.tool_use_id === undefined || typeof input.tool_use_id === "string")
+    (input.session_id === undefined ||
+      (typeof input.session_id === "string" &&
+        input.session_id.length <= 4_096)) &&
+    (input.tool_name === undefined ||
+      (typeof input.tool_name === "string" && input.tool_name.length <= 256)) &&
+    (input.tool_use_id === undefined ||
+      (typeof input.tool_use_id === "string" &&
+        input.tool_use_id.length <= 4_096)) &&
+    (input.turn_id === undefined ||
+      (typeof input.turn_id === "string" && input.turn_id.length <= 4_096))
   );
 };
+
+export const hookRuntimeStateDirectory = (pluginData: string): string =>
+  path.join(pluginData, "runtime-state");
+
+export const hookCredentialFenceStateDirectory = (pluginData: string): string =>
+  path.join(pluginData, "credential-fence-state");
+
+export function hookBrowserTaskScope(sessionId: string) {
+  const sessionDigest = digestSessionId(sessionId);
+  const taskDigest = createHash("sha256")
+    .update("oxrail-hook-browser-task-v1\0")
+    .update(sessionDigest)
+    .digest("hex");
+  // ponytail: one browser task per Host session until a stable native task id exists.
+  return { sessionId: sessionDigest, taskId: taskDigest };
+}
 
 export async function hookDefinitionHash(pluginRoot: string): Promise<string> {
   const filenames = [
@@ -65,16 +122,214 @@ export async function hookDefinitionHash(pluginRoot: string): Promise<string> {
 
 const bypassMessage =
   "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. " +
-  "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE.";
+  "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. " +
+  "Oxrail credential protection: INACTIVE.";
 const bypassOutput = (): HookOutput => ({ systemMessage: bypassMessage });
 
-/** Handle one host event. Any error is deliberately fail-open in runHookCli. */
-export async function handleHookEvent(
+const credentialFenceOutput = (result: "BLOCKED" | "UNKNOWN"): HookOutput => {
+  const reasonCode =
+    result === "BLOCKED"
+      ? "OXRAIL_CREDENTIAL_FENCE_BLOCKED"
+      : "OXRAIL_VERIFICATION_INCONCLUSIVE";
+  const explanation =
+    result === "BLOCKED"
+      ? "Oxrail's local credential fence did not admit this Agent tool call."
+      : "Oxrail could not verify its local credential fence; this Agent tool call was not admitted.";
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `${reasonCode}: ${explanation} Credential protection remains INACTIVE until Host-wide isolation is verified.`,
+    },
+  };
+};
+
+const rawToolEvent = (
   value: unknown,
+): "PostToolUse" | "PreToolUse" | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const event = (value as { hook_event_name?: unknown }).hook_event_name;
+  return event === "PreToolUse" || event === "PostToolUse" ? event : undefined;
+};
+
+const boundedFenceId = (value: unknown): string =>
+  typeof value === "string" && value.length > 0 && value.length <= 4_096
+    ? value
+    : "";
+
+const credentialFenceCall = (value: unknown) => {
+  const input = value as { session_id?: unknown; tool_use_id?: unknown };
+  return {
+    sessionId: boundedFenceId(input.session_id),
+    toolUseId: boundedFenceId(input.tool_use_id),
+  };
+};
+
+const decisionOutput = (decision: PolicyDecision): HookOutput =>
+  buildPreToolUseOutput(decision);
+const inconclusiveOutput = (): HookOutput =>
+  decisionOutput({
+    disposition: "BLOCK_BEFORE_EXECUTION",
+    reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+    recoverable: true,
+  });
+
+const handoffGateOutput = (
+  initial: Awaited<ReturnType<typeof readHandoffGate>>,
+  current = initial,
+): HookOutput | undefined => {
+  const verdict = compareHandoffGates(initial, current);
+  if (verdict === "OPEN" || verdict === "UNKNOWN") return;
+  return verdict === "ACTIVE"
+    ? decisionOutput({
+        disposition: "BLOCK_BEFORE_EXECUTION",
+        reasonCode: "OXRAIL_USER_LEASE_ACTIVE",
+        recoverable: true,
+      })
+    : inconclusiveOutput();
+};
+
+const toolCallRequestDigest = (
+  toolName: string,
+  action: ActionEnvelope | undefined,
+  decision: PolicyDecision,
+): string =>
+  deterministicDigest(
+    "oxrail-hook-tool-call-request-v1",
+    action
+      ? {
+          actionIdentity: actionIdentity(action),
+          impact: action.impact,
+          origin: action.origin,
+          revision: action.revision,
+          toolName,
+        }
+      : {
+          disposition: decision.disposition,
+          reasonCode: decision.reasonCode,
+          toolName,
+        },
+  );
+
+const toolCallBindingDigest = (
+  profile: HostProfile,
+  toolName: string,
+  binding: {
+    expectedInputSchemaHash: string;
+    expectedRegistryHash: string;
+  },
+): string =>
+  deterministicDigest("oxrail-hook-tool-call-binding-v1", {
+    definitionHash: profile.hooks.definitionHash,
+    inputSchemaHash: binding.expectedInputSchemaHash,
+    matcherEvidenceHash: profile.route.matcherEvidenceHash,
+    profileId: profile.profileId,
+    registryHash: binding.expectedRegistryHash,
+    toolName,
+  });
+
+function ownershipOutput(
+  state: BrowserTaskState,
+  scope: ReturnType<typeof hookBrowserTaskScope>,
+): HookOutput | undefined {
+  if (state.sessionId !== scope.sessionId || state.taskId !== scope.taskId) {
+    return undefined;
+  }
+  const decision = browserOwnershipDecision(state);
+  return decision ? decisionOutput(decision) : undefined;
+}
+
+function alignStateToProfile(
+  saved: BrowserTaskState,
+  scope: ReturnType<typeof hookBrowserTaskScope>,
+  profile: HostProfile,
+): BrowserTaskState | undefined {
+  if (
+    saved.hostProfileId === profile.profileId &&
+    saved.hostProfileStatus === "VALID" &&
+    saved.mode === profile.derived.mode
+  ) {
+    return saved;
+  }
+  if (
+    saved.phase !== "RUNNING" ||
+    saved.pointerOwner !== "NATIVE" ||
+    saved.pendingNativeActionIds.length > 0 ||
+    saved.revision === Number.MAX_SAFE_INTEGER ||
+    saved.targetCacheEpoch === Number.MAX_SAFE_INTEGER
+  ) {
+    return undefined;
+  }
+  const fresh = createBrowserTaskState({
+    ...scope,
+    hostProfileId: profile.profileId,
+    mode: profile.derived.mode,
+  });
+  return {
+    ...fresh,
+    leaseEpoch: saved.leaseEpoch,
+    revision: saved.revision + 1,
+    stateVersion: saved.stateVersion,
+    targetCacheEpoch: saved.targetCacheEpoch + 1,
+  };
+}
+
+function alignStateToActionSignatureKey(
+  state: BrowserTaskState,
+  keyId: string,
+): { ready: boolean; state: BrowserTaskState } {
+  try {
+    return {
+      ready: true,
+      state: migrateLegacyActionSignatureBaseline(state, keyId),
+    };
+  } catch {
+    return { ready: false, state };
+  }
+}
+
+async function completePostTool(
+  runtimeRoot: string,
+  scope: ReturnType<typeof hookBrowserTaskScope>,
+  toolUseId: string,
+): Promise<"COMPLETED" | "NOT_FOUND" | "UNAVAILABLE"> {
+  const retire =
+    (retainedPersistentToolUseIds: readonly string[]) => async () => {
+      const result = await retireCompletedToolCalls(
+        runtimeRoot,
+        scope,
+        retainedPersistentToolUseIds,
+      );
+      if (result === "UNAVAILABLE") {
+        throw new Error("completed tool-call index retirement failed");
+      }
+    };
+  return transitionBrowserTaskStateWithRetry<
+    "COMPLETED" | "NOT_FOUND" | "UNAVAILABLE"
+  >(runtimeRoot, scope, async (state) => {
+    const journal = await completeToolCallPost(runtimeRoot, {
+      ...scope,
+      toolUseId,
+    });
+    if (journal === "OUT_OF_ORDER") return { value: "NOT_FOUND" as const };
+    if (journal === "UNAVAILABLE") return { value: "UNAVAILABLE" as const };
+    if (!state) return { afterCommit: retire([]), value: "COMPLETED" as const };
+    const completed = completePendingTool(state, toolUseId);
+    const afterCommit = retire(completed.pendingNativeActionIds);
+    return completed.stateVersion === state.stateVersion
+      ? { afterCommit, value: "COMPLETED" as const }
+      : {
+          afterCommit,
+          state: completed,
+          value: "COMPLETED" as const,
+        };
+  });
+}
+
+async function handleHookEventAfterCredentialFence(
+  value: HookInput,
   environment: HookEnvironment,
 ): Promise<HookOutput> {
-  if (!isHookInput(value)) return {};
-
   const now = environment.now?.() ?? Date.now();
   const sessionDigest = value.session_id
     ? digestSessionId(value.session_id)
@@ -84,7 +339,7 @@ export async function handleHookEvent(
     definitionHash,
   });
   const profileId = profileResult.profile?.profileId ?? null;
-  await recordHookMarker(
+  const hookMarkerRecorded = await recordHookMarker(
     environment.pluginData,
     {
       browserHook: false,
@@ -95,7 +350,15 @@ export async function handleHookEvent(
       synthetic: false,
     },
     now,
+  ).then(
+    () => true,
+    () => false,
   );
+
+  // A Hook that ran but cannot publish even its bounded current-hash marker is
+  // observable only as a failed adapter. Keep the Host action fail-open while
+  // making the Oxrail degradation explicit.
+  if (!hookMarkerRecorded) return bypassOutput();
 
   if (value.hook_event_name === "SessionStart")
     return profileResult.valid ? {} : bypassOutput();
@@ -111,33 +374,265 @@ export async function handleHookEvent(
       profileResult.profile &&
       classifyTool(profileResult.profile, value.tool_name) === "BROWSER",
   );
+  const browserMarkerRecorded =
+    profileResult.valid &&
+    profileResult.profile &&
+    toolEvent &&
+    browserPath &&
+    profileResult.profile.setup.lifecycle !== "INSTALLED" &&
+    value.tool_use_id &&
+    sessionDigest
+      ? await recordBrowserHookPhase(
+          environment.pluginData,
+          toolEvent,
+          {
+            definitionHash,
+            profileId: profileResult.profile.profileId,
+            sessionDigest,
+            synthetic: false,
+            toolUseDigest: digestToolUseId(value.tool_use_id),
+          },
+          now,
+        ).then(
+          () => true,
+          () => false,
+        )
+      : true;
+
+  if (toolEvent === "PostToolUse" && value.session_id && value.tool_use_id) {
+    const completion = await completePostTool(
+      hookRuntimeStateDirectory(environment.pluginData),
+      hookBrowserTaskScope(value.session_id),
+      value.tool_use_id,
+    ).catch(() => "UNAVAILABLE" as const);
+    if (completion === "COMPLETED") return {};
+    if (completion === "UNAVAILABLE") return bypassOutput();
+  }
+
   if (!profileResult.valid || !profileResult.profile)
     return browserPath ? bypassOutput() : {};
   if (!toolEvent || !value.tool_name || !browserPath) return {};
-  if (profileResult.profile.setup.lifecycle === "INSTALLED")
-    return bypassOutput();
 
-  if (
-    profileResult.profile.setup.lifecycle === "CONFIGURED" &&
-    value.tool_use_id &&
-    sessionDigest
-  ) {
-    await recordBrowserHookPhase(
-      environment.pluginData,
-      toolEvent,
-      {
-        definitionHash,
-        profileId: profileResult.profile.profileId,
-        sessionDigest,
-        synthetic: false,
-        toolUseDigest: digestToolUseId(value.tool_use_id),
-      },
-      now,
-    );
+  const profile = profileResult.profile;
+  if (profile.setup.lifecycle === "CONFIGURED") {
+    return hookMarkerRecorded && browserMarkerRecorded ? {} : bypassOutput();
+  }
+  if (profile.setup.lifecycle !== "VERIFIED") return bypassOutput();
+  if (!value.session_id || !value.tool_use_id) {
+    return bypassOutput();
+  }
+  let guardActivationVerified = false;
+  if (environment.verifyGuardActivation) {
+    try {
+      guardActivationVerified =
+        await environment.verifyGuardActivation(profile);
+    } catch {
+      // A missing/stale attestation receipt must never activate Guard.
+    }
+  }
+  if (!guardActivationVerified) return bypassOutput();
+
+  const scope = hookBrowserTaskScope(value.session_id);
+  const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+  if (toolEvent === "PostToolUse") {
+    return bypassOutput();
   }
 
-  // Passive verification never blocks, rewrites, replays, or substitutes native I/O.
-  return {};
+  const initialHandoffGate =
+    profile.handoff.activation === "ACTIVE"
+      ? await readHandoffGate(runtimeRoot, scope)
+      : undefined;
+  if (initialHandoffGate) {
+    const gateOutput = handoffGateOutput(initialHandoffGate);
+    if (gateOutput) return gateOutput;
+  }
+
+  const bundle = await loadToolSchemaRegistryBundle(
+    environment.pluginData,
+    profile,
+  );
+  const localDigestProtector = await createLocalDigestProtector(runtimeRoot);
+  const signatureProtector = localDigestProtector
+    ? {
+        keyId: localDigestProtector.keyId,
+        protect: (purpose: "input" | "target", digest: string) =>
+          localDigestProtector.protect(
+            purpose === "input" ? "action-input-v1" : "action-target-v1",
+            digest,
+          ),
+      }
+    : undefined;
+
+  let blockingOutput: HookOutput | undefined;
+  try {
+    return await transitionBrowserTaskStateWithRetry(
+      runtimeRoot,
+      scope,
+      async (saved) => {
+        let state =
+          saved ??
+          createBrowserTaskState({
+            ...scope,
+            hostProfileId: profile.profileId,
+            mode: profile.derived.mode,
+          });
+        const ownership = ownershipOutput(state, scope);
+        if (ownership) return { value: ownership };
+        if (initialHandoffGate) {
+          const currentGate = await readHandoffGate(runtimeRoot, scope);
+          const gateOutput = handoffGateOutput(initialHandoffGate, currentGate);
+          if (gateOutput) return { value: gateOutput };
+          if (
+            compareHandoffGates(initialHandoffGate, currentGate) === "UNKNOWN"
+          ) {
+            return { value: bypassOutput() };
+          }
+        }
+        if (saved) {
+          const aligned = alignStateToProfile(saved, scope, profile);
+          if (!aligned) return { value: bypassOutput() };
+          state = aligned;
+        }
+        const signatureState = signatureProtector
+          ? alignStateToActionSignatureKey(state, signatureProtector.keyId)
+          : { ready: false, state };
+        state = signatureState.state;
+        const binding =
+          bundle.status === "VALID"
+            ? bundle.bindings[value.tool_name!]
+            : undefined;
+        if (!guardActivationVerified || bundle.status !== "VALID" || !binding) {
+          return { value: bypassOutput() };
+        }
+        const guarded = runGuardPreToolUse({
+          ...binding,
+          call: {
+            toolInput: value.tool_input,
+            toolName: value.tool_name!,
+            toolUseId: value.tool_use_id!,
+          },
+          handoffAvailable: profile.handoff.activation === "ACTIVE",
+          hostApprovalAvailable:
+            profile.nativeCapabilities.nativeApprovalFlow === "passed",
+          profile,
+          registry: bundle.registry,
+          ...(signatureProtector ? { signatureProtector } : {}),
+          ...scope,
+          state,
+        });
+        if (guarded.mode !== "ACTIVE") return { value: bypassOutput() };
+        const blocking = ![
+          "PASS_THROUGH_ORIGINAL",
+          "SEMANTIC_HINT_ONLY",
+        ].includes(guarded.decision.disposition);
+        if (blocking) blockingOutput = guarded.output;
+        if (
+          !localDigestProtector ||
+          !signatureProtector ||
+          !signatureState.ready
+        ) {
+          return { value: blocking ? guarded.output : bypassOutput() };
+        }
+        const requestDigest = localDigestProtector.protect(
+          "tool-call-request-v1",
+          toolCallRequestDigest(
+            value.tool_name!,
+            guarded.action,
+            guarded.decision,
+          ),
+        );
+        const claim = await recordToolCallPre(runtimeRoot, {
+          ...scope,
+          bindingDigest: toolCallBindingDigest(
+            profile,
+            value.tool_name!,
+            binding,
+          ),
+          decision: guarded.decision,
+          requestDigest,
+          toolUseId: value.tool_use_id!,
+        });
+        if (claim.kind === "MISMATCH") {
+          return { value: inconclusiveOutput() };
+        }
+        if (claim.kind === "UNAVAILABLE") {
+          return { value: blocking ? guarded.output : bypassOutput() };
+        }
+        if (claim.kind === "REPLAY") {
+          const replayBlocks = ![
+            "PASS_THROUGH_ORIGINAL",
+            "SEMANTIC_HINT_ONLY",
+          ].includes(claim.decision.disposition);
+          return {
+            value: replayBlocks
+              ? decisionOutput(claim.decision)
+              : inconclusiveOutput(),
+          };
+        }
+        if (!guarded.action) return { value: guarded.output };
+        return {
+          state: stageToolDecision(
+            state,
+            guarded.action,
+            claim.decision,
+            signatureProtector,
+          ),
+          value: guarded.output,
+        };
+      },
+    );
+  } catch {
+    if (blockingOutput) return blockingOutput;
+    if (initialHandoffGate?.kind === "KNOWN") {
+      const currentGate = await readHandoffGate(runtimeRoot, scope);
+      const gateOutput = handoffGateOutput(initialHandoffGate, currentGate);
+      if (gateOutput) return gateOutput;
+    }
+    return bypassOutput();
+  }
+}
+
+/** Handle one host event. Any error is deliberately fail-open in runHookCli. */
+export async function handleHookEvent(
+  value: unknown,
+  environment: HookEnvironment,
+): Promise<HookOutput> {
+  const toolEvent = rawToolEvent(value);
+  if (!toolEvent) {
+    return isHookInput(value)
+      ? handleHookEventAfterCredentialFence(value, environment)
+      : {};
+  }
+
+  const root = hookCredentialFenceStateDirectory(environment.pluginData);
+  const call = credentialFenceCall(value);
+  if (toolEvent === "PreToolUse") {
+    const admission = await credentialToolFencePre(root, call);
+    if (admission === "BYPASS") {
+      return isHookInput(value)
+        ? handleHookEventAfterCredentialFence(value, environment)
+        : {};
+    }
+    if (admission === "BLOCKED" || admission === "UNKNOWN") {
+      return credentialFenceOutput(admission);
+    }
+    if (admission === "OPEN_DEGRADED") {
+      if (!isHookInput(value)) return bypassOutput();
+      const output = await handleHookEventAfterCredentialFence(
+        value,
+        environment,
+      );
+      return Object.keys(output).length === 0 ? bypassOutput() : output;
+    }
+    if (!isHookInput(value)) return credentialFenceOutput("UNKNOWN");
+    return handleHookEventAfterCredentialFence(value, environment);
+  }
+
+  const completion = await credentialToolFencePost(root, call);
+  const output = isHookInput(value)
+    ? await handleHookEventAfterCredentialFence(value, environment)
+    : {};
+  return completion === "UNKNOWN" ? bypassOutput() : output;
 }
 
 async function readStdin(maximumBytes = 1_048_576): Promise<unknown> {
@@ -160,7 +655,10 @@ export async function runHookCli(
     const pluginRoot = environment.PLUGIN_ROOT;
     if (!pluginRoot) throw new Error("missing plugin environment");
     const output = await handleHookEvent(await readStdin(), {
-      pluginData: oxrailDataDirectory(),
+      pluginData:
+        environment.PLUGIN_DATA ??
+        environment.CLAUDE_PLUGIN_DATA ??
+        oxrailDataDirectory(),
       pluginRoot,
     });
     process.stdout.write(`${JSON.stringify(output)}\n`);

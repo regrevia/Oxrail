@@ -28,11 +28,18 @@ Native Interaction Fidelity and real-host benchmark evidence are still in progre
 ## Install from GitHub
 
 Requires a current Codex CLI with plugin marketplace support and Node.js 20 or newer.
-The repository is currently a v0.1 alpha on `dev`; `main` will be created only after the real-host release gate is accepted.
-The marketplace installs the immutable `v0.1.0-alpha.0` plugin tag; `dev` may contain newer unaccepted work.
+`main` is the latest accepted stable line; ongoing development happens on `dev` and reaches `main` only after a milestone gate passes.
+The default `main` marketplace continues to install `v0.1.0-alpha.0`. The `dev` marketplace installs the product-only immutable `product-v0.1.0-alpha.8` development preview; it is not an accepted stable release.
 
 ```bash
 codex plugin marketplace add regrevia/Oxrail
+codex plugin add oxrail@oxrail
+```
+
+For the current development preview on a clean test profile, pin the marketplace checkout to `dev`:
+
+```bash
+codex plugin marketplace add regrevia/Oxrail@dev
 codex plugin add oxrail@oxrail
 ```
 
@@ -44,7 +51,26 @@ Then:
 4. Start a new thread/session so the installed Skill is available.
 5. Ask: `Use Oxrail to run setup verification (oxrail doctor).`
 
+For alpha.5, the installed Skill can perform an exact package-integrity and
+readiness check before any Browser action:
+
+```bash
+node skills/oxrail/scripts/trial-check.mjs
+```
+
+Run it from the installed plugin root, or ask the Oxrail Skill to run its
+bundled `trial-check.mjs`. It verifies the product-only allowlist and hashes,
+then executes the read-only doctor. It does not grant Hook trust or browser
+permissions.
+
 Invoking doctor through that Skill is the evidence that the Skill is available in the current thread. The alpha CLI does not query the host plugin/Skill registry. Oxrail never auto-trusts its hooks. A changed hook definition/hash returns to the host's normal review flow; each Hook command carries the manifest version as a build stamp so a version update changes that definition. Do not bypass the review.
+
+The current public Host contract does not expose a machine-readable Hook trust
+query or Chrome Computer Use tool-inventory export. Alpha.5 therefore reports
+these separately under `hostDiagnostics`: `/hooks` remains the trust authority,
+while `OBSERVED_CURRENT_DEFINITION` means only that a recent current-hash Hook
+actually executed. Missing inventory is `HOST_INVENTORY_EXPORT_UNAVAILABLE`, not
+a guessed Browser tool name.
 
 For an agent given only this repository URL: run the two marketplace commands above, report any missing Computer Use/Chrome prerequisite, stop for the human `/hooks` review, then start a new thread and run setup verification. Installation is not authorization to alter host trust state or browser permissions.
 
@@ -133,7 +159,18 @@ Handoff protection: INACTIVE
 
 `BYPASSED` is fail-open for the native browser capability, not proof of Oxrail protection. Safety and Handoff are shown as `ACTIVE` only when their required capabilities are verified and currently effective. Host-native approvals and safety controls remain authoritative.
 
-The current `0.1.0-alpha.0` runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff `INACTIVE`. Guard and Handoff modes cannot become active until a real adapter and its version-bound evidence are accepted.
+The current `0.1.0-alpha.8` public runtime adapter is passive-only, so even a verified route remains `ADVISORY_ONLY`, with Optimization `BYPASSED` and Safety/Handoff/Credential protection `INACTIVE`. Retrieval filtering and the secure credential window are not product-active in this preview. The repository-only macOS Lab fixture does not change that status and is not shipped in the product artifact. Internal fixture foundations cannot become active until a real adapter and its version-bound evidence are accepted.
+
+## Browser Control (opt-in)
+
+The preview also ships a dependency-free stdio MCP server,
+`dist/browser-control/mcp.mjs`, that a host may start only when its owner
+configures it explicitly. It drives one headless Chrome process in its own
+profile, serves both MCP eras, and stays outside the Hook/Guard lifecycle — it
+is not a Native Computer Use substitute and no lifecycle claim moves when it is
+running. Setup for Codex CLI and Claude Code, the tool list, and the reclaim
+policy are in [Browser Control](docs/product/browser-control.md) and
+[ADR-BROWSERCTL-001](docs/adr/ADR-BROWSERCTL-001.md).
 
 ## What v0.1 is testing
 
@@ -153,7 +190,11 @@ pnpm check
 pnpm release:gate
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), the [v0.1 status](docs/status/v0.1.md), the [macOS real-host validation handoff](docs/handoff/macos-v0.1-validation.md), and the [compatibility policy](docs/compatibility/README.md).
+Internal evidence tools, controlled probes, and fixture-only credential demos
+live under `lab/`, use `~/.oxrail-lab`, and are not included in the product
+artifact. See `lab/README.md` for development-only commands.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), the [alpha.5 macOS trial](docs/trial/macos-alpha.5.md), the [alpha.4 Chrome diagnostic](docs/compatibility/codex-desktop-chrome-alpha4-diagnostic.md), the [v0.1 status](docs/status/v0.1.md), the [macOS real-host validation handoff](docs/handoff/macos-v0.1-validation.md), and the [compatibility policy](docs/compatibility/README.md).
 
 ## Official host documentation
 

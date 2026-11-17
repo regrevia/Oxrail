@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   HostProfileSchema,
   NativePrimitiveSchema,
@@ -9,6 +9,7 @@ import {
 import { z } from "zod";
 
 import { hookDefinitionHash } from "./hook.js";
+import { readBoundedRegularFile } from "./bounded-file.js";
 import { writeHostProfile } from "./profile.js";
 
 const exactToolName = z
@@ -105,8 +106,11 @@ export async function readHostInventory(inventoryPath: string): Promise<{
   inventory: HostInventory;
   sha256: string;
 }> {
-  const raw = await readFile(inventoryPath);
-  if (raw.length > 1_048_576) throw new Error("host inventory exceeds 1 MiB");
+  const raw = await readBoundedRegularFile(
+    inventoryPath,
+    1_048_576,
+    path.dirname(inventoryPath),
+  );
   return {
     inventory: HostInventorySchema.parse(JSON.parse(raw.toString("utf8"))),
     sha256: createHash("sha256").update(raw).digest("hex"),
@@ -127,7 +131,7 @@ export async function bootstrapHostProfile(
   }).slice(0, 24)}`;
 
   const profile = HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 5,
     profileId,
     setup: {
       lifecycle: "INSTALLED",
@@ -162,6 +166,7 @@ export async function bootstrapHostProfile(
       toolRoute: inventory.toolRoute,
       canonicalToolMatchers: canonicalBrowserToolNames(inventory),
       matcherEvidenceHash,
+      browserTools: [],
     },
     action: {
       control: "NONE",
@@ -252,6 +257,53 @@ export async function bootstrapHostProfile(
       oneClickFallback: "unknown",
       chatMessageRequired: "unknown",
     },
+    credentialChannel:
+      inventory.os === "macos"
+        ? {
+            activation: "INACTIVE",
+            inactiveReasons: [
+              "macOS credential helper and G15 evidence are not verified",
+            ],
+            capability: {
+              platform: "macos",
+              surface: "NONE",
+              storage: "NONE",
+              acceptedKinds: [],
+              consumerMode: "NONE",
+              consumerReadiness: "UNSUPPORTED",
+              opaqueReferenceOnly: false,
+              genericSecretExport: "DENIED",
+            },
+            helperIdentity: "unknown",
+            launcherIdentity: "unknown",
+            secureInput: "unknown",
+            agentExecutionIsolation: "unknown",
+            pasteboardHygiene: "unknown",
+            registryManifestVerification: "unknown",
+            secretLeakBench: "unknown",
+            realConsumerProbe: "unknown",
+            keychainRoundTrip: "unknown",
+            opaqueRefOnly: "unknown",
+            scopeBinding: "unknown",
+            expiryAndRevocation: "unknown",
+            genericExportDenied: "unknown",
+          }
+        : {
+            activation: "INACTIVE",
+            inactiveReasons: [
+              "Secure Credential Channel is unsupported outside macOS",
+            ],
+            capability: {
+              platform: "unsupported",
+              surface: "NONE",
+              storage: "NONE",
+              acceptedKinds: [],
+              consumerMode: "NONE",
+              consumerReadiness: "UNSUPPORTED",
+              opaqueReferenceOnly: false,
+              genericSecretExport: "DENIED",
+            },
+          },
     evidence: {
       probeSuiteVersion: "bootstrap-v1",
       fixtureRevision: "host-inventory",
@@ -263,12 +315,14 @@ export async function bootstrapHostProfile(
         "browser route passive verification",
         "native interaction fidelity",
         "safety and handoff",
+        "macOS credential protection",
       ],
     },
     derived: {
       mode: "ADVISORY_ONLY",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: [
         "exact browser tool candidate loaded for passive verification",
       ],
@@ -276,6 +330,7 @@ export async function bootstrapHostProfile(
         "active optimization",
         "active safety protection",
         "active handoff protection",
+        "active credential protection",
       ],
     },
   });

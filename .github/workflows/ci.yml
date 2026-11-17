@@ -33,6 +33,56 @@ jobs:
             exit 1
           fi
 
+  live-browser-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Require a Chrome the route can find
+        run: |
+          if ! command -v google-chrome > /dev/null; then
+            echo "no google-chrome on the runner; installing the stable deb"
+            curl -fsSL -o /tmp/chrome.deb \
+              https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y /tmp/chrome.deb
+          fi
+          google-chrome --version
+      - name: Run every live case against that Chrome
+        run: |
+          # Two reporters on purpose: the default one puts the failing case and
+          # its message in the job log, the JSON one is what the next step reads.
+          # With the JSON reporter alone a failure here says only that it wrote a
+          # report, which is not enough to tell a real failure from a flaky one.
+          OXRAIL_BROWSER_LIVE=1 pnpm vitest run \
+            --reporter=default --reporter=json --outputFile.json=live.json \
+            tests/browser-control-live.test.ts \
+            tests/browser-control-digest-live.test.ts
+      - name: Refuse a run where the cases skipped
+        run: |
+          # The live files skip themselves when they cannot find a Chrome, and a
+          # skipped suite still exits 0. Read the reporter's own count instead of
+          # the rendered summary, which carries colour codes between the label and
+          # the number and cannot be matched reliably.
+          node -e '
+            const report = require("./live.json");
+            const ran = report.numPassedTests;
+            const skipped = report.numPendingTests;
+            console.log(`live cases passed: ${ran}, skipped: ${skipped}`);
+            if (ran === 0 || skipped > 0) {
+              console.error("a live case did not run; skipping is not passing");
+              process.exit(1);
+            }
+          '
+
   milestone-browser-regression:
     if: github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     runs-on: ubuntu-latest

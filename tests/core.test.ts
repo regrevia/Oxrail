@@ -1,13 +1,21 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
   activateUserLease,
   beginResume,
+  browserOwnershipDecision,
+  completePendingTool,
   createActionDigest,
   createBrowserTaskState,
   evaluateAction,
   finishResume,
+  migrateLegacyActionSignatureBaseline,
+  persistentToolUseId,
   recordActionOutcome,
+  sanitizeBrowserTaskStateForPersistence,
+  stageToolDecision,
   stateFingerprintDigest,
   StateVersionConflictError,
 } from "../packages/core/src/index.js";
@@ -45,11 +53,165 @@ function state() {
   };
 }
 
+const signatureProtector = {
+  keyId: "f".repeat(64),
+  protect: (purpose: "input" | "target", digest: string) =>
+    createHash("sha256")
+      .update("fixture-install-key\0")
+      .update(purpose)
+      .update("\0")
+      .update(digest)
+      .digest("hex"),
+};
+
 describe("v0.1 core policy", () => {
+  it("stages an executed tool decision without retaining opaque ids or changing progress", () => {
+    const before = {
+      ...state(),
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      recoveryTransitions: 4,
+    };
+    const toolAction = action({
+      toolUseId: "raw-call-secret",
+      target: { ...action().target!, text: "sensitive fixture value" },
+    });
+    const decision = evaluateAction({ action: toolAction, state: before });
+
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+
+    expect(staged).toMatchObject({
+      lastAction: {
+        toolUseId:
+          "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
+        decision: "ALLOW",
+      },
+      pendingNativeActionIds: [
+        "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
+      ],
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      recoveryTransitions: 4,
+      stateVersion: 1,
+    });
+    expect(JSON.stringify(staged)).not.toContain("raw-call-secret");
+    expect(JSON.stringify(staged)).not.toContain("sensitive fixture value");
+  });
+
+  it("normalizes and deduplicates pending tool ids when staging repeats", () => {
+    const before = {
+      ...state(),
+      pendingNativeActionIds: ["raw-call-secret"],
+      stateVersion: 5,
+    };
+    const toolAction = action({ toolUseId: "raw-call-secret" });
+    const decision = evaluateAction({ action: toolAction, state: before });
+
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+    const repeated = stageToolDecision(
+      staged,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+
+    expect(staged.pendingNativeActionIds).toEqual([
+      "oxrail-id:2a21850f2e84c1a383369fcca1c784f2f63226e310efcab9c754d40f689983e6",
+    ]);
+    expect(repeated.pendingNativeActionIds).toEqual(
+      staged.pendingNativeActionIds,
+    );
+    expect(repeated.stateVersion).toBe(7);
+  });
+
+  it("records denied decisions without adding a pending tool", () => {
+    const before = { ...state(), noProgressCount: 2, recoveryLevel: 3 };
+    const toolAction = action({ toolUseId: "denied-call" });
+    const decision = {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+      recoverable: true,
+    } as const;
+
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+
+    expect(staged).toMatchObject({
+      lastAction: { decision: "DENY" },
+      pendingNativeActionIds: [],
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      stateVersion: 1,
+    });
+    expect(JSON.stringify(staged)).not.toContain("denied-call");
+  });
+
+  it("stages a semantic hint as a pending native action", () => {
+    const toolAction = action({ toolUseId: "hint-call" });
+    const staged = stageToolDecision(
+      state(),
+      toolAction,
+      {
+        disposition: "SEMANTIC_HINT_ONLY",
+        reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+        recoverable: true,
+      },
+      signatureProtector,
+    );
+
+    expect(staged).toMatchObject({
+      lastAction: { decision: "REWRITE" },
+      pendingNativeActionIds: [
+        expect.stringMatching(/^oxrail-id:[a-f0-9]{64}$/),
+      ],
+      noProgressCount: 0,
+      stateVersion: 1,
+    });
+    expect(JSON.stringify(staged)).not.toContain("hint-call");
+  });
+
+  it("completes only a matching pending tool without treating it as progress", () => {
+    const toolAction = action({ toolUseId: "raw-call-secret" });
+    const before = { ...state(), noProgressCount: 2, recoveryLevel: 3 };
+    const staged = stageToolDecision(
+      before,
+      toolAction,
+      evaluateAction({ action: toolAction, state: before }),
+      signatureProtector,
+    );
+
+    const completed = completePendingTool(staged, "raw-call-secret");
+    const missing = completePendingTool(completed, "unknown-call");
+
+    expect(completed).toMatchObject({
+      lastAction: staged.lastAction,
+      pendingNativeActionIds: [],
+      noProgressCount: 2,
+      recoveryLevel: 3,
+      stateVersion: 2,
+    });
+    expect(missing).toBe(completed);
+  });
+
   it("passes ordinary actions through unchanged and blocks the third proven no-progress attempt", () => {
     const firstAction = action();
     const firstDecision = evaluateAction({
       action: firstAction,
+      signatureProtector,
       state: state(),
     });
     expect(firstDecision.disposition).toBe("PASS_THROUGH_ORIGINAL");
@@ -62,10 +224,12 @@ describe("v0.1 core policy", () => {
         meaningfulProgress: false,
         timestamp: 1,
       },
+      signatureProtector,
     );
     const secondAction = action({ toolUseId: "call-2" });
     const secondDecision = evaluateAction({
       action: secondAction,
+      signatureProtector,
       state: afterFirst,
     });
     expect(secondDecision.disposition).toBe("PASS_THROUGH_ORIGINAL");
@@ -78,14 +242,121 @@ describe("v0.1 core policy", () => {
         meaningfulProgress: false,
         timestamp: 2,
       },
+      signatureProtector,
     );
     const thirdDecision = evaluateAction({
       action: action({ toolUseId: "call-3" }),
+      signatureProtector,
       state: afterSecond,
     });
     expect(thirdDecision).toMatchObject({
       disposition: "BLOCK_BEFORE_EXECUTION",
       reasonCode: "OXRAIL_REDUNDANT_ACTION",
+    });
+  });
+
+  it("keeps protected action identity stable across persisted processes", () => {
+    const firstAction = action({
+      inputDigest: "a".repeat(64),
+      toolUseId: "call-1",
+    });
+    const initial = { ...state(), documentBinding: undefined };
+    const firstDecision = evaluateAction({
+      action: firstAction,
+      signatureProtector,
+      state: initial,
+    });
+    const first = sanitizeBrowserTaskStateForPersistence(
+      recordActionOutcome(
+        initial,
+        firstAction,
+        firstDecision,
+        { meaningfulProgress: false, timestamp: 1 },
+        signatureProtector,
+      ),
+    );
+    const secondAction = action({
+      inputDigest: firstAction.inputDigest,
+      toolUseId: "call-2",
+    });
+    const secondDecision = evaluateAction({
+      action: secondAction,
+      signatureProtector,
+      state: first,
+    });
+    const second = sanitizeBrowserTaskStateForPersistence(
+      recordActionOutcome(
+        first,
+        secondAction,
+        secondDecision,
+        { meaningfulProgress: false, timestamp: 2 },
+        signatureProtector,
+      ),
+    );
+
+    expect(first.lastAction?.inputSignature).not.toBe(firstAction.inputDigest);
+    expect(first.lastAction?.targetSignature).not.toBe(
+      createActionDigest(firstAction, firstDecision, 1).targetSignature,
+    );
+    expect(
+      evaluateAction({
+        action: action({
+          inputDigest: firstAction.inputDigest,
+          toolUseId: "call-3",
+        }),
+        signatureProtector,
+        state: second,
+      }),
+    ).toMatchObject({
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_REDUNDANT_ACTION",
+    });
+  });
+
+  it("migrates only an idle legacy action baseline and rejects key changes", () => {
+    const toolAction = action({ inputDigest: "a".repeat(64) });
+    const decision = evaluateAction({ action: toolAction, state: state() });
+    const legacy = {
+      ...state(),
+      lastAction: createActionDigest(toolAction, decision, 1),
+      noProgressCount: 2,
+    };
+
+    expect(() =>
+      stageToolDecision(legacy, toolAction, decision, signatureProtector),
+    ).toThrow("Action signature key");
+    const migrated = migrateLegacyActionSignatureBaseline(
+      legacy,
+      signatureProtector.keyId,
+    );
+    expect(migrated).toMatchObject({
+      actionSignatureKeyId: signatureProtector.keyId,
+      noProgressCount: 0,
+    });
+    expect(migrated).not.toHaveProperty("lastAction");
+
+    const staged = stageToolDecision(
+      migrated,
+      toolAction,
+      decision,
+      signatureProtector,
+    );
+    const replacement = {
+      ...signatureProtector,
+      keyId: "e".repeat(64),
+    };
+    expect(() =>
+      stageToolDecision(staged, toolAction, decision, replacement),
+    ).toThrow("Action signature key");
+    expect(
+      evaluateAction({
+        action: toolAction,
+        signatureProtector: replacement,
+        state: { ...staged, noProgressCount: 2 },
+      }),
+    ).toMatchObject({
+      disposition: "PASS_THROUGH_ORIGINAL",
+      reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
     });
   });
 
@@ -102,6 +373,23 @@ describe("v0.1 core policy", () => {
       evaluateAction({ action: { ...stale, impact: "read" }, state: revised })
         .disposition,
     ).toBe("PASS_THROUGH_ORIGINAL");
+  });
+
+  it("blocks an action that is bound to a different known top origin", () => {
+    const boundState = {
+      ...state(),
+      currentOrigin: "https://example.test",
+    };
+
+    expect(
+      evaluateAction({
+        action: action({ origin: "https://other.test" }),
+        state: boundState,
+      }),
+    ).toMatchObject({
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+    });
   });
 
   it("routes high-impact work only to native approval or handoff", () => {
@@ -144,6 +432,106 @@ describe("v0.1 core policy", () => {
     expect(resumed).not.toHaveProperty("activeHandoffId");
   });
 
+  it("resumes with the raw handoff id after a persisted-state round trip", () => {
+    const rawHandoffId = "raw-handoff-id";
+    const leased = activateUserLease(state(), rawHandoffId);
+    const reloadedLease = sanitizeBrowserTaskStateForPersistence(leased);
+    expect(reloadedLease.activeHandoffId).not.toBe(rawHandoffId);
+    expect(() =>
+      beginResume(reloadedLease, "wrong-handoff-id", leased.leaseEpoch),
+    ).toThrow("Only the active handoff");
+
+    const resuming = beginResume(
+      reloadedLease,
+      rawHandoffId,
+      leased.leaseEpoch,
+    );
+    const reloadedResume = sanitizeBrowserTaskStateForPersistence(resuming);
+    expect(
+      finishResume(reloadedResume, rawHandoffId, leased.leaseEpoch),
+    ).toMatchObject({ phase: "RUNNING", pointerOwner: "NATIVE" });
+  });
+
+  it("rejects a user lease while an allowed native action awaits PostToolUse", () => {
+    const toolAction = action({ toolUseId: "in-flight-call" });
+    const before = state();
+    const pending = stageToolDecision(
+      before,
+      toolAction,
+      evaluateAction({ action: toolAction, state: before }),
+      signatureProtector,
+    );
+
+    expect(() => activateUserLease(pending, "handoff-1")).toThrow(
+      "User lease cannot start while native actions are pending",
+    );
+  });
+
+  it("keeps raw tool ids distinct from the persisted-id namespace", () => {
+    const firstRawId = "call-a";
+    const prefixedRawId = persistentToolUseId(firstRawId);
+    const firstAction = action({ toolUseId: firstRawId });
+    const secondAction = action({ toolUseId: prefixedRawId });
+    const first = stageToolDecision(
+      state(),
+      firstAction,
+      evaluateAction({ action: firstAction, state: state() }),
+      signatureProtector,
+    );
+    const second = stageToolDecision(
+      first,
+      secondAction,
+      evaluateAction({ action: secondAction, state: first }),
+      signatureProtector,
+    );
+
+    expect(second.pendingNativeActionIds).toHaveLength(2);
+    const afterSecondPost = completePendingTool(second, prefixedRawId);
+    expect(afterSecondPost.pendingNativeActionIds).toEqual([
+      persistentToolUseId(firstRawId),
+    ]);
+    expect(completePendingTool(afterSecondPost, firstRawId)).toMatchObject({
+      pendingNativeActionIds: [],
+    });
+  });
+
+  it("keeps a prefixed raw outcome id distinct after persistence", () => {
+    const firstRawId = "call-a";
+    const prefixedRawId = persistentToolUseId(firstRawId);
+    const toolAction = action({ toolUseId: prefixedRawId });
+    const recorded = recordActionOutcome(
+      state(),
+      toolAction,
+      evaluateAction({ action: toolAction, state: state() }),
+      { meaningfulProgress: true, timestamp: 1 },
+      signatureProtector,
+    );
+    const persisted = sanitizeBrowserTaskStateForPersistence(recorded);
+
+    expect(persisted.lastAction?.toolUseId).toBe(
+      persistentToolUseId(prefixedRawId),
+    );
+    expect(persisted.lastAction?.toolUseId).not.toBe(prefixedRawId);
+    expect(sanitizeBrowserTaskStateForPersistence(persisted)).toEqual(
+      persisted,
+    );
+  });
+
+  it.each([
+    ["USER_LEASE_ACTIVE", "HUMAN", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["HANDOFF_VERIFYING", "HUMAN", "OXRAIL_USER_LEASE_ACTIVE"],
+    ["HANDOFF_PREPARING", "NATIVE", "OXRAIL_VERIFICATION_INCONCLUSIVE"],
+    ["RESTORING_TAB", "NONE", "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"],
+    ["RESUMING", "NONE", "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED"],
+  ] as const)(
+    "blocks browser ownership while phase=%s and owner=%s",
+    (phase, pointerOwner, reasonCode) => {
+      expect(
+        browserOwnershipDecision({ ...state(), phase, pointerOwner }),
+      ).toMatchObject({ disposition: "BLOCK_BEFORE_EXECUTION", reasonCode });
+    },
+  );
+
   it("detects optimistic state-version conflicts", () => {
     expect(() =>
       recordActionOutcome(
@@ -154,6 +542,7 @@ describe("v0.1 core policy", () => {
           meaningfulProgress: false,
           expectedStateVersion: 1,
         },
+        signatureProtector,
       ),
     ).toThrow(StateVersionConflictError);
   });

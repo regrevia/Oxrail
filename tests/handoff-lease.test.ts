@@ -31,6 +31,19 @@ function event(
 }
 
 describe("handoff lease state machine", () => {
+  it("does not wrap a saturated lease generation", () => {
+    expect(() =>
+      prepareHandoffLease({
+        handoffId: "handoff-overflow",
+        previousLeaseEpoch: Number.MAX_SAFE_INTEGER,
+        nonce,
+        scope,
+        createdAt: 1_000,
+        expiresAt: 10_000,
+      }),
+    ).toThrow("leaseEpoch cannot advance beyond the safe integer range");
+  });
+
   it("prepares and activates one bound, monotonic user lease", () => {
     const pending = prepareHandoffLease({
       handoffId: "handoff-1",

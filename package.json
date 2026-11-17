@@ -1,6 +1,6 @@
 {
   "name": "oxrail",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.8",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.18.3",
@@ -8,31 +8,48 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/build-product.mjs",
+    "build:lab": "node scripts/build-lab.mjs",
+    "build:all": "pnpm build && pnpm build:lab",
     "bootstrap": "node dist/bootstrap.mjs",
     "clean": "node scripts/clean.mjs",
+    "lab:credential-demo": "node lab/scripts/credential.mjs",
+    "lab:legacy-demo": "node lab/scripts/legacy-demo.mjs",
+    "lab:chrome-hook-trial": "pnpm build:lab && node lab/dist/chrome-hook-trial.mjs",
     "doctor": "node dist/doctor.mjs",
     "fixture:serve": "node benchmarks/harness/server.mjs",
+    "measure:reading": "node benchmarks/harness/measure-reading.mjs",
     "format:check": "prettier --check .",
     "lint": "node scripts/lint.mjs",
-    "pilot": "node dist/pilot.mjs",
+    "pilot": "pnpm build:lab && node lab/dist/pilot.mjs",
+    "package:product": "pnpm build && node scripts/package-product.mjs",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && vitest run",
+    "test:product": "pnpm build && vitest run tests/product-artifact.test.ts",
+    "test:lab": "pnpm build:lab && vitest run --config vitest.lab.config.ts",
     "test:fixture": "playwright test tests/native-fixture.spec.ts",
     "validate:spec": "node scripts/validate-spec.mjs",
     "validate:plugin": "node scripts/validate-plugin.mjs",
-    "verify:evidence": "node dist/verify-evidence.mjs",
-    "release:gate": "node dist/release-gate.mjs",
+    "validate:boundaries": "node scripts/validate-boundaries.mjs",
+    "validate:product-artifact": "node scripts/validate-product-artifact.mjs",
+    "verify:evidence": "pnpm build:lab && node lab/dist/verify-evidence.mjs",
+    "release:gate": "pnpm build:lab && node lab/dist/release-gate.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm validate:plugin && pnpm validate:spec && pnpm verify:evidence && pnpm secret:scan"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:lab && pnpm package:product && pnpm validate:boundaries && pnpm validate:product-artifact && node scripts/validate-plugin.mjs --root release/oxrail && pnpm validate:plugin && pnpm validate:spec && pnpm verify:evidence && pnpm secret:scan"
   },
   "devDependencies": {
-    "@playwright/test": "1.55.0",
+    "@playwright/test": "1.55.1",
     "@types/node": "24.3.0",
     "esbuild": "0.25.9",
     "prettier": "3.6.2",
     "typescript": "5.9.2",
-    "vitest": "3.2.4",
-    "zod": "4.1.5"
+    "vitest": "4.1.12",
+    "zod": "4.6.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "7.3.7",
+      "source-map-js": "1.2.2"
+    }
   }
 }

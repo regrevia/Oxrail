@@ -1,0 +1,23 @@
+{
+  "name": "oxrail-lab-codex-hook",
+  "version": "0.1.0-alpha.5",
+  "description": "Internal, neutral Codex Hook visibility probe for controlled Oxrail Lab runs.",
+  "author": {
+    "name": "regrevia",
+    "url": "https://github.com/regrevia"
+  },
+  "interface": {
+    "displayName": "Oxrail Lab Codex Hook",
+    "shortDescription": "Probe whether real Codex tool routes emit Hooks.",
+    "longDescription": "Internal, fail-open Lab probe for controlled Chrome Hook visibility trials. It records bounded metadata only and never makes tool permission decisions.",
+    "developerName": "regrevia",
+    "category": "Productivity",
+    "capabilities": [
+      "PreToolUse and PostToolUse visibility probe",
+      "Bounded metadata projection",
+      "Authenticated local Lab event delivery"
+    ],
+    "defaultPrompt": "Run only as part of an explicitly started Oxrail Lab Chrome Hook trial."
+  },
+  "license": "Apache-2.0"
+}

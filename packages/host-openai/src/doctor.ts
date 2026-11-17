@@ -62,7 +62,30 @@ export interface DoctorOptions {
   syntheticProbe?: HarmlessSyntheticProbe;
 }
 
+export type CredentialCheckId =
+  | "platform"
+  | "helper-identity"
+  | "launcher-identity-and-rollback-floor"
+  | "hook-trust-root-binding"
+  | "sealed-registry-manifest"
+  | "template-registry"
+  | "consumer-registry-and-real-probe"
+  | "keychain-access"
+  | "agent-execution-isolation"
+  | "pasteboard-hygiene"
+  | "opaque-ref-scope-ttl-revocation"
+  | "generic-export-denied";
+
+export interface CredentialCheck {
+  detail: string;
+  id: CredentialCheckId;
+  label: string;
+  verdict: ProbeVerdict;
+}
+
 export type DoctorReport = SetupVerification & {
+  credentialChecks: CredentialCheck[];
+  credentialInactiveReasons: string[];
   currentIdentityConfirmed: boolean;
   handoffInactiveReasons: string[];
   hookDefinitionHash: string;
@@ -73,7 +96,23 @@ export type DoctorReport = SetupVerification & {
   profileId?: string;
   safetyInactiveReasons: string[];
   syntheticProbeVerdict: ProbeVerdict;
+  hostDiagnostics: HostDiagnostics;
 };
+
+export type HostDiagnostics = Readonly<{
+  hookTrustAuthority: "HOST_UI";
+  hookTrustQuery: "UNAVAILABLE_PUBLIC_API";
+  hookExecution: "NOT_OBSERVED" | "OBSERVED_CURRENT_DEFINITION";
+  recentHookEvents: HookEventName[];
+  toolInventoryExport: "UNAVAILABLE_PUBLIC_API";
+  inventoryStatus: "BLOCKED" | "PROVIDED_AND_VALIDATED";
+  chromeRoute: "BLOCKED" | "NOT_OBSERVED" | "OBSERVED_PASSIVE";
+  blockerCodes: Array<
+    | "CHROME_ROUTE_NOT_OBSERVED"
+    | "HOOK_EXECUTION_NOT_OBSERVED"
+    | "HOST_INVENTORY_EXPORT_UNAVAILABLE"
+  >;
+}>;
 
 const exists = (filename: string) =>
   access(filename).then(
@@ -372,6 +411,13 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     profileAllowsHooks &&
     Boolean(definitionHash) &&
     (observations.generic.PreToolUse || observations.generic.PostToolUse);
+  const recentHookEvents = HOOK_EVENTS.filter(
+    (event) => observations.generic[event],
+  );
+  const hookExecution =
+    recentHookEvents.length > 0
+      ? ("OBSERVED_CURRENT_DEFINITION" as const)
+      : ("NOT_OBSERVED" as const);
   const currentIdentity = Boolean(
     profile && matchesCurrentIdentity(profile, options.currentIdentity),
   );
@@ -418,6 +464,67 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const optimization = "BYPASSED";
   const safetyProtectionActive = false;
   const handoffProtectionActive = false;
+  const credentialProtectionActive = false;
+  const credentialOs = options.currentIdentity?.os ?? profile?.identity.os;
+  const credentialUnsupported = Boolean(
+    credentialOs && credentialOs !== "unknown" && credentialOs !== "macos",
+  );
+  const credentialInactiveReasons = [
+    credentialOs === "macos"
+      ? "native macOS attestation verifier unavailable"
+      : credentialUnsupported
+        ? "Secure Credential Channel is unsupported outside macOS"
+        : "current platform identity is unavailable",
+  ];
+  const credentialUnverifiedVerdict: ProbeVerdict = credentialUnsupported
+    ? "unsupported"
+    : "unknown";
+  const credentialUnverifiedDetail = credentialInactiveReasons[0]!;
+  const credentialChecks: CredentialCheck[] = [
+    {
+      id: "platform",
+      label: "macOS platform",
+      verdict:
+        credentialOs === "macos"
+          ? "passed"
+          : credentialUnsupported
+            ? "unsupported"
+            : "unknown",
+      detail:
+        credentialOs === "macos"
+          ? "current Host identity reports macOS"
+          : credentialUnverifiedDetail,
+    },
+    ...(
+      [
+        ["helper-identity", "helper identity/signature"],
+        [
+          "launcher-identity-and-rollback-floor",
+          "launcher identity and rollback-floor ownership",
+        ],
+        ["hook-trust-root-binding", "Hook credential trust-root binding"],
+        ["sealed-registry-manifest", "sealed registry manifest"],
+        ["template-registry", "fixed credential template registry"],
+        [
+          "consumer-registry-and-real-probe",
+          "registered consumer registry and real probe",
+        ],
+        ["keychain-access", "Keychain entitlement/access"],
+        ["agent-execution-isolation", "Agent execution isolation"],
+        ["pasteboard-hygiene", "pasteboard hygiene"],
+        [
+          "opaque-ref-scope-ttl-revocation",
+          "opaque ref scope, TTL, generation and revocation",
+        ],
+        ["generic-export-denied", "generic secret export denied"],
+      ] as const
+    ).map(([id, label]) => ({
+      id,
+      label,
+      verdict: credentialUnverifiedVerdict,
+      detail: credentialUnverifiedDetail,
+    })),
+  ];
   const safetyInactiveReasons = safetyProtectionActive
     ? []
     : [
@@ -467,8 +574,35 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     optimization,
     safetyProtectionActive,
     handoffProtectionActive,
+    credentialProtectionActive,
     resultingMode,
   });
+  const blockerCodes: HostDiagnostics["blockerCodes"] = [];
+  if (hookExecution === "NOT_OBSERVED") {
+    blockerCodes.push("HOOK_EXECUTION_NOT_OBSERVED");
+  }
+  if (!options.hostInventory) {
+    blockerCodes.push("HOST_INVENTORY_EXPORT_UNAVAILABLE");
+  }
+  if (!observations.persistedBrowserRoute) {
+    blockerCodes.push("CHROME_ROUTE_NOT_OBSERVED");
+  }
+  const hostDiagnostics: HostDiagnostics = {
+    hookTrustAuthority: "HOST_UI",
+    hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+    hookExecution,
+    recentHookEvents,
+    toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+    inventoryStatus: options.hostInventory
+      ? "PROVIDED_AND_VALIDATED"
+      : "BLOCKED",
+    chromeRoute: observations.persistedBrowserRoute
+      ? "OBSERVED_PASSIVE"
+      : options.hostInventory
+        ? "NOT_OBSERVED"
+        : "BLOCKED",
+    blockerCodes,
+  };
 
   const notices: string[] = [];
   notices.push(
@@ -491,7 +625,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     notices.push("Oxrail handoff protection is INACTIVE.");
   if (!verification.hooksTrusted) {
     notices.push(
-      "Review and trust the current Oxrail hook definition in the host UI.",
+      "The public Host contract has no Hook trust-query API; /hooks is authoritative.",
+      "No recent current-hash Hook execution proves runtime delivery. Confirm the enabled source/hash in /hooks and run a new-session local-tool sanity call.",
     );
   } else {
     notices.push(
@@ -500,7 +635,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   }
   if (!options.hostInventory) {
     notices.push(
-      "Current host route inventory is not confirmed; matcher/profile remains unavailable.",
+      "No public Host tool-inventory export API is documented; HOST_INVENTORY_EXPORT_UNAVAILABLE keeps matcher/profile BLOCKED.",
+      "For Chrome extension routing, start a new Codex chat and explicitly select the intended Chrome profile/tab with @Chrome.",
     );
   }
   if (verification.stage === "VERIFIED" && !currentIdentity) {
@@ -550,7 +686,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
           ? "active"
           : !profileAllowsHooks
             ? profile.hooks.trustState
-            : "review-required",
+            : "unknown",
       },
       handoff: {
         ...profile.handoff,
@@ -561,11 +697,17 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
           ? []
           : handoffInactiveReasons,
       },
+      credentialChannel: {
+        ...profile.credentialChannel,
+        activation: "INACTIVE",
+        inactiveReasons: credentialInactiveReasons,
+      },
       derived: {
         ...profile.derived,
         mode: verification.resultingMode,
         safety: verification.safetyProtectionActive ? "ACTIVE" : "INACTIVE",
         handoff: verification.handoffProtectionActive ? "ACTIVE" : "INACTIVE",
+        credentialProtection: "INACTIVE",
       },
     };
     try {
@@ -581,6 +723,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         optimization: "BYPASSED",
         safetyProtectionActive: false,
         handoffProtectionActive: false,
+        credentialProtectionActive: false,
         resultingMode: "UNSUPPORTED",
       });
       reportedSafetyReasons = ["setup state could not be persisted"];
@@ -593,6 +736,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
 
   return {
     ...reportedVerification,
+    credentialChecks,
+    credentialInactiveReasons,
     currentIdentityConfirmed: currentIdentity,
     handoffInactiveReasons: reportedHandoffReasons,
     hookDefinitionHash: definitionHash,
@@ -603,6 +748,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       profileResult.valid && Boolean(options.hostInventory) && currentIdentity,
     safetyInactiveReasons: reportedSafetyReasons,
     syntheticProbeVerdict,
+    hostDiagnostics,
     ...(profile ? { profileId: profile.profileId } : {}),
   };
 }
@@ -624,6 +770,14 @@ export function formatDoctorReport(report: DoctorReport): string {
     `Oxrail Skill definition present: ${verdict(report.skillAvailable)}`,
     `Required Hook definitions present: ${verdict(report.hooksRegistered)}`,
     `Hooks trusted (recent execution evidence): ${verdict(report.hooksTrusted)}`,
+    `Hook trust authority: ${report.hostDiagnostics.hookTrustAuthority}`,
+    `Hook trust query: ${report.hostDiagnostics.hookTrustQuery}`,
+    `Hook execution: ${report.hostDiagnostics.hookExecution}`,
+    `Recent Hook events: ${report.hostDiagnostics.recentHookEvents.join(", ") || "none"}`,
+    `Tool inventory export: ${report.hostDiagnostics.toolInventoryExport}`,
+    `Inventory status: ${report.hostDiagnostics.inventoryStatus}`,
+    `Chrome route: ${report.hostDiagnostics.chromeRoute}`,
+    `Host blockers: ${report.hostDiagnostics.blockerCodes.join(", ") || "none"}`,
     `PreToolUse available: ${verdict(report.preToolUseAvailable)}`,
     `PostToolUse available: ${verdict(report.postToolUseAvailable)}`,
     `Chrome Computer Use detectable: ${verdict(report.chromeComputerUseDetectable)}`,
@@ -646,6 +800,15 @@ export function formatDoctorReport(report: DoctorReport): string {
       report.handoffProtectionActive
         ? "ACTIVE"
         : `INACTIVE — ${report.handoffInactiveReasons.join("; ")}`
+    }`,
+    ...report.credentialChecks.map(
+      (check) =>
+        `Credential check — ${check.label}: ${check.verdict.toUpperCase()} — ${check.detail}`,
+    ),
+    `Credential protection: ${
+      report.credentialProtectionActive
+        ? "ACTIVE"
+        : `INACTIVE — ${report.credentialInactiveReasons.join("; ")}`
     }`,
   ].join("\n");
 }

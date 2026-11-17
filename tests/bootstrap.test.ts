@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,12 +15,15 @@ import {
   HostInventorySchema,
   bootstrapHostProfile,
   matcherEvidenceHashForInventory,
+  readHostInventory,
   type HostInventory,
 } from "../packages/host-openai/src/bootstrap.js";
 import {
   handleHookEvent,
+  hookCredentialFenceStateDirectory,
   runDoctor,
 } from "../packages/host-openai/src/index.js";
+import { readCredentialExecutionGate } from "../packages/core/src/index.js";
 import {
   loadHostProfile,
   validateHostProfile,
@@ -43,6 +53,17 @@ const inventory = {
 } satisfies HostInventory;
 
 describe("host profile bootstrap", () => {
+  it("bounds the inventory before parsing it", async () => {
+    const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-bootstrap-"));
+    temporaryDirectories.push(pluginData);
+    const inventoryPath = path.join(pluginData, "inventory.json");
+    await writeFile(inventoryPath, Buffer.alloc(1_048_577, 0x20));
+
+    await expect(readHostInventory(inventoryPath)).rejects.toThrow(
+      "file exceeds local limit",
+    );
+  });
+
   it("loads only an exact inventory candidate without claiming trust or protection", async () => {
     const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-bootstrap-"));
     temporaryDirectories.push(pluginData);
@@ -62,9 +83,24 @@ describe("host profile bootstrap", () => {
         mode: "ADVISORY_ONLY",
         safety: "INACTIVE",
         handoff: "INACTIVE",
+        credentialProtection: "INACTIVE",
       },
-      route: { canonicalToolMatchers: ["fixture.native.browser"] },
+      route: {
+        canonicalToolMatchers: ["fixture.native.browser"],
+        browserTools: [],
+      },
+      credentialChannel: {
+        activation: "INACTIVE",
+        capability: { platform: "macos" },
+      },
     });
+    expect(profile.route.toolSchemaRegistryHash).toBeUndefined();
+    expect(profile.route.toolSchemaRegistryEvidenceId).toBeUndefined();
+    await expect(
+      readCredentialExecutionGate(
+        hookCredentialFenceStateDirectory(pluginData),
+      ),
+    ).resolves.toEqual({ kind: "UNINITIALIZED" });
     expect(validateHostProfile(profile).valid).toBe(true);
     const profilePath = path.join(
       pluginData,
@@ -112,6 +148,48 @@ describe("host profile bootstrap", () => {
     });
   });
 
+  it.each([
+    [
+      "active selector",
+      "active-profile.json",
+      "host profile selection is unreadable",
+    ],
+    [
+      "profile",
+      path.join("hosts", "PROFILE_ID", "profile.json"),
+      "host profile integrity check failed",
+    ],
+    [
+      "manifest",
+      path.join("hosts", "PROFILE_ID", "manifest.json"),
+      "host profile integrity check failed",
+    ],
+  ])("rejects a symlinked %s", async (_name, relativePath, error) => {
+    const pluginData = await mkdtemp(
+      path.join(tmpdir(), "oxrail-bootstrap-nofollow-"),
+    );
+    temporaryDirectories.push(pluginData);
+    const inventoryPath = path.join(pluginData, "inventory.json");
+    await writeFile(inventoryPath, `${JSON.stringify(inventory)}\n`);
+    const profile = await bootstrapHostProfile({
+      inventoryPath,
+      pluginData,
+      pluginRoot: process.cwd(),
+    });
+    const filename = path.join(
+      pluginData,
+      relativePath.replace("PROFILE_ID", profile.profileId),
+    );
+    const target = `${filename}.target`;
+    await rename(filename, target);
+    await symlink(target, filename);
+
+    await expect(loadHostProfile(pluginData)).resolves.toEqual({
+      errors: [error],
+      valid: false,
+    });
+  });
+
   it("rejects wildcard, duplicate, and non-inventory matcher input", () => {
     expect(
       HostInventorySchema.safeParse({
@@ -152,10 +230,8 @@ describe("host profile bootstrap", () => {
     );
     temporaryDirectories.push(pluginData);
     const inventoryPath = path.join(pluginData, "inventory.json");
-    await writeFile(
-      inventoryPath,
-      `${JSON.stringify({ ...inventory, os: "linux" })}\n`,
-    );
+    const linuxInventory = { ...inventory, os: "linux" } as const;
+    await writeFile(inventoryPath, `${JSON.stringify(linuxInventory)}\n`);
     const profile = await bootstrapHostProfile({
       inventoryPath,
       pluginData,
@@ -163,6 +239,28 @@ describe("host profile bootstrap", () => {
     });
 
     expect(profile.setup.chromeComputerUseDetectable).toBe("unknown");
+    await expect(
+      readCredentialExecutionGate(
+        hookCredentialFenceStateDirectory(pluginData),
+      ),
+    ).resolves.toEqual({ kind: "UNINITIALIZED" });
+    const report = await runDoctor({
+      currentIdentity: {
+        surface: linuxInventory.surface,
+        hostBuild: linuxInventory.hostBuild,
+        codexVersion: linuxInventory.codexVersion,
+        computerUsePluginVersion: linuxInventory.computerUsePluginVersion,
+        browserPath: linuxInventory.browserPath,
+        os: linuxInventory.os,
+      },
+      hostInventory: linuxInventory,
+      pluginData,
+      pluginRoot: process.cwd(),
+    });
+    expect(report.credentialProtectionActive).toBe(false);
+    expect(report.credentialInactiveReasons).toEqual([
+      "Secure Credential Channel is unsupported outside macOS",
+    ]);
   });
 
   it("invalidates a profile when the current route inventory drifts", async () => {

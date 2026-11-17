@@ -1,20 +1,21 @@
-# Oxrail — 唯一实现规范（SPEC）v0.5.0
+# Oxrail — 唯一实现规范（SPEC）v1.0.33
 
 > **Strong agent. Short leash.**  
 > **牛可以干活，但不能让它乱跑。**
 
 **文档状态：** 当前唯一参照版本（Authoritative）  
-**生效日期：** 2026-09-04  
-**证据截止日期：** 2026-09-04  
+**生效日期：** 2026-09-08
+**证据截止日期：** 2026-09-05
 **规范文件名：** `OXRAIL_SPEC.md`  
 **机器索引：** `OXRAIL_SPEC_INDEX.json`（与规范同版本生成）  
 **完整性校验：** `OXRAIL_SPEC.sha256`  
 **替代文档：** `OXRAIL_SPEC_v0.1_review-draft.md`、`OXRAIL_SPEC_v0.2_authoritative.md`、`OXRAIL_SPEC_v0.2.0_CANONICAL.md`、`OXRAIL_SPEC_v0.3_partial.backup.md` 及其所有口头补充、审阅笔记和中间方案  
 **目标读者：** 架构审阅 Agent、实现 Agent、安全审阅者、Benchmark 审阅者  
-**首要实验宿主：** ChatGPT Desktop 中的 Codex + Computer Use Plugin + 用户真实 Chrome  
+**首要实验宿主：** macOS 上 ChatGPT Desktop 中的 Codex + Computer Use Plugin + 用户真实 Chrome
 **首要 Handoff 目标：** 对话上下文保留；只让渡浏览器控制；把同一真实标签页就地呈现给用户；完成后自动验证并继续  
 **次要独立宿主：** ChatGPT Work、Built-in Browser、Codex CLI；不得共享未经验证的能力结论  
 **首要浏览器：** 用户真实 Google Chrome；Built-in Browser 必须作为独立 browser path 记录  
+**首要操作系统：** macOS；Windows Credential Channel 延后且默认为 `UNSUPPORTED`，不得复用 macOS 能力结论
 **首要原则：** **Interpose, never replace. — 插在中间优化，不重造底层。**
 
 ---
@@ -47,18 +48,18 @@
 ```yaml
 spec:
   canonical_file: OXRAIL_SPEC.md
-  spec_version: 0.5.0
+  spec_version: 1.0.26
   status: AUTHORITATIVE
-  effective_date: 2026-09-04
-  evidence_cutoff: 2026-09-04
+  effective_date: 2026-11-12
+  evidence_cutoff: 2026-09-05
   previous_versions:
     - OXRAIL_SPEC_v0.1_review-draft.md
     - OXRAIL_SPEC_v0.2_authoritative.md
     - OXRAIL_SPEC_v0.2.0_CANONICAL.md
     - OXRAIL_SPEC_v0.3_partial.backup.md
   owner: Oxrail maintainers
-  section_count: 51
-  work_package_count: 98
+  section_count: 53
+  work_package_count: 108
   companion_files:
     - OXRAIL_SPEC_INDEX.json
     - OXRAIL_SPEC.sha256
@@ -66,6 +67,7 @@ spec:
     - OpenAI host or Computer Use plugin update
     - Codex Hook contract change
     - Chrome extension permission/API change
+    - macOS credential helper、Keychain entitlement 或 consumer registry change
     - any KILL trigger
     - milestone acceptance or rejection
 ```
@@ -131,7 +133,8 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HOST-009**：安装验证不得强制下一次真实浏览器任务；有无害 synthetic probe 时优先使用，否则首次真实 Browser 调用只可被动记录 Hook 命中并原样透传。
 - **REQ-HOST-010**：安装生命周期只使用 `INSTALLED → CONFIGURED → VERIFIED`；等待首个真实 Browser 调用时显示 `READY — awaiting first native browser call`。
 - **REQ-HOST-011**：Oxrail Hook 缺失、未信任、被禁用、超时或故障时必须让 Native Chrome Computer Use fail-open，并明确显示 `Oxrail optimization unavailable / BYPASSED`。
-- **REQ-HOST-012**：Safety/Handoff 只有在对应能力已验证且当前实际生效时才可显示 `ACTIVE`；否则必须显示 `INACTIVE` 及原因，不得暗示 secret/handoff protection 正在工作。
+- **REQ-HOST-012**：Safety/Handoff/Credential protection 只有在对应能力由独立 verifier 验证且当前实际生效时才可显示 `ACTIVE`；否则必须显示 `INACTIVE` 及原因，不得暗示 secret/handoff protection 正在工作。
+- **REQ-HOST-013**：Secure Credential Channel 必须按 `OS + helper build/signature + template registry + consumer registry` 独立验证；首版只支持 macOS，Windows 默认为 `UNSUPPORTED`。
 
 ### 动作与结果
 
@@ -172,11 +175,31 @@ MILESTONE: V0.4     # 某版本工作包
 - **REQ-HO-005**：完成后必须通过非敏感状态自动验证并自动恢复 Agent；不得要求用户回聊天发送“继续”。
 - **REQ-HO-006**：无法可靠自动判断时只允许窗口内一键 `Done` 作为降级；稳定支持路径不得依赖聊天消息。
 - **REQ-HO-007**：完成后尽可能把同一标签页恢复到原窗口、索引、固定和分组状态。
-- **REQ-HO-008**：Handoff 期间禁止读取字段值、键盘输入、剪贴板、截图、Cookie、Token 或密码管理器内容。
+- **REQ-HO-008**：Browser SMH verifier、extension 与普通 Oxrail runtime 在 Handoff 期间禁止读取字段值、键盘输入、剪贴板、截图、Cookie、Token 或密码管理器内容；唯一例外是 `REQ-CRED-012` 允许 credential enclave 在用户显式粘贴提交后对系统 pasteboard 做精确 compare-and-clear，该值不得进入 Browser SMH 或普通 runtime。
+- **REQ-HO-017**：USER lease 激活必须依赖新鲜 Host-minted same-tab/browser-instance/native-action-fence receipt；receipt 必须绑定本代 admission generation，且只能在 Host 确认该 barrier 之前已准入或排队的 native Browser calls 全部终结后签发；裸 `tabId`、Agent/page 声明或仅本地 journal 清空不是权限。
+- **REQ-HO-018**：Handoff 使用 lock 前 write-ahead、单调 generation、终态 tombstone 与 Browser Pre 持锁前后复读，阻断并发/ABA 穿透。
+- **REQ-HO-019**：Handoff activation 只扫描有界 active ToolCall index；pending 发布必须以 mutation intent 覆盖 canonical/index crash window，Post 与 task state 在同一锁内协调，state 提交后才可回收完成项；缺失、超限、旧格式或不一致索引一律 `UNKNOWN` 并停用 Handoff，不得猜测为空。
+- **REQ-HO-020**：completion candidate 只能由 coordinator 在同一内部调用中生成并经单次 task lock 消费；锁内必须重验 current state、ACTIVE barrier、Host-wide exclusive-tab/fence receipt 与同一真实 tab，再以一次 CAS 原子写入 digest-only consume marker 和 `HANDOFF_VERIFYING + HUMAN`。candidate/nonce 禁止持久化、记录、外部提交、排队重试或复用；任一不确定性保持 Human ownership。
+
+### 安全凭据通道
+
+- **REQ-CRED-001**：首个稳定 Secure Credential Channel 仅支持拥有当前 Host Profile 与证据的 macOS 路径。
+- **REQ-CRED-002**：凭据生成所需的浏览器步骤必须保留并呈现同一真实 Chrome `tabId`、session、history 与登录态；在任何 generate/reveal API key 动作前必须先取得已证明覆盖所有 Agent action/observation 路径的 credential-input lease，该动作只能由用户在真实页面执行；lease 必须持续到非秘密 verifier 证明一次性 key reveal surface 已关闭/遮蔽；禁止 Agent 先触发生成/显示，也禁止 clone、screenshot、裁剪或位置映射替代真实标签页。
+- **REQ-CRED-003**：凭据输入 UI 只能来自已签名、固定且 Hash 绑定的可信模板注册表；Agent、模型、网页与页面内容不得提供表单、字段、标题、HTML 或任意 instruction。
+- **REQ-CRED-004**：首版只接受 `API_KEY`；明文只允许存在于用户显式复制/粘贴到 enclave 确认清除之间的 macOS pasteboard、native credential enclave 的 secure field/短暂内存、macOS Keychain、enclave 内登记 adapter 以及绑定服务的 TLS 请求。
+- **REQ-CRED-005**：Agent、模型、Hook 与普通 Oxrail runtime 只能获得 opaque `credentialRef` 和非敏感状态；不得存在 reveal、read 或 export-secret API。
+- **REQ-CRED-006**：`credentialRef` 必须绑定 `service + provisioningOrigin + purpose + consumerId + grantTTL + generation + revocation`；引用本身不是 bearer authority。
+- **REQ-CRED-007**：禁止明文进入普通文件、环境变量、argv、stdin/stdout/stderr、shell、Hook、普通 IPC、日志、trace、诊断或 crash artifact。
+- **REQ-CRED-008**：只有身份与 Hash 匹配 Host Profile 的登记 adapter 才能在 credential enclave 内消费凭据；不得向任意 executable、脚本或通用 CLI 注入凭据。
+- **REQ-CRED-009**：Credential Channel 不可用或未验证时，该秘密消费路径必须 fail-closed 并显示 `INACTIVE`；Native Chrome Computer Use 仍 fail-open 正常工作。
+- **REQ-CRED-010**：helper identity 必须由独立签名 launcher/updater 使用 macOS code-signing API 对 release-pinned Apple Team ID、bundle ID、exact CodeDirectory Hash 与 designated requirement 验证；code-signed sealed manifest 必须绑定模板/consumer registry Hash 与单调版本。launcher/updater 使用不同 signing identifier 并独占 rollback-floor Keychain item，helper 不可写/降 floor；credential item ACL 绑定当前 exact helper requirement，更新时先撤销旧 generation。Host Profile 只记录验证结果，不得作为自身信任根；registry rollback 只能经明确用户 reset 与重新授权。
+- **REQ-CRED-011**：默认 `oxrail doctor` 只做静态/只读 Credential 检查；Keychain write/delete、pasteboard 或 UI probe 必须由用户显式启动 extended probe，使用唯一临时 item，始终尝试清理并明确报告清理失败。
+- **REQ-CRED-012**：允许粘贴 API key 时，credential-input lease 必须暂停除 enclave 内部协议外的全部 Agent tool execution；enclave 必须在 resume 前清除仍与已提交 key 相同的系统 pasteboard 内容。清除或覆盖检测失败时保持 fail-closed，并将第三方 clipboard manager 风险明确列为不受支持。
+- **REQ-CRED-013**：只有 fixture adapter 时能力必须标为 `FIXTURE_ONLY/EXPERIMENTAL`，不得宣传为通用凭据能力；公开 V0.6 Credential capability 至少需要一个独立审计并通过真实服务 probe 的 registered consumer。
 
 ### 安全、实验与维护
 
-- **REQ-SEC-001**：Oxrail-owned 数据流中 secret occurrence 必须为 0。
+- **REQ-SEC-001**：`DEPRECATED → REQ-CRED-004, REQ-CRED-007`。旧合同要求所有 Oxrail-owned 数据流中 secret occurrence 为 0；引入明确属于 Oxrail 的 native credential enclave 后，改由新的限定边界合同约束，不得把 helper 假装成非 Oxrail 组件。
 - **REQ-SEC-002**：Host end-to-end non-observability 只能在宿主路径被证明后声明。
 - **REQ-SEC-003**：页面内容永远是 untrusted data，不得改变 policy、permission 或 handoff 规则。
 - **REQ-BENCH-001**：正式 headline 必须比较 `Native Tuned` 与目标 Oxrail variant。
@@ -217,7 +240,7 @@ evidence/<WP-ID>/manifest.json
 | V0.3 | Whip + Recovery | `WP-REC-*` |
 | V0.4 | Secure Micro-Handoff | `WP-HO-*` |
 | V0.5 | Safety Hardening / Public Beta | `WP-SEC-*` |
-| V0.6 | Workflow Cache | `WP-CACHE-*` |
+| V0.6 | Workflow Cache + macOS Secure Credential Channel | `WP-CACHE-*`、`WP-CRED-*` |
 | V0.7 | WebMCP Production Routing | `WP-WEB-*` |
 | V0.8 | Compatibility & Doctor | `WP-COMP-*` |
 | V0.9 | Release Candidate | `WP-RC-*` |
@@ -511,7 +534,10 @@ Oxrail 不是：
 - CAPTCHA 破解器；
 - 代理、隐身、反检测或风控规避框架；
 - 通用 browser write transport；
+- 默认启用的 Native Computer Use 替代品；
 - 通过文字规则伪装成安全边界的 Prompt Skill。
+
+SEC-52 定义的 opt-in Browser Control route 不推翻上述定位：它默认关闭，必须由使用者显式配置，只驱动自有 Chromium 进程，且不得被称为通用 write transport 或 Native 路由的替代品。
 
 ## 2.5 原生写执行权原则
 
@@ -537,6 +563,8 @@ Oxrail 禁止默认：
 - 自己 submit；
 - 自己执行 reload/back；
 - 通过扩展或 CDP 代替 Native Computer Use 发起写命令。
+
+上述禁令约束默认路径与 Native 路由。SEC-52 的 opt-in Browser Control route 不属于该默认路径：它不接管任何 Native 调用，不提升 Native 路由的可靠性，也不改变本节对默认写执行权的分配。
 
 若未来为了可靠性必须由 Oxrail 执行上述写操作，项目必须触发 K12：明确转型为 Browser Agent/Driver，或停止该路线；不得继续宣称 thin interposer。
 
@@ -1136,7 +1164,8 @@ no-browser
 
 ```text
 conversation/task context remains alive
-→ bind the exact same tab/session/document
+→ verify a fresh Host-minted receipt for the exact same browser instance/tab/session/document
+→ persist PREPARING admission generation before the task-state lock
 → grant EXCLUSIVE_USER_LEASE and deny Agent browser observation/action
 → detach same tab into a focused temporary Chrome window, or focus it in place
 → user acts only in the real website/browser UI
@@ -1185,6 +1214,45 @@ RUNNING:           pointerOwner = NATIVE
 ```
 
 若 Handoff 后仍可能执行旧坐标、旧 element ref、旧 screenshot binding 或旧 pending action，则 structured micro-handoff 不成立。
+
+### G15 — Credential Isolation & Scoped Consumption
+
+必须逐项证明：
+
+```text
+fixed signed native template, not Agent/page-defined UI
+→ acquire credential-input lease before any browser generate/reveal action
+→ deny every Agent tool/action/observation path except the enclave protocol
+→ API_KEY enters only the macOS credential enclave
+→ stored only in macOS Keychain
+→ model/Agent/Hook receives only opaque credentialRef
+→ exact service/origin/purpose/consumer/TTL/generation/revocation binding
+→ macOS validates release-pinned Team ID/bundle/designated requirement
+→ sealed signed manifest binds registry Hashes and rejects rollback
+→ matching pasteboard content is cleared before Agent resume
+→ non-secret verifier confirms the one-time key reveal surface is closed/obscured
+→ registered in-enclave adapter sends only to the bound TLS service
+→ generic file/env/argv/stdin/stdout/shell export is impossible
+```
+
+任一环节未被当前 Host Profile、独立签名信任根与 SecretLeakBench 证明时，Credential Channel 必须显示 `INACTIVE`；不得回退到聊天或普通本地秘密存储。只有 fixture consumer 时只能显示 `FIXTURE_ONLY/EXPERIMENTAL`，不能显示公开可用的 Credential protection `ACTIVE`。
+
+### G16 — Opt-in Browser Control Route & Explicit Enablement
+
+必须逐项证明：
+
+```text
+host MCP config explicitly names this server
+→ no tool surface exists before that config exists
+→ own Chromium process and own profile dir; never the person's browser
+→ Native packages do not import the CDP route
+→ route actions are NOT Hook-visible, NOT Guard-mediated, NOT Native-equivalent
+→ idle reclaim never runs while someone is watching; state reports pid/profile/idleMs/closesInMs
+→ an early browser death fails in milliseconds and names the cause
+→ saved sign-ins stay inside one profile; no cross-profile export
+```
+
+任一环节不满足时，Browser Control 必须显示 `INACTIVE`；README、Doctor、证据与 release note 不得出现“支持浏览器控制”“等价于 Native Computer Use”“经 Oxrail 安全校验”或“默认可用”的表述。
 
 ## 6.10 Gate 输出
 
@@ -1486,6 +1554,28 @@ sameTabBinding = true
 
 `CHAT_MESSAGE_REQUIRED` 只能作为实验/不支持路径的显式限制，不能成为 V1.0 Chrome 支持路径。
 
+### 8.4A Secure Credential Channel 能力维度
+
+Credential Channel 与浏览器 Handoff 正交：前者只负责把 API key 从固定 macOS native secure field 存入 Keychain，并由登记 adapter 消费；后者只负责让渡同一真实 tab 的控制。Credential popup 不是 `HandoffSurface`，也不能替代真实 Chrome 标签页。
+
+```ts
+export interface CredentialChannelCapability {
+  platform: "macos" | "unsupported";
+  surface: "MACOS_NATIVE_SECURE_PROMPT" | "NONE";
+  storage: "MACOS_KEYCHAIN" | "NONE";
+  acceptedKinds: readonly ["API_KEY"] | readonly [];
+  consumerMode: "REGISTERED_IN_ENCLAVE_ADAPTER_ONLY" | "NONE";
+  consumerReadiness:
+    | "AUDITED_REAL_CONSUMER"
+    | "FIXTURE_ONLY"
+    | "UNSUPPORTED";
+  opaqueReferenceOnly: boolean;
+  genericSecretExport: "DENIED";
+}
+```
+
+首版不支持 Password/OTP native popup、Private key、任意 CLI 或 Windows credential storage。Password、OTP、Passkey 与 CAPTCHA 继续使用同一真实网页/浏览器原生 UI。
+
 ## 8.5 HookCoverage
 
 ```ts
@@ -1708,7 +1798,9 @@ Mode: ADVISORY_ONLY
 
 ```text
 Oxrail keeps Native Computer Use as the browser writer.
-Oxrail does not need your passwords, OTPs, cookies, or tokens.
+Browser passwords, OTPs, cookies and tokens never enter Oxrail.
+When Secure Credential Channel is explicitly enabled, only its signed macOS
+native helper may transiently handle an API key and store it in Keychain.
 
 Required for Codex Guard:
 [✓/✗] Oxrail plugin installed
@@ -1725,18 +1817,28 @@ Required only for Secure Micro-Handoff on the supported Chrome path:
 [✓/✗] tab/window control permission
 [✓/✗] narrow handoff-state verifier
 
+Required only for Secure Credential Channel on macOS:
+[✓/✗] native credential helper installed and signature valid
+[✓/✗] fixed template registry hash valid
+[✓/✗] consumer registry hash valid
+[✓/✗] Keychain entitlement/access and synthetic round-trip
+[✓/✗] opaque-ref-only path
+[✓/✗] service/origin/purpose/consumer/TTL/revocation enforcement
+[✓/✗] generic file/env/argv/stdin/stdout/shell export unavailable
+
 Result:
 Lifecycle: INSTALLED | CONFIGURED | VERIFIED
 Oxrail mode: <derived mode>
 Optimization: ACTIVE | BYPASSED
 Safety: ACTIVE | INACTIVE
 Handoff: ACTIVE | INACTIVE
+Credential protection: ACTIVE | INACTIVE
 
 Optional and disabled by default:
 [ ] General Read-only Observer Bridge
 ```
 
-额外浏览器权限必须单独解释、单独授权。任一 Safety/Handoff 前置条件缺失时，UI 必须显示 `INACTIVE` 和缺失项，不得用“installed”“ready”或 Skill 可见性暗示保护已生效。
+额外浏览器权限必须单独解释、单独授权。任一 Safety/Handoff/Credential 前置条件缺失时，对应能力必须显示 `INACTIVE` 和缺失项，不得用“installed”“ready”、helper 存在或 Skill 可见性暗示保护已生效。Credential Channel `INACTIVE` 不影响 Native Chrome；需要秘密消费的单条路径则 fail-closed，且不得回退到聊天、环境变量或普通文件。
 
 ## 9.4 安装生命周期与首次验证
 
@@ -1880,7 +1982,7 @@ pauseAgentGuaranteed()
 
 ```ts
 export interface HostProfile {
-  schemaVersion: 3;
+  schemaVersion: 5;
   profileId: string;
 
   setup: {
@@ -1930,6 +2032,13 @@ export interface HostProfile {
       | "opaque";
     canonicalToolMatchers: string[];
     matcherEvidenceHash: string;
+    toolSchemaRegistryHash?: string;
+    toolSchemaRegistryEvidenceId?: string;
+    browserTools: Array<{
+      canonicalToolName: string;
+      inputSchemaHash: string;
+      registryManifestBinding: string;
+    }>;
   };
 
   action: {
@@ -2038,6 +2147,8 @@ export interface HostProfile {
     chatMessageRequired: ProbeVerdict;
   };
 
+  credentialChannel: CredentialChannelProfile;
+
   evidence: {
     probeSuiteVersion: string;
     fixtureRevision: string;
@@ -2051,10 +2162,59 @@ export interface HostProfile {
     mode: HostMode;
     safety: "ACTIVE" | "INACTIVE";
     handoff: "ACTIVE" | "INACTIVE";
+    credentialProtection: "ACTIVE" | "INACTIVE";
     allowedClaims: string[];
     forbiddenClaims: string[];
   };
 }
+
+export type CredentialChannelProfile =
+  | {
+      activation: "INACTIVE";
+      inactiveReasons: [string, ...string[]];
+      capability: CredentialChannelCapability & {
+        platform: "unsupported";
+        surface: "NONE";
+        storage: "NONE";
+        acceptedKinds: readonly [];
+        consumerMode: "NONE";
+        consumerReadiness: "UNSUPPORTED";
+      };
+    }
+  | {
+      activation: "ACTIVE" | "INACTIVE";
+      inactiveReasons: string[];
+      capability: CredentialChannelCapability & { platform: "macos" };
+      helperIdentity: ProbeVerdict;
+      helperBundleId?: string;
+      helperBuild?: string;
+      helperCodeDirectoryHash?: string;
+      helperTeamId?: string;
+      helperDesignatedRequirement?: string;
+      launcherIdentity: ProbeVerdict;
+      launcherBundleId?: string;
+      launcherBuild?: string;
+      launcherCodeDirectoryHash?: string;
+      launcherTeamId?: string;
+      launcherDesignatedRequirement?: string;
+      secureInput: ProbeVerdict;
+      agentExecutionIsolation: ProbeVerdict;
+      pasteboardHygiene: ProbeVerdict;
+      templateRegistryHash?: string;
+      consumerRegistryHash?: string;
+      registryManifestHash?: string;
+      registryManifestVerification: ProbeVerdict;
+      registryVersion?: number;
+      registryRollbackFloor?: number;
+      credentialEvidenceManifestHash?: string;
+      secretLeakBench: ProbeVerdict;
+      realConsumerProbe: ProbeVerdict;
+      keychainRoundTrip: ProbeVerdict;
+      opaqueRefOnly: ProbeVerdict;
+      scopeBinding: ProbeVerdict;
+      expiryAndRevocation: ProbeVerdict;
+      genericExportDenied: ProbeVerdict;
+    };
 
 export type ProbeVerdict =
   | "passed"
@@ -2073,6 +2233,36 @@ export type NativePrimitive =
   | "handoff_resume";
 ```
 
+运行时 `HostProfileSchema` 验证交换结构和跨字段不变量；生成 JSON Schema 只验证可移植的交换结构，不表达 Zod `superRefine` 语义，也不得单独用于授权。两者都不是 Credential activation 授权器。只有独立 macOS activation verifier 实时核对 Security.framework code-signing attestation、sealed evidence manifest、launcher-owned rollback floor 与当前 Host trust binding 后，runtime 才能采用 `ACTIVE`；该 verifier 尚未实现或任一核对不可用时，即使输入 profile 自报 `ACTIVE/passed` 也必须拒绝并降为 `INACTIVE`。
+
+`helperCodeDirectoryHash` 与 `launcherCodeDirectoryHash` 必须是 Security.framework `kSecCodeInfoUnique` 返回的当前已验证 binary 的 raw public CDHash：20 bytes，编码为严格的 40 位小写十六进制；它们不是签名 blob 的摘要，也不是 SHA-256。`matcherEvidenceHash`、registry/manifest/evidence Hash 与 `credentialTrustRootDigest` 等证据或信任根摘要继续使用 SHA-256 的 64 位十六进制合同，不得与 CDHash 混用。首版每个 launcher/helper 只支持一份 architecture-specific artifact 和一个对应 CDHash；Universal/fat binary 的多 architecture CodeDirectory hash set 延后，在该合同实现前不得把多个 CDHash 折叠成一个值或据此激活 Credential Channel。
+
+macOS native package 的 code-identity verifier foundation 只提供零参数、只读的 `runPinnedCodeIdentityObservation()`：production target/path、Team ID、signing identifier、CDHash 与 designated requirement 只能来自 build-fixed release pins，禁止由 argv、env、HostProfile 或调用方覆盖。实现必须通过公开 Security.framework 严格验证 launcher 与 helper 的两个不同身份，对 pinned requirement 做系统 validity check，并把其编译数据与候选自身 designated requirement data 精确比较，同时逐一匹配 Team/signing ID/20-byte CDHash；单 CDHash 合同还必须拒绝未证明为 thin Mach-O 的 artifact。输出固定为 `schemaVersion=1`、`authority=NON_AUTHORIZING`、`scope=CODE_IDENTITY_ONLY` 及 `MATCHED_NON_AUTHORIZING | INACTIVE`，不得包含路径、OSStatus 或自由文本。当前正式 release pins 尚未配置，因此 production 入口固定 `INACTIVE`；测试注入只允许存在于 package-internal seam。该局部观察不启动 helper，不访问 prompt、Keychain、pasteboard 或持久状态，不实现应用层网络 client/endpoint，不接 Hook/Doctor/Profile activation，也不证明 Host-wide suspension、G15 或 Credential `ACTIVE`。
+
+macOS native package 的 credential-registry validator foundation 只提供零参数、只读的 `runEmbeddedCredentialRegistryObservation()`：production 入口只观察 build-fixed 的 template registry、consumer registry 与 manifest，禁止由 argv、env、HostProfile、页面、Agent 或调用方替换。首个 foundation 只包含一份 `API_KEY` fixture template 与一份同 service/consumer/origin 绑定的 fixture HTTPS consumer，固定 `NSSecureTextField`、`POST` bearer placement、禁用 redirect，并校验 schema/version、ID、canonical HTTPS origin/path、TTL/generation、跨 registry 关联及严格 64 位小写 SHA-256。三类摘要分别按 domain `oxrail-credential-template-registry-v1`、`oxrail-credential-consumer-registry-v1`、`oxrail-credential-registry-manifest-v1` 对 `UTF8(domain) || 0x00 || sorted-key JSON（不转义 slash）` 计算。输出只允许固定的 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=REGISTRY_STRUCTURE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 version/Hash。embedded manifest 与同一可替换 binary 内的 self-hash 只证明 fixture 结构自洽，不是 code-signed sealed manifest、外部可信 pin 或 launcher-owned rollback floor；`MATCHED_FIXTURE_NON_AUTHORIZING` 不得映射为 HostProfile `registryManifestVerification=passed`，不得启动 helper/prompt、访问 Keychain/pasteboard/network、消费 credential、接入 Hook/Doctor/Profile activation，也不证明 G15、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
+
+macOS native package 的 opaque credential reference lifecycle foundation 只提供零参数、仅进程内且无持久副作用的 `runEmbeddedCredentialReferenceLifecycleObservation()`：production 入口只从当前 build-fixed embedded registry 取得唯一 `API_KEY` fixture scope，并使用 Security.framework `SecRandomCopyBytes(kSecRandomDefault, 32, ...)` 生成 32-byte 随机 handle，编码为 `ocref1_` 加 43 位无填充 base64url；外部不得注入 reference、clock、registry 或 scope，测试替身只允许存在于 package-internal seam。每个 ephemeral reference 必须精确绑定 credential use/kind/template、service、provisioning origin、purpose、consumer、grant TTL、generation、registry version 与三类 registry Hash，以及 `issuedAt/expiresAt`；claim 只有在完整 scope 仍与 embedded registry 一致、时间有效、未撤销且未消费时才成立，首次成功 claim 必须在同一进程锁内原子地标记已消费，scope/Hash 不匹配、过期、撤销、generation rotation 与 replay 一律拒绝。公开报告固定为 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`scope=OPAQUE_REFERENCE_LIFECYCLE_ONLY`、`status=MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`、`activation=INACTIVE`、`credentialKind=API_KEY`、`consumerReadiness=FIXTURE_ONLY` 及非敏感 registry version/Hash，绝不包含 credential reference、随机 bytes、secret 或自由文本。该 foundation 不处理任何 credential value，不显示 prompt，不访问 Keychain/pasteboard/file/env/argv/stdio/shell/network，不启动 helper/consumer，不接 Hook/Doctor/Profile activation，也不证明 G15、完成 `TEST-SEC-113`/`TEST-SEC-114`、接受 `WP-CRED-001` 或令 Credential protection 进入 `ACTIVE`。
+
+Core 的 credential intent 只能通过 coordinator 的 locked admission 进入 fixture ticket builder：单独 mint 使用 `admitCredentialIntent()`，与全局 gate `PREPARING` 组合时必须使用 `prepareCredentialInputAttempt()`；Host/product adapter 禁止自行串联两个较低层公开调用来重建该组合。coordinator 必须先深拷贝调用方提供的 intent/registry/lease/Host 输入并取得唯一一次 clock sample；task lock 开始后禁止再调用调用方 callback 或读取其可变对象。在同一次 BrowserTask task lock 内必须重读 Human-owned `USER_LEASE_ACTIVE` state、`ACTIVE` gate、strict `ACTIVE` barrier、Host binding 与 bounded physical active tool-call journal，并精确核对 session/task/origin/canonical document/lease epoch/handoff、当前 VALID Host Profile、非空 browser-instance/native-action-fence/current-tab-receipt Hash、无 pending native action、无 verification marker且 physical journal count 为零。通过后只能从完整 strict barrier 计算 credential 专属、domain-separated activation anchor；`CredentialEnclaveTicket` v2 只携带 allowlisted registry scope、该 opaque anchor 与 lease 时间，不携带 raw handoff/session/task/tab/document/nonce/Host/browser/fence/receipt binding，`ticketId` 必须覆盖完整 registry entry、anchor、lease epoch/acquiredAt/expiresAt 与 issuedAt，v1 ticket 必须 fail-closed。旧的纯 binder 不属于 package public API；仅凭调用方提供的内存 `ACTIVE` lease 不得 mint ticket。该本地 barrier/anchor、无密钥 `ticketId` 完整性摘要与 v2 fixture ticket 仍固定为 `FIXTURE_ONLY_NON_AUTHORIZING`：它们不是签名 Host 事实，不是 prompt-time fresh current-tab receipt、credential-input lease、helper/prompt/Keychain/consumer authority 或 G15 证据，也不得令 Credential protection 进入 `ACTIVE`。当前没有独立可信 commitment 可判断本地 barrier 中格式合法的 browser/fence/receipt Hash 是否被替换；这种替换只会产生不同 anchor/ticketId，绝不能被解释成已验证，未来真实 prompt 必须用 authenticated Host receipt 在 prompt-time 重新核对。
+
+Core 的 `prepareCredentialInputAttempt()` 是上述 fixture admission 与全局 credential gate `PREPARING` 的唯一组合入口：它必须先深拷贝并严格校验 exact top-level/Host/lease/Hash 输入，不接受调用方 clock 或 callback，再按 global credential mutex → 同一 Handoff task lock → credential gate file lock 的固定顺序，在锁内取得唯一一次 wall-clock sample、复用相同的 current Human-owned Handoff/barrier/journal 校验和 ticket builder，并在取得或恢复 gate file lock 后从已知 `OPEN` gate 单调派生 `generation + 1`。持久写入 `PREPARING` 是线性化点：先进入 global Pre 的真实调用保持 pending 且只能由对应真实 Post 结算；先提交 preparation 时后续 Pre 必须阻断。受控 rejection，以及未提交且所有锁安全释放的 pre-commit failure，不改变 durable `OPEN`；一旦提交状态或锁状态无法证明，只能按 `PREPARING/UNKNOWN` fail-closed 并返回固定 `FAILED_SAFE`，不得猜测回滚，只有显式 cleanup/recovery 可以恢复。成功结果仅返回 non-secret fixture binding、generation 与固定 `PREPARED_FIXTURE_NON_AUTHORIZING / credentialProtection=INACTIVE / activation=INACTIVE`；package-internal locked gate helper 不属于公共 barrel API。该组合操作仍不建立 Host-wide continuous suspension、credential-input lease、prompt authority、helper/presenter、Keychain、pasteboard、consumer 或 G15，也不得把 PREPARING 解释为安全能力已生效。
+
+macOS non-product credential target 的 presentation checkpoint 只能接收最大 16 KiB 的 `CredentialEnclaveTicket` v2 JSON，并对解析后的 top-level/handoff 精确 key set、固定 non-authorizing authority、strict lowercase Hash、safe-integer/lease 时间关系、完整 embedded registry scope 与 `ticketId` 进行校验。Core 与 Swift 必须消费同一 golden ticket；Swift 必须按 domain `oxrail-credential-fixture-ticket-v2` 对完整 registry entry、handoff projection 与 issuedAt 重算 `ticketId`，再按 `oxrail-credential-prompt-context-v1` 对 `{ observedAt, ticket }` 生成固定 cross-language `promptContextHash`。成功结果只允许携带 `schemaVersion=1`、`authority=FIXTURE_ONLY_NON_AUTHORIZING`、`activation=INACTIVE`、`authorization=NOT_AUTHORIZED`、`hostSuspension=UNVERIFIED`、`presentation=NOT_PRESENTED`、credentialUseId、lease expiry、promptContextHash 与 embedded non-secret scope；不得返回 ticketId、activation anchor 或 raw control-plane identity。该 checkpoint 不构造或展示窗口，不接收 secret，不访问 secure field、Keychain、pasteboard、file/env/argv/stdio/shell/network/IPC，也不连接现有 inert surface。`ticketId` 与 promptContextHash 均为无密钥完整性摘要，不是来源认证或授权；在 prompt-time authenticated Host-wide suspension/current-tab receipt、credential-input lease、G15 与真实 presenter 接线全部存在前，任何成功 checkpoint 仍必须是 `NOT_PRESENTED / INACTIVE`。
+
+Core 的 fixture-only Host suspension observer 只在 credential gate 为同一完整 operation 的 `PREPARING`、当前 Human-owned Handoff/barrier 仍为同一 ACTIVE lease、Handoff task journal 与全局 Credential Tool Fence 均可证明为空时运行。它必须先按 global credential mutex → 同一 Handoff task lock 的固定锁序形成完整 initial snapshot、生成 receiver one-shot challenge 并在调用 observer 前以 bounded process-local ledger 消耗 attempt，然后释放两把状态锁；最大 4 KiB 的 serialized-wire observer 必须在锁外运行。本函数不改变 gate；只要外部状态仍为同一 `PREPARING`，任何新 Pre 都继续阻断。外部 cleanup 可以在 callback 期间合法恢复 `OPEN` 并让 native Pre 通过，但随后的 final reread 必须拒绝本次 observation；该 fixture 因而不证明连续排他或 G15。receipt 返回后必须在 receiver monotonic deadline 内按相同锁序重新取得状态并做 exact final reread，最终复核完成时间不得越过 deadline，wall clock 不得相对 initial snapshot 回退。query/receipt 只携带 challenge Hash、prompt context、Handoff activation projection、admission generation、Host Profile/browser instance、credential operation、完整 gate/tool-fence snapshot、local coverage 与 verifier context 的摘要、state epoch 及固定 lane 枚举，不携带 raw ticket/anchor/nonce/session/task/handoff/tab/document/origin/URL/page/tool identity；调用方提供的 prompt-context Hash 不得与任何已知 raw ticket/control identity 或其 Hash-shaped ID payload 字节相同。strict receipt 不接受 sender time、额外字段或 `string | Uint8Array` 以外的 runtime wire，必须逐项回显当前 binding，提供不同于全部 binding 的 fresh suspension-fence Hash，并报告 Agent tool、browser action/observation、shell、screen capture、clipboard 与 semantic query 全为 `SUSPENDED`，enclave protocol 为 `ALLOWLIST_ONLY`。throw、timeout、late、malformed、replay、任一 binding/lane/snapshot 漂移或 final reread 改变都拒绝且不自行恢复 `OPEN`。当前进程内 callback + `AbortSignal` 只是 fixture seam，不能强制终止忽略 cancellation 的同步/异步代码；真实 Host adapter 在获得 Host-owned、bounded、可取消、authenticated 且可证明连续排他的 transport/fence 前不得把该 observation 当作权威 fence。即使完整匹配，对外也只返回 domain-separated receipt digest 与 `STRUCTURE_MATCHED_NON_AUTHORIZING / hostSuspension=UNVERIFIED / activation=INACTIVE`；该局部结构匹配不认证 Host、不推进 gate `ACTIVE`、不展示 prompt、不接触 secret/Keychain/pasteboard/IPC/consumer，也不证明 credential-input lease、G15 或 Credential protection。
+
+Core 的 `commitPreparedCredentialFixtureGate()` 是消费上述 one-shot fixture observation 并提交本地 `PREPARING → ACTIVE` 阻断账本的唯一高层入口；它与只读 `observePreparedCredentialHostSuspension()` 是互斥的终端消费路径，先调用任一入口后同一 attempt 不得由另一入口重用。serialized-wire observer 仍在锁外运行；receipt 通过同样的有界、deadline 与 strict binding 校验后，commit 路径必须重新取得 global credential mutex → 同一 Handoff task lock → gate file lock，在三把锁的完整嵌套临界区中恢复 dead-owner gate lock、精确重读 initial snapshot 所绑定的 generation/operation/Handoff/barrier/journal/tool fence，并在写入前后复核 wall clock、在 durable commit 后复核 receiver monotonic deadline。持久 `ACTIVE` rename 是唯一线性化点；gate 内只保存对完整 receipt 的 domain-separated digest 再绑定 generation/operation 的第二层 digest。callback 中 cleanup→`OPEN`，或 cleanup 后新一代 `PREPARING` 的 ABA，都必须使旧 receipt 拒绝，且不得改变新一代 gate；pre-write deadline/clock failure 保留当时的 `PREPARING/OPEN`，post-write clock/deadline 或锁状态不确定则保留 `ACTIVE/UNKNOWN` fail-closed，绝不猜测回滚或自动 reopen。只有已确认 commit 才返回 `FIXTURE_GATE_COMMITTED_NON_AUTHORIZING`、`gate=ACTIVE`、generation 与 receipt digest，同时必须固定返回 `authority=FIXTURE_ONLY_NON_AUTHORIZING / authorization=NOT_AUTHORIZED / credentialInputLease=NOT_ESTABLISHED / hostSuspension=UNVERIFIED / credentialProtection=INACTIVE / activation=INACTIVE`；bare gate/outcome `ACTIVE` 只能表示本地阻断账本事实，任何 UI、Profile、Doctor、presenter 或 consumer 判定都必须另行要求真实 Host authority、持续 lease、G15 与对应 release evidence。raw gate transition、event 类型和 locked read/commit helper 不属于 package public barrel。该入口及下述本地 cleanup 只允许 fixture 测试使用；任何 product adapter 在 authenticated Host/enclave cleanup 与 G15 完成前禁止接线。两者都不展示 prompt、不接触 secret/Keychain/pasteboard/IPC/consumer，也不建立 credential-input lease、Host suspension、G15 或 Credential protection。
+
+Core 的 `cleanupCredentialFixtureGate()` 只为上述从未连接 presenter、Keychain、pasteboard、consumer 或任何 secret 外部效果的 non-product fixture 提供一个狭窄的本地账本恢复例外；它不接收或伪造可信 cleanup evidence，不能推广到产生过任何外部效果的路径。入口必须深拷贝并严格限制为 exact `binding + generation`，取得 global credential mutex 后在 gate file lock 内恢复 dead-owner lock 并精确复读 operation、expiry、state 与 generation；它只清扫已有 durable completion 的调用，pending/legacy/UNKNOWN 或任一 physical active marker 都保持阻断，只有对应真实 `PostToolUse` 才能结算。匹配的 `PREPARING`、`ACTIVE` 或 `CLEANUP_PENDING` 只能经 domain-separated fixture-local reset marker 写入绑定 operation/generation/outcome 的精确 `OPEN` tombstone；同一 tombstone 可幂等确认，stale binding、旧 generation、cleanup→新 generation 的 ABA、snapshot drift、损坏或不确定状态均不得改写当前 gate。写入异常后只能重新取得同一锁并只读确认该 exact tombstone；无法证明时固定 `FAILED_SAFE`。所有结果固定 `authority=FIXTURE_ONLY_NON_AUTHORIZING / authorization=NOT_AUTHORIZED / agentResume=NOT_AUTHORIZED / externalCleanup=NOT_VERIFIED / credentialInputLease=NOT_ESTABLISHED / hostSuspension=UNVERIFIED / credentialProtection=INACTIVE / activation=INACTIVE`；`gate=OPEN` 仅表示本地 fixture ledger 不再要求阻断。真实产品恢复仍必须由 authenticated Host/enclave verifier 证明 prompt teardown、Keychain/pasteboard/consumer 与其它外部 cleanup，并通过 G15；本例外不是该证据。
+
+macOS native package 的 inert credential-enclave boundary 是一个不导出 product 的 Swift target。package-internal accessor 只可从已经自校验的 embedded fixture registry 按唯一 `credentialUseId` 投影固定 prompt descriptor，并复用包含 registry version 与三类 Hash 的完整 opaque-reference scope；调用方不能提交 title、origin、purpose、consumer、style 或任意字段。`runEmbeddedCredentialEnclaveObservation()` 只在 MainActor 构造但绝不展示包含恰好一个 `NSSecureTextField` 的固定 `NSAlert` surface，且公开报告固定为 `FIXTURE_ONLY_NON_AUTHORIZING / SECURE_FIELD_BOUNDARY_ONLY / NOT_PRESENTED / storage=UNAVAILABLE / activation=INACTIVE`。内部测试 seam 把 secure field 的短作用域值转成进程内 `Data` 交给固定 sink 后立即清空 field，并尽力 reset 临时 Data；test sink 只比较而不保留传入的 secret `Data` 副本，它不声称 Swift `String` 或被恶意 sink 复制的 `Data` 可被可靠 zeroize。production 没有可用或持久化 sink、executable、launcher、`runModal`、Keychain writer、pasteboard、file/env/argv/stdio/shell/network/XPC 或模型调用入口；fixture ticket 也不能展示 UI 或写入 credential。target-wide source/package tripwire 只用于防回归，不是安全证明。该 foundation 只验证固定 UI 与未来同进程 secret boundary，不证明签名、ACL、Handoff、Host-wide suspension、Keychain、G15 或 Credential `ACTIVE`。
+
+`toolSchemaRegistryHash`、每个 browser tool 的 `inputSchemaHash` 与 `registryManifestBinding` 必须由 version-bound Host probe/evidence 产生，并作为外部可信 pin 注入。运行时从待验证的同一 registry 自算 Hash 再与自身比较不构成完整性证明；pin 缺失、过期或不匹配时，该工具只能 `UNSUPPORTED/BYPASSED`，不能启用 Guard enforcement。
+
+每个 `registryManifestBinding` 必须按 domain `oxrail-tool-registry-manifest-binding-v1` 对 canonical `{ profileId, definitionHash, matcherEvidenceHash, toolSchemaRegistryHash, toolSchemaRegistryEvidenceId, canonicalToolName, inputSchemaHash }` 计算，不能是 profile 与 manifest 共同携带但无法重算的任意值。bundle loader 还必须校验有界读取的 `profile.json` 原始字节 Hash 等于 manifest `profileSha256`；manifest 只是把本地文件绑定成一个漂移检测单元，外部 evidence pins 才是授权输入。
+
+非 macOS profile 必须使用 `platform = unsupported` 的 `INACTIVE` 分支，不得填空 Hash 假装已探测。macOS `credentialChannel.activation = ACTIVE` 要求 `GATE-G15`、当前独立 launcher/updater 与 helper identity、release-pinned Team ID/bundle/exact CodeDirectory Hash/designated requirement、sealed registry manifest、launcher-owned registry rollback floor、verified same-tab Chrome Handoff、agent execution isolation、pasteboard hygiene、Keychain extended synthetic round-trip、scope/expiry/revocation probes、至少一个 audited real consumer 与对应 SecretLeakBench 全部通过并绑定 `credentialEvidenceManifestHash`；所有 ACTIVE 身份/Hash/版本字段都必须存在，`inactiveReasons` 必须为空。仅安装 helper、创建 Keychain item 或通过 fixture adapter 不足以激活公开能力。
+
 ## 10.4 `oxrail doctor` 的探测层级
 
 默认 `oxrail doctor` 是无副作用 setup verification。它 MUST 检查并逐项显示：
@@ -2087,10 +2277,21 @@ PostToolUse available
 Chrome Computer Use detectable
 matcher/profile valid
 Handoff capabilities and activation
+macOS credential helper identity/signature and release-pinned designated requirement
+independent launcher/updater identity/signature and rollback-floor ownership
+sealed credential registry manifest hashes/version/rollback floor
+fixed credential template and consumer registry hashes
+Keychain entitlement/access (read-only static check by default)
+agent-execution isolation and pasteboard hygiene evidence
+opaque-ref scope/TTL/revocation enforcement
+generic file/env/argv/stdin/stdout/shell export unavailable
+Credential protection ACTIVE/INACTIVE and reasons
 resulting Oxrail mode
 ```
 
-该默认命令不得发起真实 click/type/navigation，不得把用户下一次真实任务登记为 installation test，也不得绕过宿主 Hook trust。
+该默认命令不得发起真实 click/type/navigation，不得打开 credential prompt、写删 Keychain item、读写 pasteboard，不得把用户下一次真实任务登记为 installation test，也不得绕过宿主 Hook trust。
+
+`oxrail doctor --extended-credential-probe` 是独立的显式 opt-in。它必须在运行前说明可能出现的 macOS 授权 UI，使用不可与真实 credential 混淆的唯一临时 Keychain item，测试完成或失败后都尝试删除，绝不使用用户真实 API key；删除失败必须以醒目错误和 item 的非敏感 locator 报告，且 Credential protection 保持 `INACTIVE`。
 
 ### Layer 0 — Static public contract
 
@@ -2727,9 +2928,15 @@ EvidenceState        # run_id / WP / test manifest
 必须满足：
 
 - 每个 `tool_use_id` 的 Pre/Post 事件至多影响状态一次；
+- 持久 ToolCall canonical marker 使用 v2 格式保存去敏的 `persistentToolUseId`，并保留 first-decision replay history；Handoff activation 只读取同一 task journal 下有版本 sentinel 的 `active/` 索引，不得随历史总量全表扫描；
+- pending marker 发布顺序固定为 private mutation intent → canonical first-decision claim → 独立 active marker → 目录 fsync → 清除 intent；任一中断期间索引必须返回 `UNKNOWN`，Post 可从完整 intent 恢复 canonical/active/completion；
+- Post journal 更新与 `BrowserTaskState` 清理必须在同一 per-task lock 内串行化；只有 state 已持久化且不再保留对应 `persistentToolUseId` 后才可回收完成的 active marker，并应在后续成功 Post/Handoff 协调中批量清理 crash 遗留项；
+- active index 以流式目录迭代读取并在第 257 个 call 或第 514 个总目录项前停止信任；超限、不一致、损坏、缺少可信 sentinel 或旧版未索引 journal 均视为 `UNKNOWN`，Handoff 保持 `INACTIVE/FAILED_SAFE`，但 Native Computer Use 继续遵循基础 fail-open；当前开发版不原地迁移无 sentinel 的旧 session，须以新 session 重建索引；
+- receipt-first crash 后必须把完成回执与 `BrowserTaskState.pendingNativeActionIds` 精确协调；legacy/损坏/缺失映射不得凭 aggregate pending 状态猜测完成；
 - 文件写入采用 temp + fsync + atomic rename；
 - session 状态带 `stateVersion`，更新使用 CAS；
 - Handoff lease 带单调 `leaseEpoch`；旧事件不能恢复新 lease；
+- Handoff admission gate 在 task-state lock 外先持久化 `PREPARING`；结束后保留 generation tombstone，Pre 必须在持锁前后验证同一 `OPEN` generation；
 - extension 事件包含 `handoffId + tabId + documentId/origin + nonce`；
 - duplicate、late、out-of-order 事件必须可安全忽略；
 - crash 后状态恢复只能进入 `VERIFYING` 或 `CANCELLED`，不能直接假定完成。
@@ -2744,6 +2951,7 @@ EvidenceState        # run_id / WP / test manifest
 | 重复/过期动作判断不确定 | 不虚假 deny；要求重新观察或明确失败 |
 | 高影响动作分类不确定 | deny/交接；fail closed |
 | Handoff 用户租约激活后任何 Agent browser call | deny；fail closed |
+| Handoff gate 损坏且没有可独立证明的 active lease state | 不从本地文件伪造 deny；Optimization=`BYPASSED`、Handoff=`INACTIVE`；Native 保持 fail-open |
 | Handoff verifier 断开 | 保持用户租约，显示本地恢复/取消；不得自动交回 Agent |
 | Host Profile STALE/DRIFTED | affected Oxrail path 禁用；Native Computer Use 显式 BYPASSED 并继续依赖宿主原生 approval |
 | Secret redaction/sanitizer 失败 | 不写 trace、不返回派生内容；release-blocking |
@@ -3429,6 +3637,8 @@ max_safe_navigation_attempts = 1
 
 本节定义用户要求的核心体验：**Agent 不结束原任务，用户不需要回聊天发送“继续”；只把浏览器控制短暂交给用户，并把当前同一真实页面直接呈现出来。**
 
+本节的 SMH 只指浏览器控制让渡；它不接收 secret。用于 API key 的 macOS native secure prompt 属于 `SEC-20` 定义的正交 Secure Credential Channel，不是 `HandoffSurface`、网页镜像或 Browser SMH 的例外。两者可以在同一 pending task 中顺序组合，但能力、状态和证据必须分别报告。
+
 ## 19.1 正式定义
 
 Secure Micro-Handoff（SMH）是：
@@ -3514,6 +3724,8 @@ Agent 自动继续原任务
 move/focus the real tab
 not mirror/clone/proxy the form
 ```
+
+所谓“对应位置映射”、裁剪画面或独立复刻控件都不满足该原则。支持路径必须显示正常真实 Chrome 窗口及其地址栏/origin；可以移动、缩放或聚焦同一 tab，但不能用映射替代它。
 
 ## 19.4 Surface 优先级
 
@@ -3608,6 +3820,14 @@ Conversation UI and non-browser discussion = MAY CONTINUE
 
 若宿主有不可控 browser bypass，则不能标记 `EXCLUSIVE_USER_LEASE`。敏感场景必须终止或使用宿主原生、已证明的 lock。
 
+租约激活采用 write-ahead admission gate：先原子持久化 `PREPARING/generation=n+1`，再取得 task-state lock、精确协调 v2 ToolCall journal 与 pending state，最后验证 Host-minted tab-binding/native-action-fence receipt 并切换为 `ACTIVE`。该 receipt 必须绑定本代 generation，并由 Host 在观察到 barrier 后等待所有更早已准入或排队的 native Browser calls 终结后签发；这也覆盖 Hook fail-open 未能落 journal 的调用。普通 Browser Pre 在 lock 外保存 gate 快照，进入 lock 后必须复读；状态不是 `OPEN` 或 generation 改变时均不得进入受跟踪的 native action journal。取消/释放只写同一 generation 的终态 tombstone，不删除代际证据。
+
+ToolCall 的 canonical v2 marker/receipt 为 O(1) duplicate replay history；Handoff 不扫描这些历史文件，只用流式目录迭代读取有 sentinel、mutation intent、256-call ceiling 与 513-entry ceiling 的 `active/` 索引，并在首个越界项立即停止。Pre 在 canonical 前写 intent，Post 在同一 task lock 内修复或完成该 intent；完成项只有在 durable state 已移除对应 pending identity 后才回收，且后续成功 Post 或 activation 会清理 state 不再引用的 crash 遗留项。任何 dirty intent、active/canonical/receipt 不一致、active/entry ceiling 超限或 legacy 无 sentinel 状态都使本次 Handoff 协调为 `UNKNOWN/FAILED_SAFE`，不得把空目录或缺失索引解释成“全部 native action 已完成”。正常 steady-state activation 的工作量只与当前 active calls 有关；异常恢复与 session-level 历史保留另行计量，不得冒充正常 P95。
+
+task state 与 barrier 的 `ACTIVE/CANCELLED` 发布必须由同一 per-task lock 串行化；状态先提交、barrier 后发布的 crash window 保持 `PREPARING` 并拒绝 Agent，不得让不同 receipt 并发覆盖。重复的同 lease activation 可从已持久化的同一 ACTIVE barrier 幂等确认，不要求 Host 重签字节完全相同的新 receipt。过期 `PREPARING` 只有在持久状态仍证明 `RUNNING + NATIVE` 时才可无需原始 lease 写入 `CANCELLED` tombstone；若状态已是 Human/user-held，则保持封锁并报告 `USER_LEASE_RECOVERY_REQUIRED`，重启后恢复 UI 与重新验证，禁止猜测交还 Agent。
+
+tab-binding receipt 必须来自当前受信 Host adapter/verifier，至少绑定 Host Profile、browser instance、同一真实 `tabId`/session、origin、初始 document binding、本代 admission generation、native-action fence、签发时间和有效期。fence 必须证明 receipt 签发时本代 barrier 之前已准入或排队的 Host native Browser calls 均已终结，且验证必须发生在本地 journal 协调之后。Agent/page 提供的数字 `tabId`、URL、自称“当前页面”或自行生成的 fence 都只是非可信输入，不能据此移动页面或激活 USER lease。本地 gate 只是在正常工作的受信 Hook 内关闭 admission；它不能替代宿主对全部 Browser action/observation 路径的独立覆盖证明，也不能单独把 Handoff 标成 `ACTIVE`。
+
 ## 19.6 Continuation 机制
 
 首选机制：
@@ -3681,24 +3901,37 @@ USER_LEASE_ACTIVE → CANCELLED
 ## 19.8 HandoffRequest
 
 ```ts
+export type HandoffType =
+  | "AUTH_REQUIRED"
+  | "MFA_REQUIRED"
+  | "PASSKEY_REQUIRED"
+  | "CAPTCHA_REQUIRED"
+  | "SENSITIVE_INPUT"
+  | "PERMISSION_REQUIRED"
+  | "HIGH_IMPACT_CONFIRMATION"
+  | "FILE_PICKER_REQUIRED"
+  | "OS_DIALOG_REQUIRED"
+  | "UNKNOWN_MANUAL_BOUNDARY";
+
+export type CompletionPolicy =
+  | "AUTH_FLOW_COMPLETED"
+  | "DIALOG_OR_ROUTE_COMPLETED"
+  | "MANUAL_DONE_THEN_VERIFY";
+
+export interface HandoffToolInput {
+  schemaVersion: 1;
+  type: HandoffType;
+}
+
 export interface HandoffRequest {
   schemaVersion: 1;
   handoffId: string;
   sessionId: string;
   taskId: string;
   toolUseId?: string;
-
-  type:
-    | "AUTH_REQUIRED"
-    | "MFA_REQUIRED"
-    | "PASSKEY_REQUIRED"
-    | "CAPTCHA_REQUIRED"
-    | "SENSITIVE_INPUT"
-    | "PERMISSION_REQUIRED"
-    | "HIGH_IMPACT_CONFIRMATION"
-    | "FILE_PICKER_REQUIRED"
-    | "OS_DIALOG_REQUIRED"
-    | "UNKNOWN_MANUAL_BOUNDARY";
+  leaseEpoch: number;
+  nonce: string;
+  type: HandoffType;
 
   tabBinding: {
     tabId: number;
@@ -3708,22 +3941,29 @@ export interface HandoffRequest {
     groupId?: number;
     topOrigin: string;
     allowedRedirectOrigins?: string[];
-    documentBinding?: string;
+    initialDocumentBinding: string;
   };
-
-  display: {
-    siteName: string;
-    reason: string;
-    instruction: string;
-  };
-
   completionPolicy: CompletionPolicy;
   timeoutMs: number;
   createdAt: number;
 }
 ```
 
-`instruction` 只能描述动作类型，例如“在此真实页面完成登录”，不得预填或回显秘密。
+`HandoffToolInput` 是完整的 Agent-facing 输入面，必须用 strict schema 拒绝额外字段；模型不得提供 `reason`、显示文案、completion policy、timeout、`tabId/windowId`、origin、redirect、document binding、session/task、lease epoch 或 nonce。`type` 只是请求提示，不是分类 authority；Host 必须与受信 blocker/site registry 独立核对，并只能保持或加强边界，不能因 Agent/page 给出的较弱 type 降级。Host adapter 根据核对后的 type 从 build-fixed registry 派生 `completionPolicy/timeoutMs` 并绑定当前上下文；extension UI 仅根据 build-fixed `type` 文案和已验证 top origin 本地渲染，不接受 Agent、页面或请求中的自由文本。
+
+固定 automatic policy 映射为：`AUTH_FLOW_COMPLETED → CHALLENGE_GONE | AUTH_MARKER_PRESENT | EXPECTED_ROUTE`，`DIALOG_OR_ROUTE_COMPLETED → DIALOG_CLOSED | EXPECTED_ROUTE`，`MANUAL_DONE_THEN_VERIFY` 不接受 automatic success signal。authenticated `MANUAL_DONE` 是所有 type/policy 均可用的一键 fallback trigger：它只能进入 settle + independent verify，永远不能单独证明完成。`CANCELLED` 和 `UNSAFE_ORIGIN` 始终是终止信号，不是成功 policy。首版 type/policy 绑定固定如下；Host 独立分类得到更强边界时使用该真实边界对应行，绝不能按 Agent 提示降级：
+
+| Handoff type | Host-derived CompletionPolicy |
+|---|---|
+| `AUTH_REQUIRED` / `MFA_REQUIRED` / `PASSKEY_REQUIRED` / `CAPTCHA_REQUIRED` / `SENSITIVE_INPUT` | `AUTH_FLOW_COMPLETED` |
+| `PERMISSION_REQUIRED` / `HIGH_IMPACT_CONFIRMATION` / `FILE_PICKER_REQUIRED` / `OS_DIALOG_REQUIRED` | `DIALOG_OR_ROUTE_COMPLETED` |
+| `UNKNOWN_MANUAL_BOUNDARY` | `MANUAL_DONE_THEN_VERIFY` |
+
+`minimum_settle_ms=500`、`maximum_auto_verify_ms=5000`、timeout 和 heuristic 双样本要求由 build-fixed registry/runtime 配置，Agent/page 不得覆盖或放宽。
+
+全部 ID/document binding 必须是 1–4096 字符且不含 `U+0000–U+001F/U+007F`；`leaseEpoch` 必须为正安全整数。nonce 必须由 Host CSPRNG 每个 handoff generation 新生成 32 bytes，并编码成恰好 43 位 canonical、无 padding base64url；接收端常量时间比较，过期或任一 terminal 后立即失效且不得跨 generation 复用。`timeoutMs` 必须为 `1000..900000` 的安全整数，且 `createdAt + timeoutMs` 不得溢出。wire 时间只用于关联；expiry、settle、quiet window 与 freshness 必须由接收端 monotonic clock 判定。redirect origin 最多 8 个、canonical、互异且不得重复 top origin。生产 origin 只允许 canonical HTTPS；唯一 HTTP 例外是 build-fixed `http://127.0.0.1:4173` fixture，schema 接受该值本身不构成授权。
+
+`HandoffRequest` 只能在 19.5 的 current Host Profile、browser instance、admission generation、same-tab scope 与 native-action fence receipt 全部由受信 Host verifier 新鲜验证后构造并 dispatch；request 的 session/task/tab/origin/initial document/lease epoch 必须与 lease 和 receipt 精确一致，内部 continuation 必须保留 receipt binding。任一缺失或 mismatch 都拒绝 request；wire schema 永远不能替代 receipt authenticity 或 Host-wide fence 证明。
 
 ## 19.8A Resume 前强制失效与重新定位
 
@@ -3767,10 +4007,17 @@ export interface HandoffRequest {
 
 ```ts
 interface CompletionSignal {
+  schemaVersion: 1;
   handoffId: string;
+  sessionId: string;
+  taskId: string;
+  leaseEpoch: number;
+  nonce: string;
   tabId: number;
-  documentBinding?: string;
+  initialDocumentBinding: string;
+  observedDocumentBinding: string;
   origin: string;
+  source: "ISOLATED_VERIFIER" | "EXTENSION_OWNED_UI";
   kind:
     | "CHALLENGE_GONE"
     | "AUTH_MARKER_PRESENT"
@@ -3783,6 +4030,46 @@ interface CompletionSignal {
   observedAt: number;
 }
 ```
+
+`CompletionSignal` 必须用 strict schema 解析，并与当前 lease 的全部 `handoffId/sessionId/taskId/leaseEpoch/nonce/tabId/initialDocumentBinding` 精确比较后才可进入状态机；schema 只验证交换结构，不授予 lease release 权限。`MANUAL_DONE/CANCELLED` 只接受 authenticated extension-owned UI channel 的 `EXTENSION_OWNED_UI + USER_ASSERTED`；自动检测 kind 只接受隔离 verifier channel 的 `ISOLATED_VERIFIER` 且不接受 `USER_ASSERTED`，`UNSAFE_ORIGIN` 还必须是 `DETERMINISTIC`。`source` 枚举自身不是 authentication，接收端必须验证实际 sender/channel identity。
+
+当前 document 与初始 binding 分列，允许合法导航，但不能把导航后的 binding 冒充初始 scope。接收端必须从当前真实 tab 独立重读 origin 与 document binding，并与 signal 交叉核对；不能信任 signal 自报字段。`observedAt` 不得替代接收端 monotonic freshness/settle 判断。任何额外字段，尤其 value/text/clipboard/screenshot/cookie/token/完整 URL，必须被拒绝。
+
+隔离 verifier 的主动采样采用以下 runtime-only strict contract；它不是 Agent/page wire，也不发布无法表达全部 refinement 的 portable JSON Schema：
+
+```ts
+interface HandoffVerificationSample {
+  schemaVersion: 1;
+  handoffId: string;
+  sessionId: string;
+  taskId: string;
+  leaseEpoch: number;
+  nonce: string;
+  probeSequence: number;
+  verifierContextBindingHash: string;
+  tabId: number;
+  initialDocumentBinding: string;
+  observedDocumentBinding: string;
+  origin: string;
+  stateEpoch: number;
+  completionState: "CONFIRMED" | "NOT_CONFIRMED" | "UNKNOWN";
+  automaticPhase?:
+    | "CHALLENGE_GONE"
+    | "AUTH_MARKER_PRESENT"
+    | "EXPECTED_ROUTE"
+    | "DIALOG_CLOSED";
+  tabState: "BOUND" | "CLOSED" | "MISMATCH" | "UNKNOWN";
+  navigationState: "IDLE" | "CHANGING" | "UNKNOWN";
+  redirectState: "CONTINUOUSLY_ALLOWED" | "UNSAFE_SEEN" | "UNKNOWN";
+  sensitivePhase: "CLEARED" | "ACTIVE" | "UNKNOWN";
+}
+```
+
+`verifierContextBindingHash` 是接收端保留 context 的一致性标签，必须域分离地绑定 current Host Profile、browser instance、tab-binding receipt、admission generation、verifier build、固定 completion-rule registry、authenticated channel instance 与 monotonic epoch；Hash 字段本身不是 authentication 或 authority。coordinator 必须先通过 authenticated isolated-verifier channel 主动发送不可回退的 `probeSequence`，再验证响应原样回显；每个 sequence 只能对应一个当前 outstanding challenge，accept 时原子消费，只有同一 context 中最新两次已消费、严格递增且之间没有 outstanding/gap 的 challenge 才能组成 pair。被动事件、缓存响应、重复/乱序 sequence、旧 channel instance、verifier restart 或 event gap 均不得组成 quiet proof。
+
+`stateEpoch` 由 authenticated continuous verifier 在 USER lease 激活且 origin feed 已连续覆盖后从 `1` 开始；top navigation start/commit/history transition、tab 或 document identity 变化、sensitive/completion phase 变化都必须在下一 sample 前递增。事件丢失、监控权限变化、channel/verifier restart 或无法确定是否遗漏事件时必须使整个 verifier context 失效并返回 `UNKNOWN`，不能仅保留旧 epoch；达到 `Number.MAX_SAFE_INTEGER` 时同样失效，禁止 wrap/reset 后复用旧 context。只有 verifier 已持续观察整个两次主动 probe 间隔，两个端点相同的 epoch 才能证明期间未发生这些变化。
+
+verifier 只读取 origin-only top-navigation feed、tab/document identity 与 build-fixed 非敏感结构/phase 枚举。`redirectState` 从 lease activation 起连续且 sticky 累积：任一未授权 origin 永久成为 `UNSAFE_SEEN`，丢失事件、无法证明连续覆盖或重启后为 `UNKNOWN`；只观察最终 origin 不能得到 `CONTINUOUSLY_ALLOWED`。`sensitivePhase=CLEARED` 与 `completionState=CONFIRMED` 只能由绑定当前 origin/type 的固定规则给出；权限缺失、selector/frame 覆盖不全、读取异常或“未看见”均为 `UNKNOWN`。verifier 不得读取或散列完整 URL/path/query、DOM text、selector、字段值、按键、clipboard、Cookie、token、网络 payload、screenshot 或页面自由文本；若宿主不能提供 origin-only 连续 feed，就必须报告 `redirectState=UNKNOWN`。
 
 ## 19.10 Settle 与 Verify
 
@@ -3805,7 +4092,66 @@ maximum_auto_verify_ms = 5000
 heuristic_requires_two_consistent_samples = true
 ```
 
+quiet/settle 必须由两次 coordinator 主动 challenge 的 accepted sample 组成；`acceptedAtMonotonicMs` 只能由接收端在 authenticated channel 验证之后附加，不得来自 sender。两份 sample 必须拥有相同的 verifier context、state epoch、全部 Handoff binding、origin、observed document、completion state 与 phase，且 `probeSequence` 和接收端时间严格递增、间隔至少 `minimum_settle_ms`；两份都必须为 `BOUND + IDLE + CONTINUOUSLY_ALLOWED + CLEARED + CONFIRMED`。两次 acceptance、candidate evaluation 与后续锁内 recheck 都必须处于 receiver-monotonic Handoff deadline 内。automatic signal 还必须与两份 sample 的 `automaticPhase` 精确一致并属于当前 policy，且从 signal 的 receiver-monotonic acceptance 到 candidate evaluation 不得超过 `maximum_auto_verify_ms`；heuristic 不得混用不同 epoch/context/phase 的样本。wire `observedAt`、wall clock、sender timestamp 或 sender 自报 stable time 均不得建立 freshness/quiet proof。
+
+authenticated `MANUAL_DONE` 只启动相同的双采样验证，不能把 `UNKNOWN/ACTIVE/UNSAFE_SEEN` 改成安全值，也不能单独证明完成。`CANCELLED` 只产生待锁内提交的取消请求；`UNSAFE_ORIGIN`、trusted tab closed/mismatch 或 sticky unsafe redirect 只产生安全失败候选。
+
+completion candidate evaluator 必须是无副作用纯函数，最多返回：
+
+```text
+KEEP_USER_LEASE
+CANCEL_REQUESTED
+FAILED_SAFE
+READY_FOR_LOCKED_VERIFY
+```
+
+`READY_FOR_LOCKED_VERIFY` 不是 `VERIFIED` 或 resume authority。它必须携带仅供 Core 使用的 exact `handoffId/sessionId/taskId/leaseEpoch/nonce/tabId/initialDocumentBinding/observedDocumentBinding/origin/expectedStateVersion`、verifier context/state epoch、两次 probe sequence、第二次 receiver acceptance time、phase/basis、Handoff monotonic deadline 与 automatic candidate deadline；除这些 control-plane binding 外不含页面内容或用户 secret。READY candidate 作为整体及其中的 nonce 禁止离开 Core 进入模型、日志、通用 IPC、持久化或外部/跨调用队列，也不得复用；本限制不禁止 19.9 strict authenticated Handoff protocol 为建立 request/signal/sample binding 而在其限定 transport 内传递 nonce。第二份 sample 后，Core coordinator 必须在同一内部调用中立即开始 19.10A 的单次 locked consume；除该有界 lock/receipt 调用外不得把 candidate 交还 event loop 或调度重试。浏览器 sample 无权上报或证明 `leaseConflict=NONE`。candidate evaluator 禁止生成 `HandoffResult`、调用 `transitionHandoffLease`/`beginResume`/`finishResume`、恢复 tab、释放 USER lease、归还 Agent ownership 或标记任何 VERIFIED 状态。
+
 不确定时保持用户租约并显示一键 Done/Cancel，不自动交回。
+
+### 19.10A Locked completion consume / CAS
+
+`READY_FOR_LOCKED_VERIFY` 只能由 Core coordinator 在同一进程、同一内部 control flow 中调用 `evaluateCompletionCandidate()` 后取得。外部 Host、extension、Agent、page、IPC 或普通调用方不得提交、反序列化或重建 READY candidate；对外形似 READY 的对象一律是非可信输入。coordinator 必须先 strict-parse 并复制唯一允许的 candidate 字段，额外字段直接拒绝且不得被序列化、散列或写进错误；随后立即发起一次且仅一次的 task-lock acquisition。禁止使用 retry helper、延迟队列、background job 或在 lock conflict/存储结果不确定后重试同一 candidate；每次 consume 尝试无论结果如何都终结该 candidate 并丢弃引用，只有新的 active probes 可以产生下一 candidate。
+
+单次 task lock 内的检查顺序固定为：
+
+1. 重读 `BrowserTaskState`，要求 `USER_LEASE_ACTIVE + HUMAN`、exact active handoff/session/task/lease epoch、空 pending native action、current Host Profile `VALID`，并要求 `stateVersion` 与 candidate 精确相等且仍可安全递增；
+2. 重读 Handoff gate，要求 `KNOWN + ACTIVE + generation=leaseEpoch`；
+3. 重读本代 `ACTIVE` barrier，逐项核对 persistent handoff/task/scope digest、nonce digest、Host Profile binding、browser-instance binding、activation tab-binding receipt 与 native-action fence；原始 nonce 只在内存中使用常量时间比较；
+4. 使用与 activation 相同的 bounded active ToolCall index 检查 journal 与 state 一致，要求 inspection 为 `KNOWN`，且没有 legacy pending、仍被 state 引用或未终结的 pending call、dirty intent、marker/receipt mutation 或 ceiling overflow；已经完成且 durable state 不再引用的 crash residue 可以保留并由既有安全清理路径退休，不能仅因存在这种 residue 就拒绝 candidate；本地空 journal 不能代替 Host fence；
+5. 在仍持有 task lock 时，通过当前 Host Profile 认证的有界 callback 发出新的 one-shot challenge，取得 fresh completion fence/receipt；
+6. callback 返回后再次读取 receiver monotonic clock，并在任何 state write 前重验全部 binding、consume high-water 和 deadline。
+
+fresh completion fence/receipt 必须由实际认证的 Host verifier/transport 产生，并绑定 strict canonical candidate digest、current Host Profile、同一 browser instance、原 activation tab-binding receipt、handoff/session/task/scope/tab、本代 admission generation、当前 verifier context/state epoch 及组成 candidate 的两次已接受 probe sequence。它还必须由 Host-wide authority 证明：该 `(Host Profile, browser instance, tab)` 的 global exclusive-tab lease 仍由当前 handoff 唯一持有，Agent browser action lane 与 observation lane 均为 `SUSPENDED`，且 fresh completion fence 之前已准入或排队的相关调用全部终结。completion/tab/navigation/redirect/sensitive 状态只能使用 19.9 的固定非敏感枚举，不得携带 sender time。receipt 中自报的 Hash、布尔值、`tabId`、`HELD` 或 `SUSPENDED` 字符串本身不构成 authority；若 Host 不能证明跨 task/session 的 global exclusivity 或所有 action/observation bypass，locked consume 必须失败并保持 Handoff `INACTIVE`。
+
+callback 只可返回 control-plane binding、canonical current origin 与 opaque current document binding，禁止返回完整 URL/path/query、页面文本、DOM、selector、字段值、输入事件、clipboard、Cookie、Token、screenshot 或用户 secret。challenge、完整 receipt 与 candidate 只存在于本次调用内；不得持久化或记录。current receipt 必须精确引用 barrier 中的 activation receipt/browser instance/generation，并证明 tab incarnation 未关闭或复用。current origin 必须仍命中 Host-derived top/redirect allowlist，且 current origin/document/context/state epoch/probe pair 必须与 candidate 精确一致；允许的页面变化若已使 candidate stale，只能保持 Human 并重新采样，不能把“仍在 allowlist”当成完成证明。
+
+所有 expiry/freshness 判断只使用当前进程、当前 monotonic epoch 的 receiver clock。candidate 中的 deadline 必须与 coordinator 保存的原始 runtime deadline 精确相等，不能自行延长；在完成所有异步 callback 和重读之后，最后一次 `now` 必须同时满足 `now <= handoffDeadlineAtMonotonicMs` 与 `now <= automaticCandidateDeadlineAtMonotonicMs`。wall clock、wire `observedAt`、barrier wall-time expiry 或重启后的时间换算不能替代该判断。clock rollback、epoch 变化、非安全整数或 overflow 均失败并保持 Human。
+
+只有上述检查全部成功时，coordinator 才能以 candidate 的 `expectedStateVersion` 执行一次 CAS，并在同一个 `BrowserTaskState` temporary-file `fsync + rename + directory fsync` commit 中同时写入：
+
+```text
+phase = HANDOFF_VERIFYING
+pointerOwner = HUMAN
+activeHandoffId / leaseEpoch = unchanged
+pendingNativeActionIds = []
+currentOrigin = fresh canonical origin
+documentBinding = persistent digest of fresh opaque document binding
+stateVersion = expectedStateVersion + 1
+handoffVerificationMarker = strict digest-only marker
+```
+
+禁止使用独立 sidecar 先后写 marker 与 state。digest-only marker 只包含固定 `authority="FIXTURE_ONLY_NON_AUTHORIZING"`、schema version、lease epoch、domain-separated `candidateDigest/activationAnchorDigest/currentTabReceiptDigest`、verifier context binding Hash、state epoch、first/second probe sequence 以及固定 `basis/phaseSignal` 枚举；不得包含 raw nonce、完整 candidate/receipt、原始 handoff/session/task/document binding、页面内容、secret 或 monotonic timestamp。`candidateDigest` 只对 strict canonical candidate 的已知字段计算，且必须覆盖 nonce、全部 locked/verification binding、basis、phase 与两条 deadline；不得对带额外字段的 unknown object 直接散列。marker 与其 authority 只是一次性 consume/high-water 事实，不是 verification、resume 或 release authority。
+
+同一 verifier context 中，新 pair 的 first sequence 必须严格大于已持久 marker 的 second sequence；相同 candidate digest、相同/重叠 pair、旧 stateVersion、旧 context/channel/monotonic epoch、旧 activation receipt、旧 browser instance 或旧 lease generation 一律终结为 replay/stale，state 不变。不同 context 只有在 fresh authenticated channel/monotonic epoch 与全部 Host binding 重新建立后才可取代 high-water；context identifier 永不复用。该 high-water 是未来 verification-inconclusive retry 的前置合同；当前 foundation slice 不实现 `HANDOFF_VERIFYING → USER_LEASE_ACTIVE` retry，也不得借 marker 自动生成新 candidate。
+
+当前 fixture foundation 还必须以 `handoff/session/task/lease/nonce/tab/initial-document/verifier-context` 的域分离 digest 为键维护最多 256 个进程内 context high-water，并在第一次 lock/receipt 尝试前同步把 second probe sequence 登记为该 context 的 attempted-through；相同或 first sequence 不大于 high-water 的重叠 pair 一律为 replay，即使 caller 改变 basis/phase/deadline 等其它 candidate 字段也不能绕过。同一进程内即使第一次 observer 失败、超时或 lock conflict，也不得再次消费该 pair；只有严格更新的 active probe pair 可重试。达到 context ceiling 后，任何新 context 必须 `FAILED_SAFE`；已登记 context 只可继续严格更高的 pair，禁止淘汰旧项换取新 context。该 map 不持久化且不能解决多进程或重启重放，只是 non-authorizing fixture 的最小防误用措施；生产路径必须以 authenticated one-shot challenge/acceptance ledger 替代，且不能把该 map 当成权限证据。
+
+原子 commit 的 crash truth 只允许两种：rename 前仍是原 `USER_LEASE_ACTIVE` 且没有新 marker；rename 后是 `HANDOFF_VERIFYING + HUMAN + 新 marker`。若 `fsync`、返回或进程终止使 commit 结果不确定，调用方只能重读状态，不能重试 candidate。重启使所有内存 candidate、challenge ledger、receipt 与 monotonic deadline 失效；已提交 marker 只证明 candidate 已消费，重启后必须保持 Human/ACTIVE gate，恢复 UI 并重新建立 Host receipt 与验证，或由 authenticated Cancel 终止，绝不能凭 marker 自动标记 `VERIFIED` 或恢复 Agent。
+
+该 foundation 的输出只允许固定 `KEEP_USER_LEASE | CANCEL_REQUESTED | FAILED_SAFE | FIXTURE_ONLY_HANDOFF_VERIFYING | FIXTURE_ONLY_REPLAY`，每个分支都必须携带固定 `authority=FIXTURE_ONLY_NON_AUTHORIZING` 与 `activation=INACTIVE`，且不得包含 candidate binding、nonce、receipt、origin/document 或自由文本；reason 只能是固定非敏感 enum。它不得生成 `HandoffResult`、更新 lease 为 released、恢复 tab、调用 `beginResume`/`finishResume`、交付 continuation 或归还 Agent ownership。任一 lock conflict、deadline、current-tab mutation、closed/reused tab、unexpected origin、competing lease、Host/barrier/journal/receipt mismatch、存储错误或 crash recovery 都必须保持现有 Human ownership 与 ACTIVE barrier，或进入同等严格的显式 user-lease recovery；相同已提交 marker 的准确 replay 只能返回非授权的 `FIXTURE_ONLY_REPLAY`，不能重复写 state 或推进流程。已激活的安全 lease 不得按普通 Hook fail-open 规则放行 Agent。
+
+当前 runtime locked-consume foundation 只允许 build-fixed `http://127.0.0.1:4173` controlled fixture；其 runtime-only strict receipt 和 marker 的 `authority` 必须固定为 `FIXTURE_ONLY_NON_AUTHORIZING`，公开能力固定报告 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`。receipt 中的 `candidateDigest`、activation anchors、fresh fence/receipt Hash、`exclusiveTabLease=HELD`、双 lane `SUSPENDED`、tab/document/origin、verifier context/epoch/sequence 与 fixed completion/tab/navigation/redirect/sensitive enums 只验证 fixture 结构，不能自证真实 Host authority；receipt 不含 sender time。该 foundation 不得接入 production Hook、extension、Doctor/Profile activation 或真实账户。只有真实 Host verifier、authenticated transport、one-shot challenge/acceptance ledger、Host-wide exclusive-tab lease 与 action/observation completion fence 全部实现并通过当前 Host Profile Gate 后，才可允许其它 origin 或令 Handoff 进入 `ACTIVE`。
 
 ## 19.11 标签页恢复
 
@@ -3911,14 +4257,18 @@ ChatGPT Work lifecycle parity with Codex: UNKNOWN
 
 ## 19.15 Handoff 验收需求
 
-- **REQ-HO-009**：用户必须在真实网页/浏览器 UI 中输入 secret。
+- **REQ-HO-009**：Browser SMH 中的 Password、OTP、Cookie、Passkey、支付字段及其它网页认证 secret 必须由用户在真实网页/浏览器 UI 中输入；macOS API key secure prompt 仅是 `REQ-CRED-*` 限定的正交例外，不属于 Browser Handoff surface。
 - **REQ-HO-010**：支持路径的 `chat_message_required_rate = 0`。
 - **REQ-HO-011**：同一 tab/session 绑定成功率 `>=99.5%`。
 - **REQ-HO-012**：标签页恢复成功率 `>=99.5%`；失败时 tab 不丢失。
 - **REQ-HO-013**：controlled fixtures 的 auto/one-click resume 成功率 `>=95%`。
 - **REQ-HO-014**：user lease 期间已支持路径的 Agent browser action/observation occurrence = 0。
 - **REQ-HO-015**：Handoff activation P95 `<750 ms`，不含用户操作时间。
-- **REQ-HO-016**：任何 secret canary occurrence = 0。
+- **REQ-HO-016**：Browser SMH 与普通 Oxrail 数据流中任何 secret canary occurrence = 0；Credential Channel 只适用 `SEC-21.2B` 的限定 occurrence，不得扩大到 Browser SMH。
+- **REQ-HO-017**：Browser USER lease 激活前必须验证新鲜、Host-minted 且绑定当前 Host Profile、browser instance、同一 `tabId`/session/origin/document、本代 admission generation 与 native-action fence 的 receipt；fence 只能在 barrier 可见且 Host 确认此前已准入或排队的 native Browser calls 全部终结后签发，并在本地 journal 协调后验证。Agent、模型、网页、裸 `tabId` 或仅 journal 清空不能自证该绑定与静默点。
+- **REQ-HO-018**：Handoff admission gate 必须在取得 task-state lock 前持久化 `PREPARING`，并保留单调 generation 的终态 tombstone；Browser Pre 在 lock 外与 lock 内各读取一次，只有两次均为同一 `OPEN` generation 才可进入 native action journal，防止被跟踪调用的并发和 ABA 穿透；任何未能落 journal 的 fail-open 调用仍必须由 `REQ-HO-017` 的 Host native-action fence 覆盖。state 与 barrier 的 activation/cancel 发布必须在同一 task lock 内串行化；过期准备仅可在仍证明 Native ownership 时自动取消，user-held/unknown 必须保持封锁并进入显式恢复。
+- **REQ-HO-019**：Handoff activation 的正常路径必须只扫描带可信 sentinel 的 bounded active ToolCall index，而不是 canonical replay history；目录必须流式迭代并在第 257 个 call 或第 514 个总 entry 前停止信任。pending Pre 必须以 durable mutation intent 覆盖 canonical/index 之间的 crash window，Post journal 与 state coordination 必须共用 per-task lock，active completion 仅可在 durable state 不再引用对应 identity 后回收，并由后续成功 Post/activation 清理可证明已不再引用的 crash 遗留项。任一 ceiling 超限、dirty intent、legacy 无 sentinel、缺失或不一致 marker/receipt 均返回 `UNKNOWN/FAILED_SAFE`，禁止猜测清空；Native Computer Use 仍按基础 Hook fail-open 合同继续。
+- **REQ-HO-020**：`READY_FOR_LOCKED_VERIFY` 只能由 coordinator 内部同步 evaluate 后直接交给一次、不可重试的 task-lock consume。锁内必须按 19.10A 的顺序精确重读 current state、ACTIVE gate/barrier、bounded active journal，并取得 fresh authenticated Host completion fence/receipt，证明同一 Host Profile/browser instance/tab/activation receipt/generation、global exclusive-tab lease、Agent action/observation lanes 均暂停及 current origin/document/context/probe pair；callback 后必须再次通过 receiver-monotonic deadline。成功只能把 digest-only consume marker 与 `HANDOFF_VERIFYING + HUMAN + stateVersion+1` 在同一 CAS/rename 中原子提交；READY candidate 及其 raw nonce 禁止离开 Core 进入模型、日志、通用 IPC 或持久化（19.9 限定 authenticated Handoff transport 内的 protocol nonce 除外），完整 receipt 只可经已认证的有界 Host transport 进入 Core 内存并即用即弃，禁止进入模型、日志或持久化。任何失败、重放、竞争、崩溃或重启都不得 release/resume/result/归还 Agent，并保持 Human ownership 或显式 user-lease recovery。真实 Host verifier/transport/challenge ledger 未完成前，该路径只能是 build-fixed loopback fixture 的 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`。
 
 ---
 
@@ -4044,7 +4394,56 @@ export type SensitiveFieldKind =
 
 发现敏感字段不等于读取其值。
 
-## 20.8 验收需求
+## 20.8 Secure Credential Channel（macOS-first）
+
+当 Agent 需要 API key 供已登记的非浏览器 adapter 使用时，Browser SMH 与 Credential Channel 按以下固定流程组合：
+
+```text
+existing valid Keychain item
+→ issue scoped opaque credentialRef
+→ registered in-enclave adapter consumes it
+
+missing/expired/revoked item
+→ keep the original task pending
+→ acquire a credential-input lease across every proven Agent tool/action/observation path
+→ use Browser SMH to show the exact same real Chrome tab for key creation
+→ only the user performs the generate/reveal/copy action in that real tab
+→ present a separately signed macOS native secure prompt from a fixed template
+→ user pastes/types API_KEY into NSSecureTextField
+→ the same credential-enclave process writes it through Security.framework to Keychain
+→ clear matching system pasteboard content and verify no Agent tool ran during the lease
+→ user closes/obscures the one-time key reveal in the same real tab
+→ a non-secret allowlisted verifier confirms only that the reveal surface is absent
+→ return only stored/ready/cancelled/error plus opaque credentialRef
+→ registered in-enclave adapter sends the bound request
+→ sanitized outcome resumes the original task
+```
+
+这里的“同一标签页”必须是同一 Chrome profile/browser instance 中原有的 tab 对象、navigation history、cookie 与登录态本身；可以把该 tab 暂时移动到或聚焦于真实 Chrome window，但截图、复制页、远程重建、DOM 映射或仅映射输入位置均不构成 Handoff。凭据复用的易用性由 opaque `credentialRef` 提供，而不是把明文作为环境变量或文件交给 Agent。
+
+首版固定边界：
+
+- 仅 `API_KEY`，不接受 Password、OTP、Cookie、Session token、Private key 或支付字段；
+- 独立签名 launcher/updater 必须先由 macOS code-signing API 对 release-pinned Apple Team ID、bundle ID、exact CodeDirectory Hash 与 designated requirement 验证，再以同样方式验证 helper；其 code-signed sealed manifest 必须绑定模板/consumer registry Hash 和单调 registry version。launcher/updater 使用不同 signing identifier 并独占 rollback-floor Keychain item，helper 不可写/降 floor；credential item ACL 绑定当前 exact helper requirement，升级时先撤销旧 generation；Host Profile 只记录结果而不是信任根；
+- UI 的站点名、canonical origin、purpose、consumer、保存时长和授权时长来自可信 registry；Agent 只能提交被 allowlist 接受的 ID/枚举，不能提交用户可见任意文本或构造表单；
+- 用户直接键入时不接触 pasteboard。用户主动粘贴时，secure-field value 只在同一 enclave 进程内短暂存在，不经普通 broker/XPC/Hook；enclave 可且只可为提交后的 hygiene 检查读取系统 pasteboard，并在内容仍与已提交 key 完全相同时立即清空。清理确认前不恢复 Agent；第三方 clipboard manager 不在支持边界内且必须在 UI 中明确告知；
+- `credentialRef` 是无明文的索引与 scope handle，不提供独立授权；helper 必须再次验证 service、provisioningOrigin、purpose、consumerId、grant TTL、generation 与 revocation；
+- 登记 adapter 在 enclave 内完成 secret-bearing TLS request，只向 Agent 返回经过白名单的状态/业务结果；不得返回 request header、credential、可逆派生值或未经清洗的错误；
+- 不提供普通文件、环境变量、argv、stdin/stdout/stderr、shell 或任意 executable/CLI 注入。若 consumer 只能从这些通道读取，首版明确 `UNSUPPORTED`；
+- Keychain item 必须可列出其非敏感 scope metadata、撤销与删除；过期、撤销、helper/registry Hash 改变后旧 grant 立即失效。
+- credential-input lease 从任何 generate/reveal 动作之前开始，到 pasteboard hygiene、Keychain commit、prompt teardown，以及 allowlisted non-secret verifier 证明真实页面的一次性 key reveal surface 已关闭/遮蔽后才结束；除同一 enclave 的固定协议外，期间任何 Agent tool call 必须拒绝。verifier 不能读取 key value；无法证明 surface 已消失或覆盖率无法证明时 Credential Channel 不得 ACTIVE，且 Agent 不恢复。
+- release-pinned launcher/helper signing requirements 与 exact CodeDirectory Hash 的 `credentialTrustRootDigest` 必须作为 literal 进入宿主实际 review/hash 的 Hook definition，并由 Host probe 证明当前 trust 决定确实绑定该 exact definition。修改任一 release pin 必须同时改变该 literal；只有 Host probe 证明宿主重新授权后才能恢复 `ACTIVE`。在此绑定尚未实现或无法证明时，pin 改变只允许令 profile stale/Credential `INACTIVE`，不得承诺宿主一定重新弹出授权。launcher 验证失败、helper/registry/profile 同时替换或旧完整签名 bundle rollback 都不能进入 credential path。
+- fixture consumer 只用于安全验收；公开 capability 至少包含一个签名 registry 中的独立审计真实 consumer。每个 consumer 固定 TLS origin/path/method、credential placement、非敏感参数 schema 与输出白名单，不存在通用 HTTP、shell 或 reveal 通道。
+
+Agent-visible provisioning intent 唯一允许的结构是严格的 `{ schemaVersion: 1, credentialUseId }`；页面没有直接调用权限，任何受页面内容影响而附加的字段也必须拒绝。`credentialUseId` 只能命中一次 sealed allowlist。template、service、provisioning origin、purpose、consumer、TTL、generation 与 registry Hash 全部由可信 registry 和当前 USER Handoff scope 派生，不能由 Agent 覆盖。Core 在 native verifier 可用前只能生成显式 `FIXTURE_ONLY_NON_AUTHORIZING` 的无秘密 ticket；该 ticket 不得启动 helper、授权 Keychain 或令 Credential protection 进入 `ACTIVE`。模型可见结果只允许固定 `READY/STORED/CANCELLED/ERROR` 状态、opaque `credentialRef` 与固定 error code，不允许自由文本错误、Keychain persistent ref 或任何 value/export 字段。
+
+macOS Keychain extended synthetic probe 必须由用户显式调用且不接受任何外部 secret 或动态输入；probe value 与唯一 item locator 由进程内 `SecRandomCopyBytes` 生成，只在同一 native 进程内执行 add/read/compare/delete。stdout 只允许带 schema version、固定 probe 名和固定状态枚举的单行 JSON；仅清理失败可附加非敏感随机 `probeId`，不得输出 OS error、value、persistent ref 或自由文本。该 probe 是 `FIXTURE_ONLY` 的存储/清理诊断，不验证 prompt、scope consumer、same-tab、全 Agent lease、签名或 G15，也不得单独令 Credential protection `ACTIVE`；默认 doctor 不执行它。
+
+普通环境变量或用户私有文件不构成安全通道：Agent 可以读取文件、执行 `env/printenv`、令子进程继承并输出值，且这些值可能进入 shell history、错误、诊断或 crash artifact。类似环境变量的易用性只能由 opaque `credentialRef` 提供，明文不得进入 Agent 可读取的命名空间。
+
+macOS helper 自身明确属于 Oxrail trusted computing base；它不是通过改名规避 `REQ-SEC-001` 的“外部组件”。Windows storage、ACL、UI 与 consumer identity 需要新的 Host Profile 和完整 `GATE-G15` 证据，在此之前为 `UNSUPPORTED`。
+
+## 20.9 验收需求
 
 - **REQ-AUTH-001**：所有 auth/MFA/CAPTCHA fixtures 必须使用安全微接管或明确不支持。
 - **REQ-AUTH-002**：密码/OTP 不得进入 model-visible payload。
@@ -4068,21 +4467,38 @@ Website/page content                 = UNTRUSTED DATA
 Native browser state                 = SENSITIVE
 Oxrail derived state                 = FILTERED
 Model-visible Oxrail payload         = LEAST PRIVILEGE
-Handoff user input                   = SECRET / OPAQUE TO OXRAIL
+Browser Handoff user input           = SECRET / OPAQUE TO ORDINARY OXRAIL
 Extension/broker                     = LOCAL PRIVILEGED COMPONENT
+Credential enclave                   = SECRET-HANDLING OXRAIL TCB (macOS only)
+macOS Keychain                       = DESIGNATED SECRET STORE
+User-controlled pasteboard           = TRANSIENT EXTERNAL INPUT; CLEAR BEFORE RESUME
+Registered in-enclave adapter        = DESIGNATED SCOPED SECRET CONSUMER
+Agent/model/Hook/runtime             = MUST REMAIN SECRET-OPAQUE
 ```
 
 ## 21.2 两级秘密保证
 
-### A. Oxrail Non-propagation Invariant
+### A. Browser Handoff Non-propagation Invariant
 
 Oxrail 必须保证：
 
-> Oxrail-owned code、state、trace、tool output、extension message、IPC、temp file 与 crash artifact 不保存、不传递、不回显任何检测到的 secret value。
+> Browser SMH、普通 Oxrail runtime、state、trace、tool output、extension message、IPC、temp file 与 crash artifact 不保存、不传递、不回显任何检测到的 secret value。
 
-这是项目可独立测试和承诺的要求。
+### B. Credential Channel Confinement Invariant
 
-### B. Host End-to-End Non-observability
+Secure Credential Channel 启用时，Oxrail 必须诚实承认 native credential enclave 会在 secure field 到 Keychain 的最短路径中短暂处理明文。允许 occurrence 只限：
+
+```text
+NSSecureTextField / credential-enclave volatile memory
+user-controlled macOS pasteboard during explicit copy/paste, until enclave-confirmed clearing
+macOS Keychain secret value
+registered in-enclave adapter
+the exact bound service TLS request
+```
+
+除此以外，尤其 model、Agent、Host Hook、普通 runtime/broker/IPC、文件、env、argv、stdio、shell、日志、trace、诊断、crash 与 benchmark evidence，secret occurrence 必须为 0。pasteboard 只因用户显式复制/粘贴成为短暂外部 occurrence；Oxrail 不得把它当存储或读取接口，enclave 只可比较并清除与刚提交 key 完全相同的内容，且在确认清除前不得恢复 Agent。该例外不得扩大为通用 secret broker、reveal API 或任意 consumer 注入。
+
+### C. Host End-to-End Non-observability
 
 > 在 Oxrail Hook/extension 之前，宿主原生 Computer Use、模型、transcript 或其它内部日志是否已经看到 secret。
 
@@ -4102,6 +4518,16 @@ Safe verifier enum        = ALLOW
 ```
 
 若覆盖率不是 100%，不得称 exclusive lock。
+
+### 21.3A Credential-input execution lease
+
+在任何网页 generate/reveal API-key 动作前，Oxrail 必须先取得比 Browser Handoff 更强的 credential-input lease：所有已探测 Agent tool、browser action、browser observation、shell/terminal、screen capture、clipboard access 与语义查询路径一律拒绝，唯一例外是签名 credential enclave 的固定内部协议。该 lease 必须持续到 secure field 清空、Keychain commit 或 cancel、pasteboard hygiene、prompt teardown、一次性 key reveal surface 经非秘密 verifier 证明已关闭/遮蔽，以及 sanitized result 完成；任一未知/bypass path、helper crash、reveal surface 仍可见或 cleanup 失败都保持 fail-closed，不得恢复 Agent 或宣称 Credential protection `ACTIVE`。Native Chrome 页面仍由用户正常操作；这里的 fail-closed 只针对 credential task 与 Agent resume，不得破坏普通 Native Chrome 可用性。
+
+Core 的 fixture-only credential execution gate 只是一份全局保守阻断账本：显式 setup 创建私有 `OPEN` tombstone，之后仅允许代际单调的 `OPEN → PREPARING → ACTIVE → CLEANUP_PENDING → OPEN`，或 `PREPARING → CLEANUP_PENDING → OPEN` abort 路径。缺失已初始化状态、部分初始化、锁存在、损坏、权限异常、快照改变或任何非 `OPEN` 状态均产生 `BLOCK_AGENT_EXECUTION`；TTL 不得自动 reopen。只有已知 `OPEN` 产生 `NO_LEDGER_BLOCK`，它仅表示这份账本未要求阻断，不是执行许可。其 `FIXTURE_ONLY_NON_AUTHORIZING` 状态、binding digest、调用方提供的 quiescence receipt hash 与 cleanup evidence hash 都不是 attestation、授权或 capability evidence，也不得令 doctor/profile 显示 Credential `ACTIVE`。真实 Hook 集成必须在所有 Agent 路径的 admission lock 前后双读并比较完整快照；真实产品恢复 `OPEN` 必须由独立可信 Host/enclave verifier 验证 cleanup evidence，不能只信任该 hash 字段或复用激活 receipt。唯一例外是 `cleanupCredentialFixtureGate()` 可在可证明从未连接 presenter、Keychain、pasteboard、consumer 或 secret 外部效果的 non-product fixture 中只复位本地 ledger；该 `OPEN` 不授权 Agent resume 或任何产品 Credential 行为。
+
+Core 的 fixture-only Credential Tool Fence primitive 使用一个 reserved 全局 scope，把严格的 `sessionId + toolUseId` 在内存中先摘要、再经本机 HMAC 后写入现有 bounded active journal；它拒绝任何额外字段且不接收或持久化 `tool_input`。只有独立 credential fence root 本身不存在时才返回 `BYPASS`；root 已存在但 gate 缺失、未知或损坏时返回 `UNKNOWN`。已知 `OPEN` 的 Pre 在全局 mutex 内复读 gate、清理已完成项、确认包含 legacy COMPLETE marker 在内的物理 active count `< 256`、登记调用并再次比较完整快照；duplicate、超限、变化与异常均不产生正向结果。Post 不依赖 gate 仍为 `OPEN`，必须幂等完成旧调用；PREPARING quiescence 只在 mutex 内前后快照一致且 bounded journal 可证明时返回 `PENDING/QUIESCENT`。所有 gate transition 与 Pre/Post/quiescence 共享该 mutex；被本地 Guard 拒绝或登记后 gate 快照改变的 Pre 仍视为 pending，只有真实 Post 或未来 Host 签发且可认证的 deny-terminal receipt 才能结算，禁止本地伪造终态。`NO_LEDGER_BLOCK_TRACKED` 与 `QUIESCENT` 都只是非授权的本地事实。
+
+OpenAI Host fixture 在 profile、matcher、tool classifier 和完整 Hook input validation 之前，对所有 Hook 可见的 `PreToolUse`/`PostToolUse` 调用上述 fence；该层只提取有界调用身份，不读取 `tool_input` 或 `tool_response`。Credential 仍为 `INACTIVE` 时，macOS bootstrap 不创建或武装独立 fence root，因而普通 Native 路径直接 `BYPASS`。只有显式 fixture 初始化后，非 `OPEN`、已初始化但 `UNKNOWN`、畸形身份与重复 Pre 才固定 deny；仅在已成功取得共享 mutex 且锁内仍确认同一 `OPEN` snapshot 后，journal 满载、损坏或写失败才可原样继续既有 Native 路径并明确 `BYPASSED/INACTIVE`。mutex 获取/释放或锁外异常一律 `UNKNOWN`，禁止与并发 PREPARE 穿透。该降级不能成为 PREPARE、activation 或 G15 证据；当前 execution gate 全部状态仍是非授权 fixture 事实。Post fence 先于其余分支执行，因此 profile/registry drift 或下游 early return 不能漏掉真实 completion。当前 public Hook 合同仍未证明 `PermissionRequest` 的精确安全输出，也不覆盖 hosted/specialized tools、Hook 未启用/未信任/超时/崩溃、多个 plugin root 或所有 Host 内部路径；因此该接线仍为 `FIXTURE_ONLY_NON_AUTHORIZING`，不得启动 secret prompt、通过 G15 或显示 Credential `ACTIVE`。
 
 ## 21.4 Origin Binding
 
@@ -4140,6 +4566,8 @@ no tabCapture/desktopCapture
 no debugger permission for handoff
 ```
 
+macOS credential helper 的 Keychain entitlement、App/bundle identity、code signature、hardened runtime、模板 registry 和 consumer registry 必须单独记录与验证；不得因 Browser Handoff extension 已获授权而隐式获得 Credential Channel 权限。
+
 一般 Observer Bridge 的 host permissions 必须单独 opt-in。
 
 ## 21.6 进程与文件安全
@@ -4153,6 +4581,9 @@ no debugger permission for handoff
 - trace 只存 hash、枚举、计数和经过白名单的短文本；
 - crash reporter 默认不上传 Oxrail state；
 - Hook spill/temp 目录纳入 canary scan 与清理。
+- credential enclave 与登记 adapter 默认禁用 raw request/header/error logging，不把 secret 送入普通 IPC，并禁止生成包含 secret memory 的自动 crash upload；
+- Keychain item、grant 与 `credentialRef` 分别有 generation/TTL/revocation；credential item ACL 绑定当前 exact helper requirement；独立 launcher/updater 独占 rollback floor 并在升级时撤销旧 generation，使旧 helper 或 registry Hash 不能继续消费；
+- `credentialRef` 可以进入 model-visible payload，但不得包含 Keychain persistent reference、secret-derived value 或独立消费 authority。
 
 ## 21.7 Threats
 
@@ -4171,6 +4602,12 @@ no debugger permission for handoff
 -用户在错误 tab 输入 secret；
 -自动恢复过早；
 -恢复 tab 时丢失 pinned/group/session。
+- Agent/页面伪造 credential template、service、purpose 或 consumer；
+- Agent 在 generate/reveal 前观察 key，或在 credential-input lease 中通过非浏览器 tool、shell、screenshot 或 pasteboard path 读取 key；
+- credentialRef replay、错误 origin/consumer 使用、过期/撤销后继续使用；
+- adapter 把 API key 放入 env/file/argv/stdio、错误或响应；
+- helper/code signature/template registry/consumer registry 被替换，或完整旧签名 bundle/registry 被 rollback；
+- 系统 pasteboard 清理失败或第三方 clipboard manager 留存；
 
 ## 21.7A 原生交互安全边界
 
@@ -4189,7 +4626,7 @@ no debugger permission for handoff
 - **REQ-SEC-005**：用户 lease 只能由匹配 handoffId/leaseEpoch 的验证流程释放。
 - **REQ-SEC-006**：未验证 origin 不得自动恢复 Agent。
 - **REQ-SEC-007**：安全组件默认无云遥测。
-- **REQ-SEC-008**：任何 canary occurrence > 0 都是 release fail。
+- **REQ-SEC-008**：除 `SEC-36` 明确列出的 Credential Channel 指定 enclave、用户显式粘贴期间的受控 pasteboard、Keychain 与 bound service occurrence 外，任何 canary occurrence > 0 都是 release fail；Browser SMH 仍无例外。
 - **REQ-SEC-009**：权限扩张必须有 ADR、用户提示与新 SecretLeakBench。
 
 ---
@@ -4278,6 +4715,26 @@ PromptInjectionBench 至少包含：
 ## 23.1 BrowserTaskState
 
 ```ts
+export interface HandoffVerificationMarker {
+  authority: "FIXTURE_ONLY_NON_AUTHORIZING";
+  schemaVersion: 1;
+  leaseEpoch: number;
+  candidateDigest: string;
+  activationAnchorDigest: string;
+  currentTabReceiptDigest: string;
+  verifierContextBindingHash: string;
+  stateEpoch: number;
+  firstProbeSequence: number;
+  secondProbeSequence: number;
+  basis: "DETERMINISTIC" | "HEURISTIC" | "USER_ASSERTED";
+  phaseSignal:
+    | "CHALLENGE_GONE"
+    | "AUTH_MARKER_PRESENT"
+    | "EXPECTED_ROUTE"
+    | "DIALOG_CLOSED"
+    | "MANUAL_DONE";
+}
+
 export interface BrowserTaskState {
   schemaVersion: 3;
   sessionId: string;
@@ -4308,6 +4765,7 @@ export interface BrowserTaskState {
 
   lastObservation?: ObservationDigest;
   lastAction?: ActionDigest;
+  actionSignatureKeyId?: string;
   noProgressCount: number;
   recoveryLevel: number;
   recoveryTransitions: number;
@@ -4321,12 +4779,21 @@ export interface BrowserTaskState {
 
   activeHandoffId?: string;
   leaseEpoch: number;
+  handoffVerificationMarker?: HandoffVerificationMarker;
   pointerOwner: "NATIVE" | "HUMAN" | "NONE";
   targetCacheEpoch: number;
   pendingNativeActionIds: string[];
   stateVersion: number;
 }
 ```
+
+`actionSignatureKeyId` 绑定 `lastAction` 的本机 HMAC key generation。缺失表示可向后读取的 legacy state；只有 `RUNNING + NATIVE`、无 pending native action 的 sanitized state 才可清除旧 repetition baseline 后迁移。已存在但与当前 key 不一致时不得比较或静默重置，Optimization 保持 `BYPASSED`；ownership、origin、stale-target 与 high-impact gate 仍按可独立证明的信号执行。
+
+Runtime schema 必须拒绝矛盾 ownership 组合：`RUNNING` 只能是 Native 且无 active handoff；`USER_LEASE_ACTIVE/HANDOFF_VERIFYING` 必须是 Human + active handoff；`RESTORING_TAB/RESUMING` 必须是 None + active handoff。非 Native ownership 不得保留 pending native action。
+
+`handoffVerificationMarker` 是 BrowserTaskState v3 的 additive、strict、digest-only 字段，只允许出现在 `USER_LEASE_ACTIVE` 或 `HANDOFF_VERIFYING`。19.10A 的所有新 writer 进入 `HANDOFF_VERIFYING` 时必须在同一原子 state commit 中写 marker；markerless `HANDOFF_VERIFYING` 只为读取旧版本 crash state 而保留，必须解释成 `USER_LEASE_RECOVERY_REQUIRED`，不能成为 verification/resume authority。未来 verification-inconclusive path 回到 `USER_LEASE_ACTIVE` 时可以保留 marker 作为同 context 的 consume high-water，但当前 foundation slice 不实现该 retry；其它 phase 出现 marker 必须由 runtime schema 拒绝。marker 的 `authority` 固定为 `FIXTURE_ONLY_NON_AUTHORIZING`，`leaseEpoch` 必须等于 state 的 active lease epoch，probe sequence 严格递增，所有 Hash 必须是严格 64 位小写 SHA-256。
+
+`revision`、`noProgressCount`、`recoveryLevel`、`recoveryTransitions`、`leaseEpoch`、`targetCacheEpoch`、`stateVersion` 以及所有 runtime contract 中的 generation/epoch/sequence/count 都必须是非负或按字段要求为正的 safe integer。任何会使这些值超过 `Number.MAX_SAFE_INTEGER` 的 transition 必须拒绝写入并令相应 Oxrail capability fail closed/进入可表示的 `RECOVERY_REQUIRED`；外层 Hook 仍可按 Native fail-open 合同明确显示 `BYPASSED`，但不得提交不精确状态。禁止 wrap、重置为 0、以浮点精度相等冒充 CAS 成功或复用旧代际。尤其 `stateVersion` 只有在 current 值 `< Number.MAX_SAFE_INTEGER` 且 exact expected version 相等时才可写 `current + 1`。
 
 ## 23.2 ActionDigest
 
@@ -4381,7 +4848,13 @@ export interface HandoffAttempt {
 }
 
 export interface HandoffResult {
+  schemaVersion: 1;
   handoffId: string;
+  sessionId: string;
+  taskId: string;
+  leaseEpoch: number;
+  nonce: string;
+  completionPolicy: CompletionPolicy;
   outcome:
     | "VERIFIED_COMPLETE"
     | "USER_ASSERTED_AND_VERIFIED"
@@ -4391,13 +4864,32 @@ export interface HandoffResult {
     | "TAB_CLOSED"
     | "VERIFICATION_FAILED";
   finalOrigin?: string;
-  phaseSignal?: string;
+  phaseSignal?:
+    | "CHALLENGE_GONE"
+    | "AUTH_MARKER_PRESENT"
+    | "EXPECTED_ROUTE"
+    | "DIALOG_CLOSED"
+    | "MANUAL_DONE";
+  sameTab: boolean;
+  tabRestored: boolean;
+  agentLeaseRestored: boolean;
+  secretObserved: false;
+}
+
+export interface HandoffToolResult {
+  schemaVersion: 1;
+  outcome: HandoffResult["outcome"];
+  phaseSignal?: HandoffResult["phaseSignal"];
   sameTab: boolean;
   tabRestored: boolean;
   agentLeaseRestored: boolean;
   secretObserved: false;
 }
 ```
+
+`HandoffResult` 是 Host 内部的 bound result；只有 strict-validated 后的 `HandoffToolResult` 投影可返回模型，nonce/session/task/origin 等内部绑定不得进入模型结果。成功 outcome 必须带来自接收端独立 observation 的 `finalOrigin`、allowlisted phase signal、`sameTab=true`、`agentLeaseRestored=true`；`VERIFIED_COMPLETE` 的 phase 必须属于当前 request `CompletionPolicy`，`USER_ASSERTED_AND_VERIFIED` 只能对应适用于任意 policy 的 `MANUAL_DONE` fallback 且仍须通过独立 verify，其它 verified success 不能对应 `MANUAL_DONE`。非成功 outcome 不得带 phase signal；`TIMED_OUT/UNSAFE_ORIGIN/TAB_CLOSED/VERIFICATION_FAILED` 必须 `agentLeaseRestored=false`，`TAB_CLOSED` 还必须 `sameTab=false` 且 `tabRestored=false`。`CANCELLED` 只有在可信 cleanup/invalidation 已完成时才可令 `agentLeaseRestored=true`。所有 origin 继续使用上述 canonical production/loopback 规则。Protocol schema 只提供 non-authorizing wire validation，不完成 continuation、completion verification 或 Handoff activation。
+
+首版只为与 runtime 完全等价、无额外交叉 refinement 的 `HandoffToolInput` 生成 portable JSON Schema。`HandoffRequest`、`CompletionSignal`、`HandoffResult` 与 `HandoffToolResult` 必须直接使用 `@oxrail/protocol` runtime Zod schema；在 portable JSON Schema 能表达 canonical origin、binding、policy/source/result 交叉不变量前不得发布对应 artifact，避免宽松 shape validator 被误当成 strict validator。即使未来生成，portable schema 也不得用于 activate、resume 或 release lease。
 
 ## 23.5 Internal event envelope
 
@@ -4438,6 +4930,7 @@ OXRAIL_NO_PROGRESS
 OXRAIL_OBSERVATION_BUDGET
 OXRAIL_HUMAN_BOUNDARY
 OXRAIL_USER_LEASE_ACTIVE
+OXRAIL_CREDENTIAL_FENCE_BLOCKED
 OXRAIL_UNSAFE_ORIGIN
 OXRAIL_VERIFICATION_INCONCLUSIVE
 OXRAIL_RECOVERY_EXHAUSTED
@@ -4502,24 +4995,24 @@ Native Computer Use 继续承担 click/type/navigate/submit。
 
 ```json
 {
-  "type": "MFA_REQUIRED",
-  "reason": "The site requires a one-time verification step.",
-  "completion_policy": "challenge_gone_or_expected_route",
-  "timeout_ms": 300000
+  "schemaVersion": 1,
+  "type": "MFA_REQUIRED"
 }
 ```
 
-Host adapter 自动绑定当前 session/task/tab/origin；模型不得自行提供 `tabId` 或扩大 redirect allowlist。
+Host adapter 独立核对 type，自动绑定当前 session/task/tab/origin/lease/nonce，并从固定 registry 派生 policy、timeout 和本地 UI 文案；模型不得提供自由文本、policy、timeout、`tabId`、origin 或扩大 redirect allowlist。
 
 结果：
 
 ```json
 {
+  "schemaVersion": 1,
   "outcome": "VERIFIED_COMPLETE",
-  "phase_signal": "authentication_complete",
-  "same_tab": true,
-  "tab_restored": true,
-  "secret_observed": false
+  "phaseSignal": "AUTH_MARKER_PRESENT",
+  "sameTab": true,
+  "tabRestored": true,
+  "agentLeaseRestored": true,
+  "secretObserved": false
 }
 ```
 
@@ -4768,7 +5261,7 @@ unavailable/insufficient/unsupported surface
 ## 27.1 默认配置
 
 ```toml
-spec_version = "0.5.0"
+spec_version = "1.0.0"
 mode = "auto"
 require_fresh_host_profile = true
 
@@ -5044,6 +5537,8 @@ contain: strict;
 同时 `tabindex=-1`、`aria-hidden=true`、零布局影响、默认关闭。Release build 的默认值必须为 `allow_runtime_overlay=false`。
 
 Human Handoff 的 Spotlight 应优先使用 Chrome 窗口、extension side panel、宿主 App surface 或浏览器 chrome，不得通过页面内 overlay 伪造登录/OTP 表单。
+
+Secure Credential Channel 的固定 macOS native prompt 是独立 App surface，不注入网页、不代替 Browser SMH，也不接受 Agent/page-defined UI。它只可在 `GATE-G15` 通过后接收 `API_KEY`。
 
 ## 28.6 Control-Critical Metadata
 
@@ -5372,6 +5867,8 @@ Benchmark 分析：
 - 输入录制/重放框架；
 - 通用 CDP write transport。
 
+唯一例外是 SEC-52 的 opt-in Browser Control route：它默认关闭、由使用者显式配置、只服务自有 Chromium 进程，不接管使用者浏览器，也不构成对 Native Computer Use 的替代。
+
 ## 30.4 引入重大依赖的 Gate
 
 必须先创建 ADR，回答：
@@ -5404,6 +5901,7 @@ B2 Native + Skill Policy Only
 B3 Native + Oxrail Guard
 B4 Native + Oxrail Observation Path
 B5 Native + Oxrail Secure Micro-Handoff
+B5C Native + Oxrail Secure Credential Channel (macOS/API_KEY only)
 B6 Full Supported Oxrail
 ```
 
@@ -5575,6 +6073,15 @@ fixture 不使用真实密码、OTP 或第三方账户。
 | `TEST-NIF-021` | ordinary action pass-through | canonical low-level input 无未授权变化 |
 | `TEST-NIF-022` | no-op Oxrail overlay policy | 页面 layout/focus/scroll/hit-test 无变化 |
 | `TEST-NIF-023` | normal-action false block | 全部普通 primitive 均不被 Oxrail 错误阻止 |
+| `TEST-BCTL-001` | opt-in route 未配置时不可达 | 未显式配置 MCP server 时不存在 Browser Control 工具、不启动进程，也不出现 Hook 命中或 Native 替代声明 |
+| `TEST-BCTL-002` | 自有浏览器进程与 profile 隔离 | 路由只驱动自己启动的 Chromium 与自己创建的 profile，不接管使用者浏览器；Native package 不 import CDP 路由 |
+| `TEST-BCTL-003` | 控件编号在重绘后仍可解析 | 重绘后旧编号要么重新解析到正确目标，要么明确报错；不得静默点到错误元素 |
+| `TEST-BCTL-004` | 浏览器早死与空闲回收 | 启动即死亡在毫秒级报错并给出原因；空闲回收不发生在仍在观察时，`state` 如实报告 `pid`/`idleMs`/`closesInMs` |
+| `TEST-BCTL-005` | 读取模式回答且受预算约束 | 长页面上 `query` 必须返回含答案的段落并报告未展示部分（`matched`/`total`）；四种模式都受限 `maxChars`；`query` 缺问题时拒绝，未知模式指名报错；`browser_view` 的行为与编号语义不变 |
+| `TEST-BCTL-006` | 投影与增量一致性 | `changed` 只与同投影同地址的上一次读取比较；首次读取返回整页；导航后重建基线；页面未变时 `ref` 跨读取保持同一编号 |
+| `TEST-BCTL-007` | 写只能落在读取交出的编号上 | 未读取过的编号、以及读取之后页面已导航的编号，都必须被拒绝并说明属于哪一种，且拒绝发生在启动浏览器之前；拒绝不得落成任何一次输入；不提供任何以坐标为入口的写；命中测试被遮挡时报告遮挡者而不是抛出内部错误 |
+
+`TEST-BCTL-*` 不是 Native parity 用例：不得计入 NIF 矩阵，也不得用于支持任何“等价于 Native”的声明；其覆盖对象是 SEC-52 的路由自身合同。
 
 每个用例至少覆盖：
 
@@ -5772,6 +6279,10 @@ success >= Native Tuned - 2pp
 - malicious origin redirect；
 - completion detector ambiguous；
 - Handoff 后 DOM/viewport 大幅改变。
+- existing valid macOS Keychain API key reuse；
+- API key creation in the same authenticated tab → fixed native secure prompt；
+- wrong service/origin/purpose/consumer, expired grant and revoked generation；
+- credential helper/adapter crash, cancel and timeout。
 
 ## 35.2 必测要求
 
@@ -5792,6 +6303,14 @@ success >= Native Tuned - 2pp
 | `TEST-HO-013` | minimal safe re-observation + re-resolve 后才归还 Native |
 | `TEST-HO-014` | crash/timeout/cancel fail closed |
 | `TEST-HO-015` | Handoff resume 通过 `TEST-NIF-017` |
+| `TEST-HO-016` | API key 生成前后保持同一真实 tab/session/history/login state |
+| `TEST-HO-017` | 用户看到完整真实 Chrome/origin，不使用 clone、截图、裁剪或位置映射 |
+| `TEST-HO-018` | native secure prompt 完成后原 pending task 自动继续且只返回 opaque ref/status |
+| `TEST-HO-019` | 已有 Keychain credential 可无聊天、无终端秘密输入复用 |
+| `TEST-HO-020` | credential helper crash/cancel/timeout 不丢 tab、不泄漏且不错误恢复 |
+| `TEST-HO-021` | 在任何 generate/reveal 动作前取得 credential-input lease，期间全部 Agent tool/action/observation path 为 0 |
+| `TEST-HO-022` | pasteboard hygiene、Keychain commit/cancel、prompt teardown 与真实页 one-time key reveal surface 消失验证完成前不恢复 Agent |
+| `TEST-HO-023` | READY candidate 只能在单次 task lock 内消费；fresh receipt、state/gate/barrier/journal 复验与 marker CAS 必须原子成立，重放、竞争、失败或崩溃保持 Human ownership且不 resume/release/result |
 
 ## 35.3 指标与 Gate
 
@@ -5806,7 +6325,15 @@ chat_continue_required = 0 on supported path
 browser_reopen_required = 0
 Agent action/observation during lease = 0
 post-handoff stale target execution = 0
-secret occurrence = 0
+Browser SMH secret occurrence = 0
+Credential Channel secret occurrence outside designated enclave/Keychain/bound TLS service = 0
+same_tab_session_continuity for credential provisioning = 100%
+chat_or_terminal_secret_entry = 0
+wrong_scope_credential_use = 0
+generic_secret_export_success = 0
+credential_task_success_rate reported separately
+time_to_secure_prompt_ready P95 reported excluding user input time
+resume_after_credential_submit P95 reported separately
 ```
 
 用户实际输入时间不计入系统 latency。
@@ -5827,6 +6354,7 @@ PASSWORD_CANARY = oxrail_pw_7af91
 OTP_CANARY      = 831924
 COOKIE_CANARY   = oxrail_cookie_382k
 TOKEN_CANARY    = oxrail_token_91zz
+API_KEY_CANARY  = oxrail_api_key_6m2q
 CARD_CANARY     = 4111111111111111_fixture_only
 ```
 
@@ -5844,6 +6372,11 @@ CARD_CANARY     = 4111111111111111_fixture_only
 - exception、crash dump、diagnostics bundle；
 - source map/debug dump；
 - screenshot/frame cache（默认不存）。
+- credential helper secure-field boundary、ordinary IPC/XPC 与 Unified Log；
+- process environment/argv、shell history 与普通 local files；
+- credential adapter request construction、sanitized response/error；
+- Accessibility tree 与 pasteboard API static scan；除 enclave 内精确 compare-and-clear 外无 pasteboard 读取/导出；
+- Keychain ACL、scope metadata、expiry/revocation and cleanup（不得导出 `kSecValueData` 到 evidence）。
 
 ## 36.3 恶意页面
 
@@ -5851,15 +6384,45 @@ CARD_CANARY     = 4111111111111111_fixture_only
 
 ## 36.4 两级判定
 
-- `Oxrail-owned non-propagation`：Oxrail 自己控制的数据流 canary 必须为 0；
+- `Browser Handoff non-propagation`：Browser SMH 与普通 Oxrail 数据流 canary 必须为 0；
+- `Credential Channel confinement`：canary 只允许存在于指定 secure field/enclave、用户显式 paste 到清除确认之间的系统 pasteboard、Keychain secret value、登记 adapter 与绑定 TLS service；所有 Agent/model/Hook/普通 runtime 和导出面必须为 0；
 - `Host end-to-end non-observability`：只有 HostRealityBench 能观察并证明所有相关路径时才允许声明。
+
+Credential fixture 由目标服务验证 canary 并只返回布尔成功状态；仓库、报告和 evidence 不保存 secret 派生 hash 或导出的 Keychain value。用户主动 paste 只授权 credential enclave 在提交后比较当前 pasteboard 是否仍等于刚提交 key 并立即清空；不得通过该权限导出、记录或通用读取 clipboard。
+
+必测安全项：
+
+| Test ID | 要求 |
+|---|---|
+| `TEST-SEC-111` | model、Agent、Hook、普通 runtime、日志与 evidence 中 API key occurrence = 0 |
+| `TEST-SEC-112` | file/env/argv/stdin/stdout/stderr/shell generic export 全部不可用 |
+| `TEST-SEC-113` | 错误 service/origin/purpose/consumer、ref replay 被拒绝 |
+| `TEST-SEC-114` | grant TTL、Keychain item expiry、revocation 与 generation rotation 生效 |
+| `TEST-SEC-115` | 固定模板 provenance、Accessibility、clipboard API、adapter error 与 crash 泄漏检查通过 |
+| `TEST-SEC-116` | 错误 launcher/helper Team ID、exact CodeDirectory Hash、designated requirement，替换 binary/manifest/registry 与完整签名 registry rollback 全部拒绝 |
+| `TEST-SEC-117` | 默认 doctor 不写 Keychain/不触发 UI；显式 extended probe 使用唯一临时 item 并在成功/失败路径清理 |
+| `TEST-SEC-118` | paste 后匹配 pasteboard 在 Agent resume 前清空；清理失败或 clipboard manager 场景保持 fail-closed |
+| `TEST-SEC-119` | fixture-only profile 不能 ACTIVE；至少一个 audited real consumer 的 origin/path/method/schema/output binding 通过真实服务 probe |
+| `TEST-SEC-120` | INACTIVE bootstrap 不武装 fence；显式 fixture root 下所有 Hook 可见 Pre/Post 在 profile/classifier 前共享 PREPARE mutex；非 OPEN、UNKNOWN 与畸形身份拒绝，OPEN journal 故障则 Native BYPASSED；只有真实 Post 结算，原始身份和 payload 不持久化，未覆盖 Host 路径使 Credential 保持 INACTIVE |
+| `TEST-SEC-121` | non-product macOS enclave 只能从 embedded registry 构造一个未展示的 NSSecureTextField surface，并绑定完整 reference scope；未知 ID 拒绝，submit/cancel/错误均清空 field，test sink 只比较且不保留传入的 secret Data 副本；target-wide tripwire 防止加入 presenter、Keychain 或通用 secret 通道，production 保持 INACTIVE |
+| `TEST-SEC-122` | 只有 locked coordinator 在深拷贝调用方输入并严格复读当前 Human-owned ACTIVE state/gate/barrier、Host binding 与 physical journal count 为零后才能 mint v2 opaque-anchor fixture ticket；裸 ACTIVE lease、旧 v1 ticket、scope/Host mismatch、browser/fence/receipt 缺失或畸形、非 ACTIVE gate、verification marker、非空或 UNKNOWN journal 及损坏状态均拒绝且不改写任务状态；票据不携带 raw control-plane identity 并保持 INACTIVE，格式合法的本地 binding 替换只能改变非授权 anchor，不能充当 Host verification |
+| `TEST-SEC-123` | Core 与 macOS Swift 消费同一 v2 golden ticket，ticketId 覆盖完整 registry entry/handoff projection/issuedAt；native checkpoint 只接受有界 strict shape、完整 embedded registry scope 与有效时间，重算 ticketId 后的 scope/时间负例、未承诺 drift、畸形/超限输入均拒绝；固定 cross-language promptContextHash 且输出不含 ticketId/anchor/raw control identity，target 默认 source path 与无 presenter/Keychain/通用 secret channel tripwire 通过，结果固定 NOT_AUTHORIZED/UNVERIFIED/NOT_PRESENTED/INACTIVE |
+| `TEST-SEC-124` | fixture-only Host suspension observer 以两次 global credential mutex → Handoff task lock 的 exact snapshot 夹住锁外 bounded wire observer；要求 PREPARING operation、当前 Human-owned ACTIVE barrier、严格 ticket ID、空 Handoff/global journal、receiver deadline、wall clock 不回退与前后状态不变；同一 PREPARING 未漂移时新 Pre 阻断，callback 内外部 cleanup→OPEN 可让 native Pre 通过但 final 必须拒绝，fixture 不声明连续排他；strict receipt 精确绑定 one-shot challenge、prompt/Handoff/Host/browser/gate/fence/coverage/verifier context，全部 Agent lane suspended 且 enclave-only，throw/timeout/late/malformed/非 wire 类型/binding drift/lane drift/replay 与 prompt/raw-control Hash alias 均拒绝；query/result 不携带 raw control identity，gate 不转 ACTIVE，输出固定 UNVERIFIED/INACTIVE |
+| `TEST-SEC-125` | `prepareCredentialInputAttempt()` 在 global credential mutex → Handoff task lock → gate file lock 内复核 current Human-owned Handoff，并在取得或恢复 gate file lock 后把 v2 fixture ticket mint 与 `OPEN → PREPARING` 合成一次线性化提交；Pre-first 调用保留 pending 并由真实 Post 排空，prepare-first 后续 Pre 阻断；未提交且所有锁安全释放的 failure 保持 durable OPEN，提交或锁状态不确定时按 PREPARING/UNKNOWN fail-closed；严格 top-level/Host/lease/Hash 输入、结果与 public barrel 均不泄露 secret/raw control identity 或内部 locked helper，输出固定 non-authorizing/INACTIVE且不声明 credential-input lease、Host suspension、UI/Keychain/consumer 或 G15 |
+| `TEST-SEC-126` | `commitPreparedCredentialFixtureGate()` 在 bounded wire observer 后于同一 global credential mutex → Handoff task lock → gate file lock 临界区完成 exact final snapshot 与 `PREPARING → ACTIVE`；dead gate lock 可恢复，callback cleanup→OPEN 或 cleanup→新 generation PREPARING 的 ABA、snapshot/binding/replay/deadline/clock 漂移均拒绝且不覆盖当前 gate，pre-write failure 保持 PREPARING/OPEN、post-write uncertainty 保持 ACTIVE/UNKNOWN；成功 receipt digest 与 gate 二次 digest 精确可重算，Pre 继续阻断，Handoff 不变，query/result/gate 不泄露 secret/raw control identity；raw transition/event/locked helper 不进 public barrel，结果固定 NOT_AUTHORIZED/NOT_ESTABLISHED/UNVERIFIED/INACTIVE，且在 authenticated Host/enclave cleanup 与 G15 存在前禁止产品接线 |
+| `TEST-SEC-127` | `cleanupCredentialFixtureGate()` 只在可证明从未连接 presenter/Keychain/pasteboard/consumer/secret 外部效果的 non-product fixture 中允许无可信 cleanup verifier 的本地 ledger reset；global credential mutex → gate file lock 内精确复读 binding/generation/state，清扫 durable completed markers 并等待 pending 调用的真实 Post，`PREPARING/ACTIVE/CLEANUP_PENDING` 只写匹配 operation/generation/outcome 的精确 tombstone；同代 replay 幂等，stale binding、generation ABA、snapshot drift、journal/lock/clock 不确定均 fail safe 且不覆盖新状态，异常后只读确认 exact tombstone 才可报告 `OPEN`；结果固定 external cleanup 未验证、Agent resume/authorization 为 NOT_AUTHORIZED、Credential 为 INACTIVE，product adapter 保持断开且真实恢复仍需 authenticated Host/enclave cleanup 与 G15 |
 
 ## 36.5 Gate
 
 ```text
-canary occurrence in any Oxrail-owned surface = 0
+Browser SMH and ordinary Oxrail canary occurrence = 0
+Credential Channel occurrence outside designated enclave/controlled pasteboard window/Keychain/bound TLS service = 0
+credential occurrence visible/readable by model or Agent = 0
+unauthorized credential consumption or generic export = 0
 Agent browser observation during user lease = 0
 Agent browser action during user lease = 0
+Agent tool/action/observation during credential-input lease = 0
+matching pasteboard content at Agent resume = 0
 unauthorized origin resume = 0
 ```
 
@@ -5946,7 +6509,7 @@ N4 N3 + handoff resume
   "run_id": "r_...",
   "task_id": "nif-001",
   "variant": "native-plus-oxrail-pass-through",
-  "spec_version": "0.5.0",
+  "spec_version": "1.0.0",
   "work_package_ids": ["WP-NIF-002"],
   "host_profile_id": "hp_...",
   "host": {
@@ -6007,7 +6570,7 @@ N4 N3 + handoff resume
   "work_package": "WP-NIF-002",
   "status": "IN_REVIEW",
   "commit": "...",
-  "spec_version": "0.5.0",
+  "spec_version": "1.0.0",
   "host_profiles": ["hp_..."],
   "commands": ["pnpm bench:nif --profile hp_..."],
   "test_results": ["results/native-interaction.json"],
@@ -6486,6 +7049,12 @@ Kill Criteria 是强制决策，不是“值得关注”的风险描述。触发
 | `KILL-K26` | Host update 使 Profile stale，而运行仍继续用旧 enforcement claim | 立即禁用 affected mode，修复 Doctor/更新机制 |
 | `KILL-K27` | README 性能/安全数字无法从发布 evidence 重算 | 阻断发布并撤回数字 |
 | `KILL-K28` | Work Package 标 ACCEPTED 但缺少 hash、命令、环境或 reviewer | 降回 IN_REVIEW；里程碑 Gate 不计入 |
+| `KILL-K29` | API key 可被模型、Agent、Hook、普通 runtime、file/env/argv/stdio/shell 或非指定 artifact 读取 | Release fail；禁用 Credential Channel，撤销/轮换 fixture credential 并修复边界 |
+| `KILL-K30` | Agent、网页或页面内容能够构造/篡改 credential prompt、用户可见字段或可信 scope | 杀死该模板/请求路径；只保留固定签名 registry |
+| `KILL-K31` | 错误 service/origin/purpose/consumer、过期、撤销或旧 generation 的 credentialRef 仍可消费 | Release fail；撤销受影响 grants/items，Credential Channel 保持 INACTIVE |
+| `KILL-K32` | Agent 在 credential-input lease 生效前触发/观察 API key generate/reveal，lease 中任一 Agent path 可运行，或 key reveal surface 仍可见时恢复 Agent | Release fail；禁用 Credential Channel；该 Host 不得声称安全输入 |
+| `KILL-K33` | 错误 signer/designated requirement、替换或 rollback registry 被接受，或匹配 pasteboard 内容在 Agent resume 时仍存在 | Release fail；禁用 helper、撤销 grants/items，并保持 Credential Channel INACTIVE |
+| `KILL-K34` | Browser Control route 未显式启用即可达，或被报告为 Hook-visible、Guard 中介或与 Native Computer Use 等价 | 杀死该路由的相应声明；未启用却可达时整条路由下线，直到 GATE-G16 逐项证明 |
 
 ## 42.1 Pivot 决策
 
@@ -6780,7 +7349,7 @@ install plugin
 
 ## 47.2 不应擅自修改的定位
 
-除非正式触发 Pivot ADR，不得把 Oxrail 改成 Browser Agent、Playwright wrapper、CDP writer、remote browser、input replay system 或 secret form proxy。
+除非正式触发 Pivot ADR，不得把 Oxrail 改成 Browser Agent、Playwright wrapper、CDP writer、remote browser、input replay system 或 secret form proxy。SEC-52 的 opt-in Browser Control route 是独立、默认关闭、可整体删除的附加 surface，不改变本节的定位：它不接管 Native 调用，也不得被描述成 Oxrail 的核心执行路径。
 
 ## 47.3 审阅输出格式
 
@@ -7022,7 +7591,8 @@ BLOCKED / REJECTED / KILLED may branch from any non-ACCEPTED state
 | [`WP-CACHE-003`](#wp-cache-003) | Recipe validation, invalidation and self-healing boundary | P0 | `PLANNED` |
 | [`WP-CACHE-004`](#wp-cache-004) | Opt-in persistent cache privacy and controls | P1 | `PLANNED` |
 | [`WP-CACHE-005`](#wp-cache-005) | Workflow-cache benchmark and go/no-go | P0 | `PLANNED` |
-| [`WP-RLS-060`](#wp-rls-060) | V0.6 Workflow Cache gate | P0 | `PLANNED` |
+| [`WP-CRED-001`](#wp-cred-001) | macOS Keychain Credential Channel vertical slice | P0 | `PLANNED` |
+| [`WP-RLS-060`](#wp-rls-060) | V0.6 Workflow Cache and macOS Credential Channel gate | P0 | `PLANNED` |
 
 ### V0.7
 
@@ -7070,6 +7640,9 @@ BLOCKED / REJECTED / KILLED may branch from any non-ACCEPTED state
 | [`WP-V1-004`](#wp-v1-004) | Final documentation, limitations and release notes | P1 | `PLANNED` |
 | [`WP-V1-005`](#wp-v1-005) | Stable publish and rollback readiness | P0 | `PLANNED` |
 | [`WP-V1-006`](#wp-v1-006) | Post-release drift and incident monitoring | P0 | `PLANNED` |
+| [`WP-BCTL-001`](#wp-bctl-001) | Opt-in Browser Control route (MCP / CDP) | P2 | `IN_PROGRESS` |
+| [`WP-BCTL-002`](#wp-bctl-002) | Context-efficient Browser reads (`browser_read`) | P1 | `IN_PROGRESS` |
+| [`WP-BCTL-003`](#wp-bctl-003) | Writes addressed by a read (`ref`-only, no coordinates) | P1 | `IN_PROGRESS` |
 | [`WP-RLS-100`](#wp-rls-100) | V1.0 final acceptance | P0 | `PLANNED` |
 
 ## 49.5 工作包卡片
@@ -7263,7 +7836,7 @@ Create the minimal repository skeleton without committing to unproven Host capab
 **验收**
 
 - [ ] Install, lint, typecheck and empty test suites pass.
-- [ ] Production packages do not depend on Playwright/CDP write APIs.
+- [ ] Production packages do not depend on Playwright/CDP write APIs on the Native route. The opt-in Browser Control package is the only CDP owner and stays unreachable unless a host explicitly configures its MCP server (SEC-52).
 - [ ] Handoff and Observer extensions are separate capability modules.
 
 **测试 / 证据**
@@ -7678,7 +8251,7 @@ Test nested promise semantics, specialized bypasses, disabled hooks and managed-
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-HOST-004`, `WP-HOST-005`, `WP-HOST-006`, `WP-HOST-007` |
-| Related | `REQ-HOST-001`, `REQ-HOST-005`, `REQ-HOST-007`–`REQ-HOST-012`, `SEC-09`, `SEC-10` |
+| Related | `REQ-HOST-001`, `REQ-HOST-005`, `REQ-HOST-007`–`REQ-HOST-013`, `SEC-09`, `SEC-10` |
 
 **目标**
 
@@ -7692,10 +8265,12 @@ Generate an evidence-backed profile, present capabilities/limitations and requir
 - profile freshness/invalidator
 - acceptance record
 - setup lifecycle state and passive first-call evidence
+- HostProfile v5 external tool-registry/input-schema pins and Credential Channel fields
 
 **验收**
 
 - [ ] Profile key includes all required versions/routes.
+- [ ] Tool registry/input schema pins come from external Host probe/evidence, never self-validation.
 - [ ] Default doctor checks the complete setup matrix without issuing a real Browser action.
 - [ ] Doctor uses a harmless synthetic probe when supported; otherwise waits for passive first-call verification.
 - [ ] Passive first call records the route while preserving native input/result and side effects exactly once.
@@ -7703,6 +8278,7 @@ Generate an evidence-backed profile, present capabilities/limitations and requir
 - [ ] Mode, NIF, result contract, handoff and forbidden claims are shown.
 - [ ] Stale/drifted/untrusted profiles disable affected Oxrail capabilities but keep Native Computer Use available.
 - [ ] Safety/Handoff inactive state and reasons are always visible.
+- [ ] Credential protection is separately ACTIVE/INACTIVE with helper/template/consumer/Keychain/scope probe reasons.
 - [ ] User acceptance is not requested every task unless capability changes.
 
 **测试 / 证据**
@@ -9004,7 +9580,7 @@ Accept bounded, honest recovery behavior and its claim wording.
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-RLS-030`, `WP-FND-002` |
-| Related | `REQ-HO-001`, `REQ-HO-003`, `REQ-NIF-008`, `SEC-19` |
+| Related | `REQ-HO-001`, `REQ-HO-003`, `REQ-HO-017`, `REQ-HO-018`, `REQ-HO-019`, `REQ-HO-020`, `REQ-NIF-008`, `SEC-19` |
 
 **目标**
 
@@ -9014,6 +9590,9 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 
 - lease state machine
 - lease epoch/nonce
+- durable admission generation/tombstone
+- exact ToolCall journal reconciliation
+- bounded active ToolCall index with crash intent/recovery
 - all-route deny hooks
 - crash/timeout cleanup
 
@@ -9022,6 +9601,9 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 - [ ] During USER_LEASE_ACTIVE all known Agent browser action/observation is denied.
 - [ ] Oxrail never becomes pointer owner.
 - [ ] Illegal/late/replayed events fail closed.
+- [ ] A stale Pre cannot cross a completed prepare/terminal generation (ABA).
+- [ ] USER lease activation requires a fresh Host-minted same-tab receipt.
+- [ ] Steady-state activation scans only bounded active calls; dirty, legacy, corrupt, or over-ceiling indexes fail safely.
 - [ ] Conversation state remains alive.
 
 **测试 / 证据**
@@ -9030,6 +9612,7 @@ Transfer browser ownership Native→Human→None→Native while keeping the conv
 - HR-21
 - TEST-HO-003
 - TEST-HO-004
+- TEST-HO-023
 
 **阻断 / Kill**
 
@@ -9176,7 +9759,7 @@ Keep the original Agent operation pending and resolve it when Handoff verificati
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-HO-001`, `WP-HO-004`, `WP-SEC-000` |
-| Related | `REQ-HO-008`, `SEC-19`, `SEC-21` |
+| Related | `REQ-HO-008`, `REQ-HO-020`, `SEC-19`, `SEC-21` |
 
 **目标**
 
@@ -9200,6 +9783,7 @@ Detect completion using challenge disappearance, safe route/phase markers and or
 
 - HR-22
 - TEST-HO-007
+- TEST-HO-023
 - SecretLeakBench Handoff subset
 
 **阻断 / Kill**
@@ -9218,7 +9802,7 @@ Detect completion using challenge disappearance, safe route/phase markers and or
 | Priority | `P0` |
 | Status | `PLANNED` |
 | Depends | `WP-HO-004`, `WP-HO-005` |
-| Related | `REQ-HO-005`, `REQ-HO-006` |
+| Related | `REQ-HO-005`, `REQ-HO-006`, `REQ-HO-020` |
 
 **目标**
 
@@ -9240,8 +9824,10 @@ Resolve the pending continuation automatically; use a Spotlight-local Done butto
 
 **测试 / 证据**
 
+- TEST-HO-006
 - TEST-HO-009
 - TEST-HO-010
+- TEST-HO-023
 - HandoffBench resume cases
 
 **阻断 / Kill**
@@ -9578,7 +10164,7 @@ Ensure page content cannot alter policy, request secrets, forge Handoff state or
 - [ ] Page instructions never modify Host Profile/permissions/lease.
 - [ ] Hidden/aria content retains data-only trust.
 - [ ] Forged Done/verified signal fails.
-- [ ] No secret prompt reaches user via Oxrail.
+- [ ] No page/Agent-defined or Browser-Handoff secret prompt reaches the user via Oxrail; only the fixed signed macOS `API_KEY` prompt governed by `REQ-CRED-*` is permitted.
 
 **测试 / 证据**
 
@@ -10008,8 +10594,8 @@ Measure first vs repeated runs and decide whether persistent caching deserves re
 
 ---
 
-<a id="wp-rls-060"></a>
-### WP-RLS-060 — V0.6 Workflow Cache gate
+<a id="wp-cred-001"></a>
+### WP-CRED-001 — macOS Keychain Credential Channel vertical slice
 <!-- wp-meta: MILESTONE=V0.6 PRIORITY=P0 STATUS=PLANNED -->
 
 | 字段 | 值 |
@@ -10017,18 +10603,85 @@ Measure first vs repeated runs and decide whether persistent caching deserves re
 | Milestone | `V0.6` |
 | Priority | `P0` |
 | Status | `PLANNED` |
-| Depends | `WP-CACHE-005`, `WP-NIF-005` |
+| Depends | `WP-RLS-050`, `WP-HOST-008`, `WP-HO-004` |
+| Related | `REQ-CRED-001`, `REQ-CRED-002`, `REQ-CRED-003`, `REQ-CRED-004`, `REQ-CRED-005`, `REQ-CRED-006`, `REQ-CRED-007`, `REQ-CRED-008`, `REQ-CRED-009`, `REQ-CRED-010`, `REQ-CRED-011`, `REQ-CRED-012`, `REQ-CRED-013`, `REQ-HOST-013`, `GATE-G15`, `SEC-20`, `SEC-21`, `SEC-35`, `SEC-36` |
+
+**目标**
+
+Prove one narrow macOS API-key path from the exact authenticated Chrome tab through a fixed native secure prompt and Keychain to one registered in-enclave fixture adapter, without exposing plaintext to the Agent/model.
+
+**产物**
+
+- signed macOS native credential helper with one fixed `API_KEY` template
+- Keychain save/reuse/revoke path
+- scoped opaque credentialRef protocol
+- one registered in-enclave HTTPS fixture adapter
+- at least one independently audited registered real-service consumer
+- release-pinned independent launcher/helper signing requirements, sealed registry manifest and launcher-owned rollback floor
+- credential-input lease and pasteboard hygiene path
+- HostProfile v5 and doctor capability evidence
+
+**验收**
+
+- [ ] API key creation retains the exact `tabId`/session/history/login state and full Chrome origin UI.
+- [ ] Credential-input lease is active before any generate/reveal action and blocks every Agent tool/action/observation path until safe resume.
+- [ ] The one-time key reveal surface in the real tab is closed/obscured and verified without reading its value before Agent resume.
+- [ ] Agent/page cannot define or alter secure prompt fields, labels, instructions or scope.
+- [ ] Only opaque credentialRef/status reaches Agent/model/Hook; no reveal/export API exists.
+- [ ] service/origin/purpose/consumer/TTL/generation/revocation bindings reject every mismatch and replay.
+- [ ] File/env/argv/stdin/stdout/stderr/shell and arbitrary executable/CLI injection are unavailable.
+- [ ] macOS rejects wrong launcher/helper Team ID, exact CodeDirectory Hash or designated requirement, binary/registry replacement and full signed-bundle rollback.
+- [ ] Matching pasteboard content is cleared before resume; cleanup failure remains fail-closed and third-party clipboard managers are explicitly unsupported.
+- [ ] Existing Keychain item reuse, user revoke/delete, expiry and helper/registry rotation work.
+- [ ] Default doctor is read-only; explicit extended probe cleans its unique temporary Keychain item on success and failure.
+- [ ] Fixture-only capability is marked experimental/inactive; one audited real consumer passes its bound live-service probe before public activation.
+- [ ] Doctor reports Credential protection `ACTIVE` only after `GATE-G15` and current evidence pass; every other state is explicit `INACTIVE`.
+- [ ] `TEST-HO-016`–`022` and `TEST-SEC-111`–`127` pass with sanitized evidence.
+
+**测试 / 证据**
+
+- HandoffBench Credential Channel subset
+- SecretLeakBench Credential Channel subset
+- TEST-SEC-120 Host wildcard credential-fence integration
+- TEST-SEC-121 inert native credential-enclave boundary
+- TEST-SEC-122 locked credential Handoff-anchor admission
+- TEST-SEC-123 Core-to-macOS presentation checkpoint
+- TEST-SEC-124 fixture Host suspension receipt observation
+- TEST-SEC-125 atomic fixture credential-input preparation
+- TEST-SEC-126 atomic final fixture-gate commit
+- TEST-SEC-127 fixture-local credential-gate cleanup recovery
+- HostProfile v5 contract and doctor probes
+- Full BENCH-NIF handoff subset
+
+**阻断 / Kill**
+
+- `KILL-K29`/`KILL-K30`/`KILL-K31` on any leak, untrusted UI or scope escape.
+- Password/OTP popup、Private key、Windows、任意 CLI、普通 env/file 注入与第三方 clipboard manager 支持不在首版范围；需要时另开 WP 与安全 Gate。
+
+---
+
+<a id="wp-rls-060"></a>
+### WP-RLS-060 — V0.6 Workflow Cache and macOS Credential Channel gate
+<!-- wp-meta: MILESTONE=V0.6 PRIORITY=P0 STATUS=PLANNED -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V0.6` |
+| Priority | `P0` |
+| Status | `PLANNED` |
+| Depends | `WP-CACHE-005`, `WP-CRED-001`, `WP-NIF-005` |
 | Related | `SEC-39`, `SEC-40` |
 
 **目标**
 
-Release only semantic, validated caching that preserves Native execution and privacy.
+Release only semantic, validated caching and a scoped macOS Credential Channel that preserve Native execution and privacy.
 
 **产物**
 
 - V0.6 report
 - cache scope/controls
 - evidence-backed claim
+- credential capability table and sanitized G15 evidence
 
 **验收**
 
@@ -10036,16 +10689,28 @@ Release only semantic, validated caching that preserves Native execution and pri
 - [ ] Persistent mode remains opt-in.
 - [ ] No coordinate/input replay.
 - [ ] NIF/Secret pass.
+- [ ] Credential Channel is macOS-only, API_KEY-only and passes `GATE-G15`; Windows remains `UNSUPPORTED`.
+- [ ] Public Credential capability includes an audited real-service consumer; fixture-only builds remain `EXPERIMENTAL/INACTIVE`.
+- [ ] Any unavailable or stale credential prerequisite displays `INACTIVE` without affecting Native Chrome.
 
 **测试 / 证据**
 
 - Cache benchmark
 - BENCH-NIF
 - SecretLeakBench
+- HandoffBench Credential Channel subset
+- TEST-SEC-120 Host wildcard credential-fence integration
+- TEST-SEC-121 inert native credential-enclave boundary
+- TEST-SEC-122 locked credential Handoff-anchor admission
+- TEST-SEC-123 Core-to-macOS presentation checkpoint
+- TEST-SEC-124 fixture Host suspension receipt observation
+- TEST-SEC-125 atomic fixture credential-input preparation
+- TEST-SEC-126 atomic final fixture-gate commit
+- TEST-SEC-127 fixture-local credential-gate cleanup recovery
 
 **阻断 / Kill**
 
-- Can release V0.6 without persistent cache if no-go ADR says so.
+- Can release V0.6 without persistent cache if no-go ADR says so; cannot advertise Credential Channel unless `WP-CRED-001` is ACCEPTED.
 
 ---
 
@@ -10982,7 +11647,7 @@ Prove every KILL condition was checked and the final architecture remains a thin
 **验收**
 
 - [ ] No active KILL trigger.
-- [ ] No production mouse/keyboard/CDP writer.
+- [ ] No production mouse/keyboard/CDP writer on the Native route. The opt-in Browser Control route is governed by SEC-52, is never the Native executor, and is not counted as Native capability (KILL-K34).
 - [ ] Observer/Handoff permissions match approved scope.
 - [ ] Public positioning matches actual mode.
 
@@ -11204,6 +11869,161 @@ Make the final Go/No-Go decision for the first stable release.
 
 ---
 
+<a id="wp-bctl-001"></a>
+### WP-BCTL-001 — Opt-in Browser Control route (MCP / CDP)
+<!-- wp-meta: MILESTONE=V1.0 PRIORITY=P2 STATUS=IN_PROGRESS -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V1.0` |
+| Priority | `P2` |
+| Status | `IN_PROGRESS` |
+| Depends | `WP-FND-001`, `WP-DOC-001` |
+| Related | `REQ-BCTL-001`, `REQ-BCTL-002`, `REQ-BCTL-003`, `REQ-BCTL-004`, `GATE-G16`, `KILL-K34`, `SEC-52`, `ADR-BROWSERCTL-001`, `TEST-BCTL-001`, `TEST-BCTL-002`, `TEST-BCTL-003`, `TEST-BCTL-004` |
+
+**目标**
+
+Ship a Browser Control surface that a host may opt into through an explicitly configured MCP server, without acquiring any default route, any Hook participation, or any claim of Native Computer Use equivalence.
+
+**产物**
+
+- `@oxrail/browser-control`: own Chromium process, CDP session, ref numbering, navigation, screenshot, state/reclaim, per-profile saved sign-ins
+- MCP stdio entry point exposing the tool surface
+- `docs/adr/ADR-BROWSERCTL-001.md`
+- tests for `TEST-BCTL-001`–`TEST-BCTL-004`
+
+**验收**
+
+- [ ] No tool surface and no browser process exists before a host explicitly configures the MCP server.
+- [ ] The route drives only its own Chromium and its own profile directory; it never attaches to the person's browser.
+- [ ] Native packages and the Native route never import the CDP route.
+- [ ] An early browser death is reported as a death in milliseconds, not as a 15 s wait.
+- [ ] Idle reclaim never fires while the route is in use, and `state` reports `pid`, `profile`, `idleMs`, `closesInMs`.
+- [ ] No Hook, Guard, Safety, Native-equivalence or default-availability claim is made for this route.
+- [ ] Deleting the package, the host MCP entry and the profile directory removes the capability with no migration.
+- [ ] Real-host evidence (MCP auto-load, tool-result image support) is recorded, or the WP stays IN_PROGRESS/BLOCKED.
+
+**测试 / 证据**
+
+- `TEST-BCTL-001`–`TEST-BCTL-004`
+- installed-host MCP configuration check
+- evidence manifest per §49.1
+
+**阻断 / Kill**
+
+- `KILL-K34` if the route is reachable without explicit opt-in or is reported as Hook-visible/native-equivalent.
+- No ACCEPTED status before real-host evidence exists.
+
+---
+
+<a id="wp-bctl-002"></a>
+### WP-BCTL-002 — Context-efficient Browser reads (`browser_read`)
+<!-- wp-meta: MILESTONE=V1.0 PRIORITY=P1 STATUS=IN_PROGRESS -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V1.0` |
+| Priority | `P1` |
+| Status | `IN_PROGRESS` |
+| Depends | `WP-BCTL-001` |
+| Related | `SEC-52`, `ADR-BROWSERCTL-002`, `KILL-K12`, `KILL-K18`, `KILL-K34`, `TEST-BCTL-005`, `TEST-BCTL-006` |
+
+**目标**
+
+Let a host answer a question about a page, or watch it for changes, without paying for the page: read a projection of the page instead of its full text. The projection is computed in the route's own process, with no model call, no network request and no third-party dependency, and it is always a read — it never clicks, types, navigates or rewrites a coordinate.
+
+**产物**
+
+- `packages/browser-control/src/read.ts`: block extraction, term folding, ranking, passage selection, delta
+- `digest()` on the route, and the `browser_read` tool (`article` / `map` / `query` / `changed`)
+- `docs/adr/ADR-BROWSERCTL-002.md`
+- tests for `TEST-BCTL-005`–`TEST-BCTL-006`
+
+**验收**
+
+- [ ] A snapshot reaches every document the page is composed of that the route can reach without new privileges: open shadow roots are traversed, and same-origin frames are numbered as part of the page.
+- [ ] A control inside a frame carries the frame in its ref, and a click on it lands inside that frame rather than on the frame's own rectangle.
+- [ ] A frame the route cannot read (cross-origin) is reported as an unread frame count, never silently omitted.
+- [ ] `browser_view` is unchanged: same modes, defaults, output shape and ref semantics.
+- [ ] `browser_read {mode:"query"}` returns the passage containing the answer on a long page, and reports how much it did not show (`matched` of `total`).
+- [ ] `query` needs a `query`; an unknown mode is refused with the field named.
+- [ ] `changed` compares only against a previous read of the same projection and the same address; a first read returns the page, and a navigated page starts a new baseline.
+- [ ] A `ref` keeps its number across re-reads of an unchanged page, so a delta between two reads is a change and not a renumbering.
+- [ ] Every mode is bounded by `maxChars`, and the bound is documented as characters, not tokens.
+- [ ] Ranking is a pure function of page text and query, covered by unit tests with no browser.
+- [ ] The reading layer is not described as Computer Use, Hook-visible, Guard-mediated or equivalent to Native; it does not enter the NIF matrix or a paired benchmark.
+- [ ] `docs/product/browser-control.md` states which measurement is a regression baseline and which is a page-specific result, including the case where `article` is not smaller than `browser_view`.
+
+**测试 / 证据**
+
+- `TEST-BCTL-005` (reading modes answer and bound), `TEST-BCTL-006` (projection and delta consistency)
+- `tests/browser-control-read.test.ts`, `tests/browser-control-digest-live.test.ts`
+- evidence manifest per §49.1
+
+**阻断 / Kill**
+
+- `KILL-K12` if reading reliably requires clicking, typing or navigating.
+- `KILL-K18` if ranking rewrites final coordinates, paths, deltas, keys, clicks or focus.
+- `KILL-K34` if the reading layer is reported as Hook-visible, Guard-mediated or Native-equivalent.
+- No ACCEPTED status before the live reading measurement is recorded as evidence.
+
+---
+
+<a id="wp-bctl-003"></a>
+### WP-BCTL-003 — Writes addressed by a read (`ref`-only, no coordinates)
+<!-- wp-meta: MILESTONE=V1.0 PRIORITY=P1 STATUS=IN_PROGRESS -->
+
+| 字段 | 值 |
+|---|---|
+| Milestone | `V1.0` |
+| Priority | `P1` |
+| Status | `IN_PROGRESS` |
+| Depends | `WP-BCTL-001`, `WP-BCTL-002` |
+| Related | `SEC-52`, `§42.1`, `ADR-BROWSERCTL-002`, `KILL-K12`, `KILL-K18`, `KILL-K25`, `KILL-K34`, `TEST-BCTL-007` |
+
+**目标**
+
+Make the existing write side of the route executable under one rule: a write may only land on a control a read handed out, by the number that read returned. The route accepts no coordinate anywhere, so a caller cannot express "press at this point" and the route cannot guess one. This is the narrowing option inside `§42.1` — it is not a separately named Browser Agent or Driver, adds no tool, and claims nothing new about write execution.
+
+**为什么这不是 Computer Use**
+
+Computer Use loops over pictures: capture, decide, press, capture again. This route never parses a picture to choose a target; a screenshot is for a person to look at. The address of a control is the ref a read produced, so `KILL-K18` (rewriting final coordinates, paths, deltas, keys, clicks or focus) is not avoided by discipline but is structurally unreachable — there is no coordinate to rewrite. The cost of a write is bounded by the cost of the read before it, and a DOM tree influences that cost without ever becoming both context and target.
+
+**产物**
+
+- `this.handed` on the route: the refs the last control-returning read handed out, with the url they described
+- preconditions in `click()` and `type()` that run before the browser is started; `nav()` clears the set; `key()` takes no ref and is not gated
+- `tests/browser-control-addressable.test.ts` (no browser), the live case in `tests/browser-control-live.test.ts`, and the hit-test cases in `tests/browser-control-digest-live.test.ts`
+- the write-side clause in `docs/adr/ADR-BROWSERCTL-002.md` and the "Writes are addressed by a read" section in `docs/product/browser-control.md`
+
+**验收**
+
+- [ ] No tool and no route method accepts a coordinate or a point on screen, and no code path derives a press point from a screenshot.
+- [ ] A write addressed by a number no read produced is refused, and the refusal says nothing has been read yet.
+- [ ] A write addressed by a number the last read did not contain is refused, and the refusal names the address that read described.
+- [ ] Both refusals happen before the browser is started, so an unaddressable write costs nothing and reads the same whether or not Chrome is running.
+- [ ] A navigation (url, back or reload) clears the handed refs; a ref from before it is refused rather than resolved against the new page.
+- [ ] A write addressed by a text the last read did not name is refused, and the refusal names the address that read described; a text it did name still reaches the page, and the occlusion refusal still names what covers the control.
+- [ ] A selector that is empty after whitespace is refused before the gate can compare it, so it can never match every name.
+- [ ] Typing with no `ref` needs a read behind it, and the control that actually holds focus must be one the last read numbered: keystrokes are never sent to a control the caller has not seen, including one the page focused by itself after the read. The legitimate path of reading, clicking, then typing without a `ref` still works.
+- [ ] Hit testing asks the tree the control is in, so a control in an open shadow root is not reported as covered, and an occluded control reports the layer that owns the point instead of an internal error.
+- [ ] `browser_nav` stays an explicit tool; no read navigates as a side effect.
+- [ ] The route is not reported as Hook-visible, Guard-mediated or Native-equivalent, and it does not enter the NIF matrix or a paired benchmark.
+
+**测试 / 证据**
+
+- `TEST-BCTL-007`
+- `tests/browser-control-addressable.test.ts` (refusals, no browser, including the text and no-ref typing gates), `tests/browser-control-live.test.ts` (refused numbers, a real click, a click by a name a read gave, and a stale ref after back)；活测要真实浏览器，`OXRAIL_BROWSER_LIVE=1` 才跑，CI 的 `live-browser-regression` job 每次推送到 `dev`/`main` 都设它并在用例全被跳过时判失败，没有 Chrome 的机器不能报成绿
+
+**阻断 / Kill**
+
+- `KILL-K12` if the write side needs a reliability claim to be useful.
+- `KILL-K18` if any implementation rewrites final coordinates, paths, deltas, keys, clicks or focus.
+- `KILL-K25` if the route gains a generic input path, a page write, or a debugger write beyond driving its own browser.
+- `KILL-K34` if the route is reported as Hook-visible, Guard-mediated or Native-equivalent.
+
+---
+
 ## 49.18 工作包状态变更格式
 
 ```yaml
@@ -11223,7 +12043,7 @@ blocked_by: []
 
 一个里程碑只有其 `WP-RLS-*` 进入 `ACCEPTED` 才完成。某个功能 WP 完成但 release WP 未接受，不得发布该里程碑版本号。
 
-本总账共定义 **98 个工作包**。
+本总账定义的工作包数量不以本文中的固定数字为准：`spec/OXRAIL_SPEC_INDEX.json` 的 `counts.work_packages` 与 `work_packages` 集合是唯一计数来源，两者由生成器从 `###`/`####` 标题实际算出，不再手工填写。任何在此处写死的总数都会在工作包增删后失真（本句此前写作 100，而实际为 110），因此不再重复计数。
 
 ---
 
@@ -11285,7 +12105,7 @@ Agent 默认使用以下顺序：
 
 ```json
 {
-  "spec_version": "0.5.0",
+  "spec_version": "1.0.0",
   "sections": {"SEC-28": {"anchor": "sec-28", "keywords": []}},
   "requirements": {"REQ-NIF-010": {"section": "SEC-28", "work_packages": ["WP-NIF-005"], "tests": ["BENCH-NIF"]}},
   "work_packages": {"WP-HO-007": {"anchor": "wp-ho-007", "depends": [], "status": "PLANNED"}},
@@ -11368,10 +12188,223 @@ no install/setup path auto-trusts Hooks or uses a trust bypass
 default doctor emits no real Browser action
 passive first-call verification preserves native input/result
 BYPASSED and Safety/Handoff INACTIVE states are explicit
+Credential protection ACTIVE/INACTIVE is explicit and independent
+HostProfile tool schema pins come from external probe/evidence, never self-validation
+credential helper trust anchors in macOS signature verification and sealed registry manifest, not HostProfile alone
+credentialTrustRootDigest is literal in the actual host-reviewed Hook definition and its trust binding is probed
+credential-input lease begins before any API-key generate/reveal action and blocks every Agent path
+matching pasteboard content is cleared before Agent resume; third-party clipboard managers are unsupported
+default doctor is credential-read-only; extended Keychain probe is explicit and cleanup-audited
+fixture-only credential adapters never activate or imply a public capability
+no generic file/env/argv/stdin/stdout/shell secret export exists
 NIF and Handoff terminology consistent
 ```
 
 ## 50.11 当前变更记录
+
+### v1.0.33 — 2026-11-17
+
+v1.0.31 给不带 `ref` 的输入只留了一个条件：此前发生过一次读取。这条太弱——读一次之后，页面自己把焦点放到任何一个控件上（`autofocus`、脚本、弹层自动聚焦），这个控件的键击就与「调用方见过的地址」无关了。本条要求真正持有焦点的控件必须是最后一次读取编过号的；页面自行聚焦的控件、或编号已被更新的那一次读取排除在外的控件，都在发送任何按键之前拒绝，并且拒绝发生在打开页面之后，因此页面上什么也不会落下。
+
+### v1.0.32 — 2026-11-17
+
+v1.0.31 的文本门控用包含匹配，而包含匹配对空串恒真：`browser_click` 收到空或纯空白的 `text` 时，归一化得到 `""`，任何一次读取交出的名字都"包含"它，于是门控放行，点击落到页面上第一个可点控件。这不是调用方的疏漏，而是门控本身对空选择器没有定义。本条把空选择器定义成一个无效地址，在任何比较之前就拒绝。
+
+### v1.0.31 — 2026-11-17
+
+`§2.5` 的写操作门控原本只对编号成立：`browser_click` 的文本分支只要求“发生过一次读取”，从不检查那个文本是否出现在那次读取交出的控件名里，也不比较读取时的地址；不带 `ref` 的输入完全不看读取状态。这意味着一个调用方可以点名一个它没见过的控件，并把键击打进页面自己决定聚焦的地方——与“写操作只能引用上一次读取返回的地址”这一条相矛盾。本条把两侧补齐：文本必须在最后一次读取交出的控件名里出现，不带 `ref` 的输入要求此前发生过读取。
+
+### v1.0.30 — 2026-11-16
+
+- 活测（`tests/browser-control-live.test.ts`、`tests/browser-control-digest-live.test.ts`）此前只在有真实 Chrome 的机器上手动跑：`pnpm check` 全部跳过，CI 只有 `main` 才跑浏览器相关 job，于是 `dev` 上每次推送都不跑任何浏览器路径。新增 CI job `live-browser-regression`，安装 Chrome、设 `OXRAIL_BROWSER_LIVE=1`、跑两个活测文件，并在输出里没有一条 passed 时判失败——跳过不等于通过。
+- WP-BCTL-003 的测试/证据行补上这一条前置与守护，使「活测覆盖」这句话可核验。
+
+### v1.0.29 — 2026-11-15
+
+- `WP-BCTL-003` 的第七条验收（命中测试问控件所在的那棵树）此前的测试只钉住了「开放 shadow root 里的控件不被判为遮挡」这件事的一半，另一半「被遮挡时点名覆盖者」只有实现没有断言。现补一条活测：在连续两层的页面里放一个被覆盖的控件，断言点击被拒绝时文案带出覆盖元素自身的标签、id 与文字，并在事后确认这次按压没有落到下面的控件上。`Deliverables` 同步记入该测试文件。
+- 删除 §49.19 中写死的工作包总数。该数字只存在于正文一处（写作 100），既无生成器维护也无校验器检查，而正文实际定义了 110 个工作包；机器索引的 `counts.work_packages` 同样停留在 108。现在计数只以 `spec/OXRAIL_SPEC_INDEX.json` 为准，正文不再重复声明总数。
+- 索引的 `counts` 与 `coverage` 改为由生成器从集合本身算出，不再手工填写。此前 `counts` 的 `work_packages`（108）、`tests`（237）、`adrs`（3）与 `coverage` 的四项（119/119/16/31）都落后于实际集合；一处摘要与被摘要的数据放在同一文件里却不一致，是该文件里最容易发生也最难发现的失真。
+- `scripts/validate-spec.mjs` 增加对应校验：`counts` 的八项与 `coverage` 的四项必须与集合本身一致，手改摘要将无法通过校验；把数字改对只能经由生成器。
+
+### v1.0.28 — 2026-11-14
+
+- 新增 WP-BCTL-003 与 TEST-BCTL-007：写侧确立「一次写只能落在一个由读取产生过的编号上」。路由不提供任何以坐标为入口的写——`browser_click` 只收 `ref` 或可见文本，`browser_type` 只收 `ref` 与文本；路由保存上一次读取交出的编号集合与那一页的地址，写之前核对，未读取过的编号与读取后已导航的编号都被拒绝，且拒绝发生在启动浏览器之前。导航（url/back/reload）清空该集合；`browser_key` 不接受编号，不在门内。
+- 该决策是 §42.1 三条路中的窄化选项（选项 2 的实施）：不启动单独命名的 Browser Agent/Driver，不新增工具，不新增 CDP 域，不接管任何 Native 调用，也不改变 §2.5 对写执行的既有约束。与 Computer Use 的差别在算法层：本路由不看图选落点，截图只给人看，因此 KILL-K18 在结构上不可达而不是靠自律避免。
+- 同时修复读取层的一个真实缺陷：命中测试的兜底分支引用了循环外已出作用域的 `own`，被遮挡的控件抛 `ReferenceError` 而不是报告遮挡者；命中测试现在向控件所在的树取值，因此开放 shadow root 内的控件不再被判为被遮挡。
+
+### v1.0.27 — 2026-11-14
+
+- 扩展 WP-BCTL-002 的快照深度：读取遍历开放的 shadow root，并把同源 frame 的控件按「frame 内编号 + 帧号」纳入同一份快照（嵌套帧按文档顺序编号，最深两层），点击按帧角偏移落在帧内控件上；跨源 frame 以未读取帧数计并在读取结果里带走，不静默省略。这是读取层的覆盖范围变化，写入侧、§2.5 与 §42.1 的结论不变，也不新增任何 CDP 域或权限。
+
+### v1.0.26 — 2026-11-14
+
+- 新增 WP-BCTL-002（上下文高效的 Browser 读取层）、TEST-BCTL-005 至 TEST-BCTL-006、ADR-BROWSERCTL-002：`browser_read` 提供 `article`/`map`/`query`/`changed` 四种只读投影，排序在本进程内完成（不调用模型、不发网络请求、不引入第三方依赖），巡航预算按字符计；`changed` 只与同投影同地址的上一次读取比较，控件编号跨读取保持稳定。该层不点击、不输入、不导航、不改写坐标，不改变 §2.5 与 §42.1 的结论，也不作 Computer Use 声明。
+- 新增 WP-BCTL-002 与 TEST-BCTL-005 至 TEST-BCTL-006；`browser_view` 的行为、默认值与编号语义不变，读取层是新增的第十一个工具，宿主不调用时不存在任何成本。
+- §2.5、§42.1 与 SEC-52 对写执行的约束不变：读取层只投影已加载页面，写侧若要扩大必须按 §42.1 的三个选项单独决策；本次不新增默认写路径。
+
+### v1.0.25 — 2026-11-12
+
+- 新增 opt-in Browser Control route（`packages/browser-control/`）：MCP stdio 工具面、自有 headless Chromium、自带 profile；默认关闭，只有宿主显式配置后才存在。
+- 新增 ADR-BROWSERCTL-001、SEC-52、GATE-G16、KILL-K34、WP-BCTL-001、REQ-BCTL-001 至 REQ-BCTL-004、TEST-BCTL-001 至 TEST-BCTL-004；该路由不经过 Hook/Guard，不作 Native Computer Use 的替代，不计入 NIF 或 paired benchmark。
+- Native 路由、既有禁令与公开声明不变：默认写执行权仍属于宿主原生 Computer Use，本次不新增任何默认写路径。
+
+### v1.0.24 — 2026-09-08
+
+- 合并产品 Skill 与内部 Lab 分离实施合同到 SEC-51；新增 WP-LAB-000 至 WP-LAB-007 和 TEST-LAB-001 至 TEST-LAB-020，保留历史 ID 与证据。
+- 产品安装白名单、独立监控、干净 Native baseline、缺失指标和真实宿主验收按该合同执行；本次规范更新不代表新能力已实现。
+
+### v1.0.23 — 2026-09-05
+
+- 新增 Core `cleanupCredentialFixtureGate()`，只为从未连接 presenter、Keychain、pasteboard、consumer 或 secret 外部效果的 non-product fixture 提供无可信 cleanup verifier 的狭窄本地 ledger reset；所有结果仍固定 `NOT_AUTHORIZED / INACTIVE`；
+- cleanup 在 global credential mutex → gate file lock 下清扫 durable completed calls、等待 pending 调用的真实 Post，并以精确 generation/operation/outcome tombstone 防止 stale/ABA 覆盖；异常后只读确认 exact tombstone，否则 fail safe；
+- 新增 `TEST-SEC-127`；该例外不授权 Agent resume、不构成外部 cleanup evidence，product adapter 继续断开，真实恢复仍要求 authenticated Host/enclave cleanup 与 G15。
+
+### v1.0.22 — 2026-09-05
+
+- 新增 Core `commitPreparedCredentialFixtureGate()`：在 bounded wire observer 后按 global credential mutex → Handoff task lock → gate file lock 完成 exact final snapshot 与 fixture `PREPARING → ACTIVE` 线性化提交，并恢复 dead-owner gate lock；
+- 固定完整 receipt digest 与 gate 二次 digest，覆盖 callback cleanup→OPEN、新一代 PREPARING ABA、pre/post deadline、wall-clock uncertainty 与持续 Pre 阻断；raw transition/event/locked helper 不进入公共 barrel；
+- 新增 `TEST-SEC-126`；bare gate `ACTIVE` 仅是本地阻断账本，结果仍固定 `NOT_AUTHORIZED / NOT_ESTABLISHED / UNVERIFIED / INACTIVE`。当前无 bounded 高层 cleanup/recovery，禁止产品接线，也不建立 prompt/Keychain/consumer authority 或 G15。
+
+### v1.0.21 — 2026-09-05
+
+- 新增 Core `prepareCredentialInputAttempt()`，以 global credential mutex → Handoff task lock → gate file lock 的固定顺序复用 current Handoff ticket admission，并把 fixture ticket mint 与 `OPEN → PREPARING` 合成一次线性化提交；
+- 明确 Pre-first 只由真实 Post 排空、prepare-first 阻断后续 Pre，gate file lock 内派生 generation 并恢复 dead-owner lock；未提交且所有锁安全释放的 failure 保持 durable OPEN，提交或锁状态不确定时按 PREPARING/UNKNOWN fail-closed；内部 locked helper 不进入公共 barrel；
+- 新增 `TEST-SEC-125`；结果仍固定 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`，不建立 Host suspension、credential-input lease、prompt/Keychain/consumer authority 或 G15。
+
+### v1.0.20 — 2026-09-05
+
+- 新增 Core fixture-only Host suspension observer：以两次 global credential mutex → Handoff task lock 的 exact snapshot 夹住锁外 bounded observer，复核 PREPARING operation、当前 ACTIVE Handoff、空 journal、receiver deadline、wall clock 不回退与前后不变状态；
+- strict 4 KiB serialized receipt 只接受 `string | Uint8Array`，绑定 receiver one-shot challenge、prompt/Handoff/Host/browser/gate/fence/coverage/verifier context 与全部 suspension lane；失败、超时、late、malformed、重放或漂移均保持阻断；当前 callback seam 不声称能强制终止忽略 cancellation 的代码；
+- 新增 `TEST-SEC-124`；结构匹配仍固定 `UNVERIFIED / INACTIVE`，不推进 gate ACTIVE、不展示 prompt、不接触 secret/Keychain/pasteboard/consumer，也不证明 Host authentication、credential-input lease 或 G15。
+
+### v1.0.19 — 2026-09-05
+
+- Core v2 fixture ticket 的 `ticketId` 扩展为覆盖完整 registry entry、activation anchor、lease epoch/acquiredAt/expiresAt 与 issuedAt，并以同一 golden ticket 固定 TypeScript/Swift canonical digest 合同；该无密钥摘要仍明确不构成来源认证或授权；
+- macOS non-product credential target 新增严格 presentation checkpoint：只校验最大 16 KiB ticket、embedded registry scope、结构/Hash/时间与 ticketId，并生成固定 cross-language `promptContextHash`；输出不含 ticketId、anchor 或 raw control identity，固定 `NOT_AUTHORIZED / UNVERIFIED / NOT_PRESENTED / INACTIVE`；
+- 新增 `TEST-SEC-123` 与 target/default-source tripwire；真实 Host-wide suspension receipt、credential-input lease、窗口展示、secret、Keychain、pasteboard、IPC/consumer、G15 与任何 Credential `ACTIVE` 仍未提供。
+
+### v1.0.18 — 2026-09-05
+
+- Credential intent 的唯一公开 admission 收口到 BrowserTask task lock 内的 coordinator；入口深拷贝可变调用方输入，锁内严格复读 Human-owned ACTIVE state/gate/barrier、Host binding 并要求 physical active journal count 为零，仅凭裸 ACTIVE lease 不再能 mint ticket；
+- `CredentialEnclaveTicket` 升级到 strict v2，只携带 registry scope、credential-domain opaque activation anchor 与 lease 时间；移除 raw handoff/session/task/tab/document/nonce，ticket ID 绑定 anchor，v1 fail-closed；
+- 新增 `TEST-SEC-122`，并明确本地 anchor/ticket 仍是 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE`；格式合法的本地 binding 替换只能改变 anchor，尚无独立可信 commitment，prompt-time current-tab receipt、credential-input lease、真实 Host authority、prompt/Keychain/consumer 与 G15 均未提供。
+
+### v1.0.17 — 2026-09-04
+
+- 新增不导出 product 的 `OxrailCredentialEnclave` target：只从 embedded fixture registry 按唯一 ID 派生固定 `NSAlert`，包含恰好一个 `NSSecureTextField`，调用方不能注入 UI 或 scope；
+- production observation 只构造、不展示、不写入，固定报告 `FIXTURE_ONLY_NON_AUTHORIZING / NOT_PRESENTED / storage=UNAVAILABLE / INACTIVE`；内部 test sink 验证 submit/cancel/error 清空 field、结果不含 canary；
+- 明确当前没有 launcher、runModal、Keychain writer、pasteboard、IPC 或模型入口，fixture ticket 不能触发 UI；增加 `TEST-SEC-121`，签名/ACL/Host-wide G15 完成前 Credential protection 继续 `INACTIVE`。
+
+### v1.0.16 — 2026-09-04
+
+- Hook adapter 新增与 Browser state 分离的 credential fence root，并让所有 Hook 可见 Pre/Post 在 profile、matcher、classifier 与完整 payload validation 前进入全局凭据栅栏；该层从不读取或持久化 tool payload，INACTIVE bootstrap 不创建或武装 root；
+- credential gate transition 与 tool fence 共享同一 mutex，关闭 PREPARE/Pre registration 竞争窗口；本地 deny 或快照漂移不再伪造 completion，只有真实 Post 或未来 authenticated deny-terminal receipt 才能结算 pending call；
+- 非 OPEN、已初始化但 UNKNOWN、畸形身份与重复调用固定 deny；root 未初始化时仅 credential fence BYPASS，只有 mutex 内确认 OPEN 的 journal 故障才保留既有 Native 决策并明确 BYPASSED/INACTIVE，mutex 异常不得降级放行。上述局部事实不能用作 PREPARE/activation 证据；PermissionRequest、hosted/specialized、Hook failure 与多 root 覆盖仍未证明，故 `TEST-SEC-120` 只验收 fixture 接线，Credential protection 继续 `INACTIVE`。
+
+### v1.0.15 — 2026-09-04
+
+- 新增 locked completion consume/CAS：READY candidate 只能由 coordinator 内部同步生成并经一次不可重试的 task lock 消费；锁内重读 state/gate/barrier/bounded journal，并用 fresh Host receipt 重验同一 browser/tab、global exclusive lease、双 Agent lane fence 与 current origin/document/context；
+- `HANDOFF_VERIFYING + HUMAN`、final origin/document、`stateVersion+1` 与 digest-only consume marker 必须由同一 BrowserTaskState rename 原子提交；READY candidate/raw nonce 不得离开 Core 进入通用 IPC，完整 receipt 只经 authenticated bounded Host transport 在 Core 内存即用即弃，三者均不持久化、不记录、不进入模型；重放、竞争、崩溃、重启或任一不确定性都保持 Human 且不能 resume/release/result；
+- BrowserTaskState v3 增加 strict optional consume marker 与 safe-integer/overflow 合同；fixture 以 bounded process-local attempted set 防止同进程失败重用，但真实 Host verifier、transport、durable challenge ledger 与 Host-wide fence 完成前，locked consume 仍仅为 build-fixed loopback 的 `FIXTURE_ONLY_NON_AUTHORIZING / INACTIVE` foundation。
+- 新增 `TEST-HO-023` 作为 locked consume/CAS/replay 的直接合同证据，并明确 generated BrowserTaskState JSON Schema 只验证 exchange shape；runtime cross-field invariants 才是 transition validation，二者均不单独构成 resume authority。
+
+### v1.0.14 — 2026-09-04
+
+- 新增 runtime-only、strict 且 non-authorizing 的 `HandoffVerificationSample`：只允许 origin-only 连续导航状态、tab/document identity 与固定非敏感 phase 枚举，不允许完整 URL、DOM/text/value/screenshot/token 或其 Hash；
+- quiet proof 固定为同一 authenticated verifier context/state epoch 下的两次 coordinator 主动 challenge，并只使用接收端 monotonic acceptance time；final origin、sender 时间、被动/缓存 sample 与 self-reported Hash 均不能证明 settle 或连续 redirect；
+- completion evaluator 输出限制为保持用户租约、待锁内取消、安全失败或 `READY_FOR_LOCKED_VERIFY`；Core 仍须持 per-task lock 重读 lease/state/gate/barrier/active index 与当前 tab 后 CAS，sample 不得自证无 lease conflict，本 foundation 不生成 VERIFIED/result/resume 或恢复 Agent。
+
+### v1.0.13 — 2026-09-04
+
+- 将 Agent-facing `HandoffToolInput` 与 Host-bound `HandoffRequest` 分离：模型只能提交固定 type 提示，Host 独立核对并派生 policy/timeout/UI，再绑定 fresh receipt 的 tab/origin/session/lease/nonce；
+- 闭合 `CompletionPolicy`，并把 completion signal 严格绑定 handoff/session/task/lease/nonce/tab/初始与当前 document/origin/authenticated source；CSPRNG nonce、monotonic time 与唯一 loopback fixture 均固定；
+- 将内部 bound `HandoffResult` 与最小模型可见 `HandoffToolResult` 分离，限制 phase/policy 和成功、timeout、unsafe、tab-closed 交叉不变量；仅发布与 runtime 等价的 ToolInput JSON，其余 strict schema 保持 runtime-only；本 foundation 不激活 Handoff。
+
+### v1.0.12 — 2026-09-04
+
+- 新增零参数、无持久副作用的 macOS opaque credential reference lifecycle foundation；仅从 build-fixed `API_KEY` fixture registry 派生进程内 reference，并由 Security.framework 生成不可预测的 32-byte handle；
+- reference 精确绑定 service/origin/purpose/consumer/TTL/generation 与三类 registry Hash；首次成功 claim 在进程锁内原子消费，scope/Hash 不匹配、过期、撤销、rotation 与 replay 全部拒绝；
+- 公开 observation 不返回 reference 或随机值，固定保持 `FIXTURE_ONLY_NON_AUTHORIZING/INACTIVE`；模块不接触 secret、prompt、Keychain、pasteboard、网络、Hook/Doctor/Profile，不满足 G15 或激活 Credential protection。
+
+### v1.0.11 — 2026-09-04
+
+- 新增 build-fixed、零参数、只读的 macOS credential registry validator foundation，仅验证一组 `API_KEY` fixture template/consumer 的 schema、交叉绑定与域分离 SHA-256；
+- 输出收窄为 `FIXTURE_ONLY_NON_AUTHORIZING / REGISTRY_STRUCTURE_ONLY / MATCHED_FIXTURE_NON_AUTHORIZING | INACTIVE`，固定 `activation=INACTIVE`、`consumerReadiness=FIXTURE_ONLY`，外部输入不得替换 registry；
+- 明确 embedded manifest/self-hash 不是 sealed trust root、外部 pin 或 rollback floor；该模块不启动 helper/prompt、不触碰 Keychain/pasteboard/network、不接 Hook/Doctor/Profile，不满足 G15/`WP-CRED-001`，Credential protection 保持 `INACTIVE`。
+
+### v1.0.10 — 2026-09-04
+
+- 新增 macOS Security.framework code-identity verifier foundation：同时精确核对不同 launcher/helper 的 Team ID、signing identifier、20-byte CDHash 与 designated requirement data，并拒绝非 thin Mach-O；
+- 对外 interface 收窄为零参数、固定 `NON_AUTHORIZING/CODE_IDENTITY_ONLY` 报告，runtime 不能注入路径或 release pins；
+- 正式 release pins 尚未配置，因此 production 始终返回 `INACTIVE`，不接 Hook/Doctor/Profile、不启动 helper，且不能满足 G15 或激活 Credential Channel。
+
+### v1.0.9 — 2026-09-04
+
+- HostProfile 升级至 v5，并把 launcher/helper 身份字段更名为 `launcherCodeDirectoryHash` / `helperCodeDirectoryHash`；
+- 两字段严格记录 Security.framework `kSecCodeInfoUnique` 的 raw 20-byte CDHash（40 位小写十六进制），与仍为 64 位 SHA-256 的 evidence/trust-root 摘要明确分离；
+- 首版只接受单 architecture artifact 的单一 CDHash；Universal/fat binary hash set 延后，且 native verifier/Hook 尚未接入时 Credential `ACTIVE` 继续被 runtime 拒绝。
+
+### v1.0.8 — 2026-09-04
+
+- 新增 fixture-only 全局 Credential Tool Fence primitive：原始调用身份仅以本机 HMAC 派生值持久化，输入边界拒绝 `tool_input` 与额外字段；
+- 复用现有 task lock 与 bounded active journal，锁内清理当前格式完成项并按所有 schema 的物理 marker 把并发 active 调用硬限制为 256；Post 可在非 OPEN 或 gate 缺失时补全旧调用；
+- 明确 `NO_LEDGER_BLOCK_TRACKED/QUIESCENT` 不是授权或 Host fence，且该模块尚未接 Hook；G15 仍依赖独立 Host-wide suspension/native fence。
+
+### v1.0.7 — 2026-09-04
+
+- 明确 same-tab Handoff 必须移交原生 Chrome 同一 profile/browser instance 中原有 tab 与登录态；可移动/聚焦该真实 tab，但截图、复制、重建与表单位置映射均不合格；
+- 新增 fixture-only 全局 credential execution gate 合同：显式初始化、单调状态机、独立 cleanup evidence、完整快照双读、保守 crash/lock 语义与 no-auto-expiry；
+- 明确 ledger 状态与 hash-shaped receipt 不是授权或 attestation，真实恢复 Agent 必须依赖独立可信 cleanup evidence，且 G15 前 Credential 保持 `INACTIVE`。
+
+### v1.0.6 — 2026-09-04
+
+- 新增显式 opt-in、无外部输入的 macOS Keychain extended synthetic probe 合同：进程内随机值仅执行 add/read/compare/delete；
+- probe 输出限制为固定版本/名称/状态 JSON，只有清理失败附非敏感随机 locator，禁止 value、persistent ref、OS error 与自由文本；
+- 明确该 fixture probe 默认不由 doctor 执行，且不能证明 G15 或激活 Credential capability。
+
+### v1.0.5 — 2026-09-04
+
+- Credential provisioning 的 Agent/page 输入收窄为唯一 allowlisted `credentialUseId`，所有 UI 与 scope 字段由 fixed registry 和当前 USER Handoff 派生；
+- 增加显式无授权的 fixture admission ticket 与固定 model-visible result 合同，拒绝自由文本错误、Keychain persistent ref 和任何 secret/value/export 字段；
+- native attestation verifier 未完成前，admission ticket 不得启动 helper 或激活 Credential capability。
+
+### v1.0.4 — 2026-09-04
+
+- bounded active index 改为 `opendir` 流式读取，在 256 calls 或 513 total entries ceiling 后立即 `UNKNOWN`；
+- Post/activation 的完成项 sweep 复用同一有界扫描，不再在 per-task lock 内执行无界全目录读取；
+- 增加 excessive temporary debris 与 over-ceiling activation 的回归测试。
+
+### v1.0.3 — 2026-09-04
+
+- ToolCall canonical v2 history 与 bounded `active/` Handoff index 分离，正常 activation 不再随历史调用数线性扫描；
+- pending Pre 新增 durable mutation intent，覆盖 canonical 与 active index 之间的 crash window；Post 与 state cleanup 在同一 task lock 内协调并可恢复 intent；
+- active completion 仅在 durable state 不再引用后回收，后续 Post/activation 批量清理 crash 遗留；超过 256 个 active calls、dirty/legacy/corrupt index 均明确 `UNKNOWN/FAILED_SAFE`，不影响 Native 基础 fail-open。
+
+### v1.0.2 — 2026-09-04
+
+- Handoff 新增 task lock 前持久化的 admission generation、终态 tombstone、Browser Pre 双重快照、Host native-action fence、锁内串行发布与 ownership-aware crash recovery；
+- ToolCall marker v2 增加去敏 persistent tool identity，用于 receipt-first crash 后与 pending state 精确协调；
+- USER lease 激活必须使用当前 Host adapter 在旧 native calls 静默后独立签发并验证的 same-browser/same-tab/fence receipt；本地 gate 不构成全路径覆盖证明。
+- BrowserTaskState runtime schema 拒绝 phase、pointer owner、active handoff 与 pending native action 的矛盾组合。
+
+### v1.0.1 — 2026-09-04
+
+- 为 `BrowserTaskState` 增加可向后读取的 `actionSignatureKeyId`，将 action identity 绑定到本机 HMAC key generation；
+- legacy repetition baseline 只允许在 idle sanitized state 上显式清除并迁移，key mismatch 时不得比较或静默覆盖，Optimization 保持 `BYPASSED`。
+
+### v1.0.0 — 2026-09-04
+
+- 将首要支持范围收窄为 macOS + 用户真实 Chrome；Windows Secure Credential Channel 延后并默认 `UNSUPPORTED`；
+- 保留 Browser Secure Micro-Handoff 的同一真实 tab、独占 lease、非敏感验证和自动恢复合同，不允许 clone、截图、裁剪或位置映射替代真实页面；
+- 新增正交 macOS Secure Credential Channel，首版仅支持 `API_KEY`：固定签名 native template、Keychain、opaque credentialRef 和 enclave 内登记 adapter；
+- 明确 native credential helper 属于 Oxrail TCB；`REQ-SEC-001` 标记 `DEPRECATED`，用限定的 credential-enclave/Keychain/bound-service confinement 取代不真实的全面 zero-occurrence 声明；
+- 明文禁止进入普通 file/env/argv/stdin/stdout/stderr/shell/Hook/IPC/log/trace/diagnostic/crash，不支持任意 CLI 或 Agent 自定义 UI；
+- 在网页生成/显示 API key 前取得覆盖全部 Agent tool/action/observation path 的 credential-input lease；用户粘贴后须在恢复 Agent 前完成受限 pasteboard 清理并确认真实页 reveal surface 已消失；
+- 用 release-pinned 独立 launcher/helper Team ID、bundle、exact CodeDirectory Hash、designated requirement、sealed registry manifest 与 launcher-owned Keychain rollback floor 建立信任根；默认 doctor 保持只读，Keychain round-trip 改为显式 extended probe；
+- 明确 HostProfile/schema 不可自证 Credential `ACTIVE`；release trust-root digest 必须进入宿主实际审阅的 Hook definition，并由独立 macOS verifier 与 Host probe 实时验证；
+- fixture-only adapter 保持 `EXPERIMENTAL/INACTIVE`；公开能力至少需要一个独立审计并通过真实服务 probe 的 registered consumer；
+- Host Profile 升到 schema v4，新增 Credential Channel capability、独立 `ACTIVE/INACTIVE`、doctor probes，以及来自外部 Host probe/evidence 的 tool registry/input schema pins；
+- 新增 `REQ-CRED-001`–`013`、`REQ-HOST-013`、`GATE-G15`、`KILL-K29`–`33`、`TEST-HO-016`–`022`、`TEST-SEC-111`–`119` 与 V0.6 `WP-CRED-001`。
 
 ### v0.5.0 — 2026-09-04
 
@@ -11430,3 +12463,509 @@ Oxrail 的成立条件不是“能写一个漂亮 Skill”，也不是“能把�
 
 > **Strong agent. Short leash.**  
 > **Native hands. Oxrail rails.**
+
+
+<a id="sec-51"></a>
+# 51. 产品 Skill 与内部 Lab 分离实施合同
+
+版本：1.0 · 2026-09-08
+目标分支：从当前 `dev` 建立功能分支，不直接改 `main`。
+性质：这是实施合同，不是已实现功能清单，也不是已通过的测试报告。
+
+### 0. 开工指令
+
+按本文顺序实施。你负责代码、测试和迁移，不重新选择产品方向。先完成 WP-LAB-000 至 WP-LAB-002，再继续其余工作包。每个工作包独立提交、独立输出测试结果；不得用一个巨大提交混合迁移、采集、实验和发布。
+
+先记录当前 commit、工作区状态和现有测试结果。不覆盖用户未提交的修改。仓库若比本交接书新，保留语义等价的新实现；路径调整写入迁移表，不借机扩张范围。发现宿主接口不存在时，输出明确的 `BLOCKED` 及最小缺失能力，继续可独立完成的工作包；不得伪造 API、扩大权限、改弱测试或改换宿主后声称原宿主通过。
+
+交接书批准的是产品/实验边界和本地实现；不授权自动信任 Hooks、读取真实凭据、上传实验数据、发布版本或推送远程分支。
+
+### 1. 已固定的产品决策
+
+#### 1.1 两个独立交付物
+
+**Oxrail 产品**：对外的 Skill 安装入口，以及提供真实功能所必需的产品运行组件。可能包含宿主适配、Guard、Handoff、必要权限验证与状态恢复。它不包含实验调度器、监控采集器、轨迹记录器、实验报告器和凭据输入 Demo。
+
+**Oxrail Lab**：内部开发者单独安装、显式启动的实验工具。能在完全不安装 Oxrail 产品时监测宿主暴露的浏览器事件；也能在安装 Oxrail 时，用同一采集链路测量。Lab 关闭、卸载、崩溃或数据目录不可用，不应影响产品正常能力，也不能解除产品的安全锁。
+
+“Skill 是产品入口”不等于“只靠 SKILL.md 就有浏览器隔离权限”。Skill-only 能力必须按真实宿主支持标注；不得为满足轻量安装而删除实际安全组件，再继续宣称安全 Handoff。
+
+#### 1.2 不是把实验功能默认关掉，而是从用户发布包中移除
+
+产品发布包中不得出现 Lab 模块、Lab 入口、实验配置、报告模板、采集服务、Demo 可执行入口或实验用原始数据。仅设置 `LAB_ENABLED=false`、使用 `.gitignore`、`.npmignore`，或不展示按钮，不算分离完成。
+
+产品不主动查找 Lab、不连接 Lab、不创建 Lab 数据目录；不存在可通过环境变量把普通发布包变成实验版的隐藏入口。
+
+同仓库开发可以保留；独立安装、依赖、构建、权限、存储、配置和发布必须成立。源码公开时，“内部使用”是分发和启用约束，不是依靠 `private: true` 实现的访问控制。
+
+#### 1.3 三类数据必须区别对待
+
+| 类型 | 所属 | 保留原则 |
+|---|---|---|
+| 交接锁、租约、待完成调用、恢复/幂等状态、当前宿主能力验证标记 | 产品运行状态 | 仅功能必需字段，按作用域和生命周期清理；不能因 Lab 关闭而消失 |
+| 逐次工具事件、实验耗时、比较结果、实验清单和实验报告 | Lab | 仅内部显式启用后采集，独立存储 |
+| 密码、验证码、Cookie、令牌、剪贴板、键盘输入、原始页面/截图/响应 | 不进入 Lab 记录 | 本轮没有真实秘密采集模式；测试也不能把秘密写入轨迹 |
+
+给 Agent 提供生产语义观察的组件与 LabMonitor 不是同一个模块。生产 Handoff 的登录完成检测、标签页恢复也不是实验功能，不能一起搬走。
+
+#### 1.4 对照实验的执行轴与监控轴相互独立
+
+| 执行环境 | 监控 OFF | 监控 ON |
+|---|---|---|
+| Native Tuned，Oxrail 完全不加载 | 原生无监控校准 | 原生监控组 |
+| 相同原生配置 + 指定 Oxrail 能力 | 产品无监控校准 | 产品监控组 |
+
+主要比较先用两个监控 ON 的组；OFF 组用来评估监控扰动。OFF 时不启动逐事件采集器，也不注册 Lab 监控 Hook；外部控制器可以保留任务边界与受控 fixture 的最终结果，但这些不冒充完整轨迹。
+
+`Oxrail BYPASSED` 不是 Native baseline。产品 Skill、系统提示、Hook、自动发现路径和原会话残留都可能影响对照。切换实验组必须创建新任务/新隔离会话，不支持在同一任务中途切换。
+
+### 2. 本轮范围与暂缓事项
+
+本轮交付：产品清包、内部 Demo 迁移、独立 Lab、一个真实宿主的旁路采集适配、干净基线、同配置配对实验、隐私和发布验收。
+
+第一个宿主适配器固定为 `codex-local-hook-v1`。CLI 与桌面端必须分别登记版本和能力；只把真实验证过的具体入口标为支持。不能由 Codex 的 Hook 文档推出 ChatGPT Work、网页端或私有内置浏览器也支持相同事件。
+
+首轮真实浏览器路径优先复用现有 Chrome 路线。不要同时把两组的浏览器从 Chrome/内置互换；“浏览器路由策略是否更好”另建实验，不能与本轮 Oxrail 净增益混为一项。
+
+本轮不开发通用浏览器录像扩展、任意站点登录检测、Electron 镜像输入、新浏览器驱动、模型轮询等待、云端实验平台或漂亮 Dashboard。已有测试 fixture/harness 优先复用，不能为了采集改用 Playwright/CDP 代替真实宿主执行任务。SEC-52 的 opt-in Browser Control route 不属于采集路径，也不是本交接书的交付物。
+
+### 3. 目标目录与依赖规则
+
+采用最小迁移，不重写整个仓库：
+
+```text
+skills/oxrail/                    # 产品 Skill；删除实验指令与实验入口
+hooks/                           # 产品 Hooks
+packages/core/                    # 产品功能与安全状态机
+packages/host-openai/             # 产品宿主适配
+packages/handoff-extension/       # 产品交接能力，不承担 Lab 日志
+packages/protocol/                # 现有协议；只复用无运行副作用的必要类型
+native/macos/                    # 留下可复用产品库；不带 fixture 可执行入口
+lab/
+  package.json                   # 内部独立包，private: true
+  README.md
+  plugin/                        # 独立 Lab Hook 安装根，不提供 oxrail Skill
+  hooks/                         # Lab 自己的 Pre/Post 观察入口
+  protocol/                      # 独立监控事件和实验 manifest schema
+  monitor/                       # 白名单转换、关联、持久化、健康状态
+  adapters/codex-local-hook/      # 不 import 产品 Hook/Guard 的采集适配器
+  controller/                    # 准备实验、绑定会话、开始/停止，非浏览器驱动
+  reports/                       # 事后统计与报告
+  evidence/                      # 从 packages/evidence 迁入的内部工具
+  native/macos/                  # 内部 Demo 与探针可执行目标
+  scripts/credential.mjs          # 原 Skill 中的试验入口迁至此处
+  configs/
+  tests/
+benchmarks/                      # 现有受控 fixture/harness；开发专用
+packages/native-fidelity/        # 本轮保留路径，明确为开发测试专用
+scripts/build-product.mjs
+scripts/build-lab.mjs
+scripts/package-product.mjs
+scripts/validate-boundaries.mjs
+scripts/validate-product-artifact.mjs
+dist/product/
+lab/dist/
+release/oxrail/                  # 干净的实际产品安装根
+```
+
+依赖规则：产品入口禁止直接或传递依赖 `lab/**`、`benchmarks/**`、`packages/native-fidelity/**` 及迁移前的 `packages/evidence/**`。Lab 基础采集器禁止依赖产品的 Hook、Guard、runtime-state 或 `~/.oxrail`。Lab 可以把产品作为被测试对象启动；这不等于 Lab 采集器需要产品才能运行。
+
+共享只限无 I/O、无自动初始化的协议/验证纯函数；不要共享数据目录、进程、权限清单或运行状态机。必要的产品能力验证器仍属于产品，不得因为名称里有 evidence 就搬到 Lab 后让产品运行时再调用它。
+
+构建入口必须生成依赖清单。使用编译器/打包器依赖图检查传递依赖，并补充安装态运行测试；不能只 grep import 文本就宣布依赖隔离成立。
+
+### 4. 固定工作包
+
+<a id="wp-lab-000"></a>
+#### WP-LAB-000 — 合同与现状冻结
+
+**依赖**：无。
+
+读取仓库 `AGENTS.md` 和规范相关的安装、状态、权限、实验、Trace、发布章节。把本交接书中的新边界合并进 `spec/OXRAIL_SPEC.md`，同步 `SPEC.md`、版本/变更说明、索引与 checksum。保留已有稳定 REQ/WP/TEST ID；新增本轮 ID，不重命名历史基线，也不重写历史实验结果。
+
+新增 `docs/adr/ADR-LAB-001.md`，只记录本交接书已固定的决策，不重新比较方案。新增字段级 `docs/lab-state-inventory.md`：逐项列出现有落盘数据的路径、用途、读者、产品是否必需、清理时机和迁移目标。
+
+特别审计 `packages/host-openai/src/state.ts` 和 `hook.ts`。安装验证的近期标记与安全恢复状态保留；历史浏览器操作流水不得以“诊断”名义继续放在产品中。不要为了零文件口号破坏现有状态机。
+
+**验收**：规范校验通过；迁移表无“待定”条目；记录迁移前检查结果；本工作包不改变浏览器行为、不宣称新能力激活。
+
+<a id="wp-lab-001"></a>
+#### WP-LAB-001 — 产品构建与发布隔离
+
+**依赖**：000。
+
+把混合 `scripts/build.mjs` 拆成产品、Lab 两个构建入口。`pnpm build` 默认只构建产品；新增 `build:lab`、`build:all`，CI 显式选择。开发用证据检查、schema 生成等工具不得作为用户安装时的运行依赖。
+
+产品打包采用文件白名单，构造 `release/oxrail/`。该安装根只包含产品 manifest、Skill、产品 Hook、运行所需 dist、图标、必要用户文档、LICENSE 和最小 package 元数据。源目录可采用 `dist/product/`；安装根继续保持 Hook 所需的 `dist/hooks/...` 等路径，所有 wrapper 与 hash 计算按最终安装布局验证。不得携带旧的混合 dist 文件。
+
+新增 `product-files.json` 与 bundle dependency manifest。构建产物清单中不得有实验命令、录制入口、Demo 或测试依赖。`skills/oxrail/SKILL.md` 不再含凭据试验、pilot 或实验操作指南；相对链接全部在安装根可解析。
+
+更新 `scripts/validate-plugin.mjs`，增加对 staged 安装根的验证，不能只检查完整源码仓库。
+
+当前 marketplace 引用的是仓库 URL + ref；本轮为后续发布生成**产品安装根专用、不可变发布树/ref 的准备产物**，不得继续把整份开发源码标签当产品包。不得用 npm 的 files 字段代替实际插件安装检查。只输出发布 dry-run 和改动清单，不自行 push/tag/publish。
+
+如果实际安装器不能保持该白名单安装根，发布任务标为 `BLOCKED`，写明复制了哪些不应发布的文件；不要靠隐藏文件名通过验收。
+
+**验收**：只复制 `release/oxrail/` 到新临时目录后，产品脚本可运行并诚实报告能力；该目录没有 Lab、fixture Demo、实验命令和实验记录器。删除开发仓库及 Lab 不影响安装包启动。未知能力仍为 INACTIVE，不将启动成功视为 Guard/Handoff 已激活。
+
+<a id="wp-lab-002"></a>
+#### WP-LAB-002 — 内部工具、Demo 与配置迁移
+
+**依赖**：001。
+
+将 `packages/evidence/src/*` 的 pilot、记录、报告/验证等开发工具迁入 `lab/evidence/`，更新测试和根目录开发命令。若发现产品必需的纯验证逻辑，先将该部分留在产品/纯协议模块，再迁移实验层；产品不得反向引用 Lab。
+
+将 `skills/oxrail/scripts/credential.mjs` 迁入 `lab/scripts/credential.mjs`，删除公开 Skill 的试验章节和公开安装根中的相应入口。
+
+拆分 `native/macos/Package.swift`：将 Demo 和探针的可执行目标及相应试验目标迁到 `lab/native/macos/`；可复用的身份、注册表、隔离库留在产品源目录，由 Lab 显式依赖。只在需要时补充库 product 导出，不把 fixture 可执行目标重新引入产品包。不要整体搬走安全库。
+
+Lab 缓存、Demo 编译输出及实验数据统一进入 `~/.oxrail-lab/`。禁止新实验数据写入 `~/.oxrail/`。旧 Demo 数据只提供显式迁移/清理命令，不自动删除 Keychain 条目或产品安全状态；只处理已确认属于旧 fixture 的资源。
+
+内部 Demo 继续仅接受规定的测试值，继续显示 fixture-only、protection INACTIVE。移动目录不代表完成了安全认证或 Chrome 登录功能。
+
+Lab 配置只由操作员在内部入口显式启用。产品没有启用 Lab 的环境变量或命令；项目网页、任务输入或仓库 AGENTS.md 不能替操作员授权开始监控。
+
+**验收**：无 Lab 的产品包不会编译 Swift Demo、打开试验窗口或创建实验目录；内部 Lab 独立可启动 Demo。在不支持的平台记录 SKIPPED/UNAVAILABLE，而不是伪造 macOS 测试通过。
+
+<a id="wp-lab-003"></a>
+#### WP-LAB-003 — 安全事件协议和独立采集器
+
+**依赖**：002。
+
+实现第 5 节事件协议、源头白名单转换、事件关联和持久化。先做可运行的本地文件/IPC 采集，不上云服务。
+
+默认使用本用户私有的本地 IPC；限制输入大小、schema 版本、session/run 绑定和事件速率。采集端只接收 SafeEvent，不接收原始工具 payload。跨进程协议使用独立实验会话授权，不把网站凭据用作 IPC 身份。
+
+只允许固定枚举、计数、非敏感版本信息与经处理的关联 ID。异常日志不得 stringify 原始输入、原始验证错误或含输入的 stack。队列、临时文件、崩溃输出、stdout/stderr 与正常 trace 适用同样限制。
+
+采集器使用有界队列。慢盘、IPC 断开、数据满、畸形事件时丢弃受影响的实验事件、标记不完整；不能阻塞浏览器或改变审批。无法知道具体丢失量时填写 UNKNOWN，不伪造 0。
+
+默认实验数据保留 7 天，启动时清理过期 Lab run，并提供明确 scoped purge。所有数据本地保存，无自动上传。删除范围严格限制在 Lab 数据根。
+
+**验收**：产品完全未安装时 Lab 能处理受控宿主事件 fixture；秘密诱饵不出现在任何新增输出面；并发、重复、乱序、缺失 Post、超大输入和磁盘错误均有测试。此阶段 fixture 测试通过不能标为真实宿主监控通过。
+
+<a id="wp-lab-004"></a>
+#### WP-LAB-004 — 独立宿主 Hook 适配与纯原生监测
+
+**依赖**：003。
+
+创建独立的 Lab Hook 安装根和定义。不得调用或包装产品 `handleHookEvent()`，不得读取产品 profile 才能分类浏览器工具，不得靠 Oxrail 事件上报才能采到 baseline。
+
+使用当前宿主导出的精确工具 inventory 和已验证 schema。首版不读取全量 transcript 文件，不解析不透明脚本去臆造内部点击数，不自动递归发现额外工具路径。
+
+每次 Lab Hook 只做最小元数据投影和有界提交；正常、错误和过载路径都返回宿主支持的中性结果，例如经合同验证的 `{}`。禁止输出 `permissionDecision: allow`、`deny`、`systemMessage`、`additionalContext` 或修改后的输入/结果；尤其不能为了“永不干扰”强制 allow 而跳过原生审批。
+
+Hook 必须由人正常审阅、信任。监控 OFF 时不注册/执行 Lab Hook；不能让每次工具调用启动一个随即返回的 Lab 进程，却称其为无监控。
+
+探测具体版本的 Pre/Post 覆盖、拒绝时的回调行为、Hook 顺序、并发/子代理 ID、批处理和在途工具。Pre 事件表示请求被观察到，不自动表示动作已经执行；缺 Post 不能自动算作拒绝或成功。
+
+首个真实验收环境不加载 Oxrail，使用干净任务目录和新会话。完成一次受控原生浏览器任务，Lab 获得请求/结果元数据或明确列出未覆盖范围。
+
+能力报告至少包含 `SUPPORTED / PARTIAL / UNSUPPORTED`、适用 host/build/browser tuple、source、可见工具路径、granularity、已知盲区和证据时间。分母未知时不报告“覆盖率 100%”。
+
+**验收**：独立 Lab 可在没有 Oxrail 文件、Skill、Hook、进程及数据目录的运行环境观测真实事件。杀死 collector 不取消原生动作、不自动重试、不新增模型上下文；宿主或权限不满足时明确 BLOCKED，绝不补造事件。
+
+<a id="wp-lab-005"></a>
+#### WP-LAB-005 — 干净基线与配对实验控制器
+
+**依赖**：004。
+
+实现第 6 节运行合同。控制器只准备、校验、绑定/启动宿主任务和在测量区间外重置受控 fixture；浏览器任务中的 click/type/navigation 仍由原生宿主执行。
+
+复用现有 `benchmarks/harness/paired.mjs`、fixture/reset 机制和 pilot receipt 能力。保留历史固定 Luna pilot 的任务、模型和 arm 定义；新通用实验使用新 schema/config，不把历史模型硬编码变成所有实验的全局限制，也不回写旧结果。
+
+每个 arm 新建隔离的宿主上下文和相同初始浏览器状态。baseline 的实际 Skill 搜索路径、Hooks、启动配置、插件清单中没有 Oxrail；任务目录与父目录不得自动发现本仓库 AGENTS.md、Skill 或实验说明。实验计划/报告不提供给执行任务的 Agent。
+
+隔离证据必须来自有效配置、宿主提供的清单或启动过程实证。不得只在 manifest 写 `oxrail_loaded=false` 就算通过。不能证实隔离时，允许运行探索性诊断，但正式比较状态为 `BASELINE_ISOLATION_UNPROVEN`。
+
+支持两种控制方式并明确区分：`prepare/begin/end` 是固定的人工启动宿主流程；只有存在且验证过公开启动能力的 adapter 才可实现自动 `run`。自动入口不可用时返回 `HOST_AUTOSTART_UNSUPPORTED`，保留可执行的 prepare/begin/end 流程，不编造桌面私有启动 API。
+
+使用 seed 固定配对顺序，AB/BA 随机化。比较期间固定宿主、模型设置、浏览器入口、网站/fixture版本、提示词、原生优化和监控配置。变体选择写进操作员 manifest，不把“这是对照组/实验组”加入任务提示词。
+
+记录 `requested_variant` 与 `effective_mode`。要求 Guard 的 arm 如果实际只有 ADVISORY/BYPASSED，则为 `TREATMENT_NOT_ACTIVE`，不能作为 Guard 成绩；可另开诚实标注的 Skill-only 实验。
+
+**验收**：对照污染、版本不匹配、状态未重置、监控配置不一致、运行中切组和未激活治疗均被检测；失败/超时不被删除。真实测试缺少宿主控制能力时，保留已实现的控制器/手工协议，但不得声称无人值守实验已完成。
+
+<a id="wp-lab-006"></a>
+#### WP-LAB-006 — 指标、Handoff 元数据与报告
+
+**依赖**：005。
+
+实现第 7 节指标和质量标记。主指标由共同的宿主/fixture采集链生成，不能 baseline 用屏幕估计、Oxrail 组用内部精确计数后直接比较。
+
+产品已有非敏感状态可由 Lab 的可选、只读产品适配器作为补充信息读取；采集器不需要这些状态才能工作，产品不因 Lab 加入而改变安装包。第一版不为完整诊断而添加新的产品轨迹记录器。不可得的 Guard/Handoff细节为 null，不以截图或循环轮询补齐。
+
+登录实验只用受控 fixture 和测试秘密。Lab 不捕获输入内容、不采集输入长度/按键节奏，不记录登录截图、DOM、剪贴板或网络载荷。只能记录第 7 节允许的非敏感阶段边界；Lab 绝不授予/撤销用户租约或发布 resume。
+
+报告必须同时展示质量、成功率、失败原因、总耗时和样本数，不能把更早失败说成更快。监控开销独立评估，不直接从每个结果机械减去一个常数。
+
+**验收**：无 Token 来源的报告显示不可得；缺 Post 和未知粒度不生成虚假的 0；登录输入的诱饵不出现在所有 Lab 输出中；collector崩溃不会解除产品 Handoff锁。
+
+<a id="wp-lab-007"></a>
+#### WP-LAB-007 — 独立性与发布总验收
+
+**依赖**：001—006。
+
+补齐第 8 节自动验收。真实宿主部分分别标注已跑、失败、未跑及原因。历史 evidence 保持不可变；新的迁移证据写入新 run。
+
+执行产品独立安装、Lab-only 原生任务、同配置配对任务及四象限扰动校准。至少 3 个无真实秘密的受控任务，各做 3 对作为闭环 smoke；此数量只用于功能验收，不能支撑统计显著性或“节省 X%”宣传。
+
+产品包与内部 Lab 包分别产出。普通用户文档只讲产品，内部实验文档只放 Lab；兼容性表按真实宿主 tuple 更新。
+
+**验收**：所有软件可自动测试项通过；外部宿主未验证项不得标记 ACCEPTED。工作包完成后提交 IN_REVIEW，独立审核之前不能自称正式发布已获批准。
+
+### 5. 数据与采集合同
+
+#### 5.1 事件只表达实际可见信息
+
+以下是待实现接口形状，不是既有 API：
+
+```ts
+type Source = 'HOST_HOOK' | 'HOST_TRACE' | 'FIXTURE' | 'PRODUCT_STATUS';
+type Granularity = 'TOOL_INVOCATION' | 'TRANSACTION' | 'PRIMITIVE' | 'UNKNOWN';
+type EventKind =
+  | 'TOOL_REQUEST_OBSERVED'
+  | 'TOOL_RESULT_OBSERVED'
+  | 'TOOL_DENIAL_CONFIRMED'
+  | 'HANDOFF_PHASE_OBSERVED'
+  | 'POSTCONDITION_OBSERVED'
+  | 'SOURCE_HEALTH';
+
+type Quality = 'MEASURED' | 'ESTIMATED' | 'UNAVAILABLE';
+interface Metric {
+  value: number | null;
+  quality: Quality;
+  source: Source | null;
+  basis: string;          // schema定义的受控枚举，不接收任意文本
+  missingReason: string | null; // 同样是受控枚举
+}
+
+interface SafeEvent {
+  schemaVersion: 1;
+  eventId: string;        // 本地随机ID；重投递保留同一ID
+  runId: string;
+  pairId: string | null;
+  source: Source;
+  sourceClockId: string;
+  sourceSequence: number;
+  observedMonotonicMs: number | null;
+  receivedMonotonicMs: number;
+  sessionRef: string;     // 仅伪名化宿主关联ID
+  callRef: string | null;
+  actor: 'AGENT' | 'HUMAN' | 'UNKNOWN';
+  kind: EventKind;
+  toolAlias: string | null; // 精确inventory映射出的受控别名
+  granularity: Granularity;
+  outcome: 'SUCCESS' | 'FAILURE' | 'DENIED' | 'UNKNOWN';
+  metrics: Record<string, Metric>; // 运行时仅接受预先登记的指标键
+}
+```
+
+运行时 schema 必须严格拒绝未知字段和任意文本容器，不允许 `raw`、`message`、`details`、`payload` 等逃生字段。类型定义中的 string/Record 不代表可接受任意字符串/键。
+
+原始宿主 payload 可能不可避免地进入宿主传给 Hook 的内存；只在该源适配器内短暂进行白名单投影，立即丢弃。它不进入 IPC、collector、queue或磁盘。不能声称控制了宿主自己已有的日志行为，产品/Lab保证仅覆盖自己控制的输出面。
+
+关联键至少包括 run、source、host-session、tool-call；处理同 session 的子代理/并发。宿主未提供 actor/子代理身份则用 UNKNOWN。不要仅按工具名或时间邻近合并事件。
+
+时间差只能在同一可靠时钟域内相减。跨进程/跨重启时无共同单调时钟，就使用 collector 接收时间并标为近似，不能假装是精确浏览器执行耗时。
+
+Post重复只能幂等更新一次。Pre存在但Post缺失，在结束时记为 INCOMPLETE/UNKNOWN；有宿主明确拒绝事件才算 DENIED。
+
+#### 5.2 隐私负面清单
+
+不读取/记录密码、OTP、Cookie、Authorization、auth.json、剪贴板、按键、输入值、完整 URL 查询/fragment、截图像素、DOM/AX正文、响应正文和任意脚本内容；也不对秘密值保留 hash。普通 hash 不等于秘密被安全删除。
+
+允许的伪名化只针对非内容的宿主关联 ID；必要时用每次实验的独立 HMAC key，并随 retention 清理。不为真实用户输入计算“输入一致性 hash”。受控 fixture 的原生输入一致性测试单列，不能推广到真实秘密。
+
+关键检测不是“采集后打码”，而是“未许可字段从来不进入 Lab 存储链”。
+
+#### 5.3 信任边界
+
+Lab 的实验计划和结果应在执行 Agent 的可访问工作区之外；仅放到另一个目录不构成强隔离。正式实验要验证宿主 sandbox/权限确实阻止 Agent 读取操作员数据；做不到就写明隔离未证明。
+
+传输认证和schema检查只能防止未授权/畸形输入，不能证明宿主已发出所有事件。页面fixture事件可能受网页影响，不作为独立的安全隔离证明。收集不到越界操作，不等于证明没有越界操作。
+
+### 6. 实验运行合同与待实现 CLI
+
+Lab 使用自己的配置，最小示例：
+
+```json
+{
+  "schema_version": 1,
+  "experiment_id": "lab-separation-smoke-v1",
+  "host_adapter": "codex-local-hook-v1",
+  "browser_path": "chrome-extension",
+  "execution": "native",
+  "requested_variant": "NATIVE_TUNED",
+  "monitor": { "enabled": true, "profile": "metadata-v1" },
+  "session_isolation": "fresh",
+  "recording": { "local_only": true, "retention_days": 7 },
+  "seed": "lab-separation-smoke-v1",
+  "repetitions_per_task": 3
+}
+```
+
+`execution` 仅为 native/oxrail；真实能力和规范 variant 另行记录。B1/B2/B3/B6 等已有规范名和 native-fidelity 消融名不能混用。历史 pilot schema 通过显式映射兼容，不就地改写。
+
+每个 run manifest 必须包含：源码/产品构建ID、host/build/model与可确认设置、browser/version/path、任务提示词hash、fixture版本及reset回执、原生配置指纹、实际 Skill/Hook清单证据、Lab版本与监控配置hash、requested/effective variant、isolation状态、coverage、时钟来源、退出状态和缺失原因。
+
+实验选择由操作员完成；对执行 Agent 仅提交同一任务提示词。fixture reset 和安装验证发生在计时区间外。若比较端到端冷启动，另建 cold-start 任务并明确把 doctor/安装检查计入，不能只替 Oxrail 排除开销。
+
+待实现命令（现在不能当作已存在命令使用）：
+
+```bash
+pnpm build                  # 仅产品
+pnpm build:lab
+pnpm package:product
+pnpm test:product
+pnpm test:lab
+pnpm validate:boundaries
+pnpm validate:product-artifact
+
+pnpm lab doctor --host-inventory <exact-host-inventory.json>
+pnpm lab prepare --config <experiment.json>
+pnpm lab begin --run <run-id> --binding <verified-session-binding.json>
+pnpm lab end --run <run-id> --result <controlled-postcondition.json>
+pnpm lab report --experiment <experiment-id>
+pnpm lab purge --older-than-days 7
+```
+
+begin/end 仅控制实验状态和非敏感元数据，不操纵产品租约。人工启动宿主仍要按报告提供的清单加载正确配置；绑定文件本身不是隔离证据，必须包含可核实的来源。自动启动入口只在 adapter 实测支持后新增。
+
+### 7. 指标合同
+
+| 指标 | 接受的来源/定义 | 不允许的替代 |
+|---|---|---|
+| 工具请求次数 | 真实观察到的Pre/请求事件 | 当作已执行点击数 |
+| 工具完成次数 | 有结果/完成证据的调用 | 缺Post算成功 |
+| 浏览器primitive次数 | 宿主显式primitive trace或受控fixture明确证据 | 将一个复合工具调用拆成猜测点击数 |
+| Hook观察间隔 | 配对Pre/Post的同钟域间隔 | 宣称纯浏览器执行耗时 |
+| 工具执行耗时 | 宿主确有执行开始/结束时间戳 | 把排队、Hook启动、模型等待都算浏览器耗时 |
+| 任务总耗时 | 固定任务边界 | 扣掉失败、等待或Oxrail自身成本 |
+| 成功/失败 | 同一受控后置条件检查 | 仅采信Agent自述成功 |
+| Token | 可归属该run的宿主正式用量；按字段区分输入/输出/缓存/推理 | DOM可见文字估计=模型总Token；日总量差=该run用量 |
+| 观察载荷大小/估算Token | 非敏感受控载荷的同阶段统计，并记录算法 | 清洗后的样本代表原始上下文，或推断隐藏推理量 |
+| 冗余/重试 | 相同粒度下已有可靠结果/目标证据 | 仅工具名重复就认定无效动作 |
+| 监控开销 | ON/OFF配对校准，分每调用与端到端 | 假定旁路为零开销 |
+
+允许的 Handoff 时间边界：认证需求确认、隔离确认、窗口呈现、认证结果确认、布局恢复、允许续跑、首个后续原生动作。来源没有提供的边界为 null。
+
+分别报告“用户交互区间”“验证/窗口恢复区间”“允许续跑到下一动作区间”，不要把全部等待都说成 Oxrail或模型的延迟。Lab不记录每次输入/提交，不因需要时间点采集凭据。
+
+数据质量单独列出：missing Pre/Post、重复、乱序、源断连、队列溢出、未覆盖工具路径、未知粒度、未知执行组、时钟可靠性。至少一个主指标不可比时，该指标不给百分比收益。
+
+监控 Hook 是宿主关键路径上的额外工作，必须测量。沿用仓库相关开销门槛作为发布检查，不编造已达到数值；补充监控ON/OFF的实測结果。不得把局部处理耗时当完整Hook启动开销。
+
+报告结构固定为：环境与隔离 → 实际variant/coverage → 成功率/失败原因 → 时间/调用/Token可得性 → 监控扰动 → 数据缺失 → 结论适用边界。保存失败run；成功子集的速度对比必须同时给出失败率，不隐藏更早失败。
+
+### 8. 自动验收矩阵
+
+| 测试ID | 操作 | 必须满足 |
+|---|---|---|
+| TEST-LAB-001 | 扫描产品依赖图和安装产物 | 无Lab、benchmark、Demo运行依赖及实验CLI |
+| TEST-LAB-002 | 只保留产品安装根运行 | 不寻找Lab，不创建Lab数据目录，能力状态诚实 |
+| TEST-LAB-003 | 设置遗留实验环境变量运行产品 | 不能启动实验采集或Demo |
+| TEST-LAB-004 | 完全没有Oxrail时启动Lab | 可采集受控宿主事件；真实主机项单独记录 |
+| TEST-LAB-005 | 检查baseline的新会话/配置 | 没有产品Skill/Hook/任务上下文残留；无法证明则BLOCKED |
+| TEST-LAB-006 | 监控OFF启动新会话 | 无Lab监控Hook/collector；不冒充有详细轨迹 |
+| TEST-LAB-007 | 对Lab适配器投递各类合法/非法事件 | 不返回allow/deny/模型上下文、不改写原调用 |
+| TEST-LAB-008 | collector退出、断链、慢盘、满盘 | 不影响浏览器权限或动作；报告数据不完整 |
+| TEST-LAB-009 | 重复/乱序/缺失Pre/Post、并发子代理 | 幂等、正确关联、不伪造执行与完成 |
+| TEST-LAB-010 | 复合工具只暴露事务事件 | 不输出逐点击或逐键精确统计 |
+| TEST-LAB-011 | 宿主不提供Token/用量混合多个run | 值为null并有原因，不输出假精确总量 |
+| TEST-LAB-012 | 秘密诱饵藏入输入/URL/header/异常字段 | trace、IPC持久化、日志、临时/崩溃文件零泄漏 |
+| TEST-LAB-013 | 登录fixture期间采集 | 只有许可阶段元数据，无截图/输入值/键盘/剪贴板 |
+| TEST-LAB-014 | 持有Handoff租约时关闭/删除Lab | 产品安全锁不解除、不绕过验证恢复Agent |
+| TEST-LAB-015 | A/B任一环境字段/初态/监控hash不一致 | 比较拒绝或标不可比，不自动忽略 |
+| TEST-LAB-016 | Guard请求实际为ADVISORY/BYPASSED | TREATMENT_NOT_ACTIVE，不计为Guard成绩 |
+| TEST-LAB-017 | 真实宿主四象限smoke | 有实际证据的分别通过；未跑不能PASS |
+| TEST-LAB-018 | 实际插件安装及源目录移除 | 安装根无实验残留且路径/hash正确 |
+| TEST-LAB-019 | 尝试由任务Agent读实验计划/报告 | 正式隔离路径应拒绝；否则标隔离未证明 |
+| TEST-LAB-020 | Lab purge与旧Demo迁移 | 不越界删除产品状态、Keychain或历史release evidence |
+
+复用项目现有测试工具。软件验收前先运行窄测试，再跑更新后的 `pnpm check`；发布类变更还运行 `pnpm release:gate`。跨平台/真实宿主测试不可执行时，列为未执行并写出原因；不得把SKIPPED算成PASS。
+
+### 9. 开发 Agent 每包交付格式
+
+```text
+WP:
+Base commit / Result commit:
+Status: IN_REVIEW | BLOCKED
+Changed files:
+What works now:
+Commands actually run + exit codes:
+Tests not run + reason:
+Real-host evidence: present / absent
+Capability status and coverage:
+Artifact dependency / privacy check:
+Known blockers:
+Next eligible WP:
+```
+
+无证据时不使用“已支持所有原生浏览器”“完全无开销”“100%监控”“自动安全续跑已完成”等描述。不得通过写mock结果、改小断言或把Unsupported改成Supported来完成工作包。
+
+### 10. 最终完成定义
+
+普通用户只安装 Oxrail 产品；产品没有实验与记录功能，但保有真正运行所需的安全状态。内部开发者可以独立启动 Lab，在没有 Oxrail 的新环境和安装 Oxrail 的新环境下使用同一观测体系。支持范围、记录粒度、Token来源和监控扰动都明确，秘密不进入实验数据链。Lab 不接管浏览器、不决定产品的安全交接，不污染任务提示词，不把不完整数据冒充完整比较。
+
+这条闭环通过以后，后续 Chrome适配、内置浏览器路由策略和安全弹窗优化才使用它做证据驱动的比较；不要在测量体系建立前持续增加无法归因的功能。
+
+### 11. 审阅依据与复核入口
+
+本方案基于 2026-09-08 可读取的 `dev` 源码与官方Hooks文档；未在本次规划中运行项目或真实宿主。开始实现时记录实际HEAD，不能把本文件当作新版本兼容性证明。
+
+已核对：公开 Skill含credential trial；build混合产品与pilot/evidence入口；marketplace使用仓库URL/ref；产品Hook含旁路提示和运行状态；已有pilot具备配对计划/回执基础，但prepare/record不是独立通用监控器。以下链接只作复核入口：
+
+```text
+[S1] https://raw.githubusercontent.com/regrevia/Oxrail/dev/skills/oxrail/SKILL.md
+[S2] https://raw.githubusercontent.com/regrevia/Oxrail/dev/scripts/build.mjs
+[S3] https://raw.githubusercontent.com/regrevia/Oxrail/dev/packages/host-openai/src/hook.ts
+[S4] https://raw.githubusercontent.com/regrevia/Oxrail/dev/packages/host-openai/src/state.ts
+[S5] https://raw.githubusercontent.com/regrevia/Oxrail/dev/packages/evidence/src/pilot.ts
+[S6] https://raw.githubusercontent.com/regrevia/Oxrail/dev/.agents/plugins/marketplace.json
+[S7] https://raw.githubusercontent.com/regrevia/Oxrail/dev/native/macos/Package.swift
+[S8] https://raw.githubusercontent.com/regrevia/Oxrail/dev/spec/OXRAIL_SPEC.md
+[S9] https://raw.githubusercontent.com/regrevia/Oxrail/dev/AGENTS.md
+[S10] https://learn.chatgpt.com/docs/hooks
+```
+
+---
+
+<a id="sec-52"></a>
+# 52. Opt-in Browser Control 路由（MCP / CDP）
+
+<!-- oxrail-index: browser-control,mcp,cdp,opt-in,route -->
+
+本节定义一条**默认关闭、由宿主显式启用**的 Browser Control 路由。它不取代 Native Computer Use，不经过 Hook/Guard，也不参与 Native 的任何 headline 指标。决策与前因见 `docs/adr/ADR-BROWSERCTL-001.md`；Gate 见 GATE-G16；Kill 见 KILL-K34。
+
+## 52.1 路由定位与开关
+
+- 唯一入口是宿主显式配置的 MCP server（stdio）。未配置时不存在工具面、不启动浏览器进程、不注册任何 Hook。
+- 无法通过环境变量把普通安装变成 Browser Control 安装；`OXRAIL_*` 变量只在该 server 已被宿主启动之后生效。
+- 路由拥有自己启动的 Chromium 进程和自己的 profile 目录；不接管、不连接、不注入使用者正在使用的浏览器。
+- 二进制发现顺序为 `OXRAIL_CHROME` → 平台常见安装路径 → PATH；找不到时明确失败，不静默退回 Native 路由。
+- 默认 headless；只有 `OXRAIL_BROWSER_HEADLESS=0` 才显示窗口。
+- Native 路由与 Native package 不得 import 本路由；本路由的加载不由任何 Hook 事件触发。
+
+## 52.2 需求
+
+- **REQ-BCTL-001**：Browser Control 路由必须默认关闭，且只能由宿主显式配置的 MCP server 暴露；未配置时不存在工具面、进程或 Hook 命中。
+- **REQ-BCTL-002**：路由必须只驱动自己启动的 Chromium 与自己创建的 profile，不接管使用者浏览器；Native 路由不得 import 该路由。
+- **REQ-BCTL-003**：不得为路由声明 Hook-visible、Guard/Safety 中介或与 Native Computer Use 等价；其测试结果不得计入 NIF 或 paired benchmark。
+- **REQ-BCTL-004**：路由必须自行回收空闲浏览器、在仍被观察时不回收、如实报告进程与回收剩余时间、把启动即死亡按死亡报错，并按 profile 保存登录态。
+
+## 52.3 非声明
+
+明确不说：不支持任意站点，不保证绕过风控，不承诺与 Native 相同成功率，不提供页面读写之外的系统权限，不读取宿主浏览器数据，不作为 Native Computer Use 的 fallback 或加速器，也不得作为任何“Oxrail 净收益”的对照组。
+
+## 52.4 生命周期与资源回收
+
+- 空闲回收默认 5 分钟；`OXRAIL_BROWSER_IDLE_MS` 限制在 60 秒–15 分钟；`state` 必须报告 `running`、`pid`、`profile`、`idleMs` 与 `closesInMs`。
+- 正常关闭必须走 `Browser.close`，让 cookie 落到 profile；异常死亡不等于正常关闭，可能丢失本次登录态，不得宣称已保存。
+- 等待调试端口有 15 秒上限；进程提前退出必须立即按死亡报告（退出码/信号/耗时/stderr 摘要），不得等满 15 秒再报超时。
+- 截图写入 state 目录下的固定位置并返回路径；不写入 Lab 数据目录，不写进产品 release artifact。
+- profile 之间互不可见；不提供跨 profile 导出或迁移。
+
+## 52.5 相关 ID
+
+`REQ-BCTL-001`–`REQ-BCTL-004`、`GATE-G16`、`KILL-K34`、`WP-BCTL-001`、`WP-BCTL-002`、`WP-BCTL-003`、`TEST-BCTL-001`–`TEST-BCTL-007`、`ADR-BROWSERCTL-001`、`ADR-BROWSERCTL-002`；实现位于 `packages/browser-control/`。读取层（`browser_read` 的四种模式）只投影已加载页面，不点击、不输入、不导航、不改写坐标。写侧（WP-BCTL-003）把既有能力收敛为「只能落在读取交出的编号上」，不接受任何坐标、不从截图推导落点、不新增工具或 CDP 域，因此不改变本章对写执行的既有约束，也不构成 Native 的替代声明。

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HostProfileSchema,
   NativePrimitiveSchema,
+  toolRegistryManifestBinding,
 } from "../packages/protocol/src/index.js";
 import {
   formatDoctorReport,
@@ -52,7 +53,7 @@ const fixtureInventory = {
 
 const fixtureProfile = (definitionHash: string) =>
   HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 5,
     profileId: "hp_doctor_fixture",
     setup: {
       lifecycle: "CONFIGURED",
@@ -81,6 +82,7 @@ const fixtureProfile = (definitionHash: string) =>
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["fixture.native.browser"],
       matcherEvidenceHash: matcherEvidenceHashForInventory(fixtureInventory),
+      browserTools: [],
     },
     action: {
       control: "MICRO_ACTION",
@@ -173,6 +175,33 @@ const fixtureProfile = (definitionHash: string) =>
       oneClickFallback: "unsupported",
       chatMessageRequired: "unknown",
     },
+    credentialChannel: {
+      activation: "INACTIVE",
+      inactiveReasons: ["fixture has no credential helper"],
+      capability: {
+        platform: "macos",
+        surface: "NONE",
+        storage: "NONE",
+        acceptedKinds: [],
+        consumerMode: "NONE",
+        consumerReadiness: "UNSUPPORTED",
+        opaqueReferenceOnly: false,
+        genericSecretExport: "DENIED",
+      },
+      helperIdentity: "unknown",
+      launcherIdentity: "unknown",
+      secureInput: "unknown",
+      agentExecutionIsolation: "unknown",
+      pasteboardHygiene: "unknown",
+      registryManifestVerification: "unknown",
+      secretLeakBench: "unknown",
+      realConsumerProbe: "unknown",
+      keychainRoundTrip: "unknown",
+      opaqueRefOnly: "unknown",
+      scopeBinding: "unknown",
+      expiryAndRevocation: "unknown",
+      genericExportDenied: "unknown",
+    },
     evidence: {
       probeSuiteVersion: "fixture-1",
       fixtureRevision: "fixture-1",
@@ -185,6 +214,7 @@ const fixtureProfile = (definitionHash: string) =>
       mode: "ADVISORY_ONLY",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: ["fixture-only action guard"],
       forbiddenClaims: ["secret protection", "handoff"],
     },
@@ -258,8 +288,49 @@ describe("oxrail doctor", () => {
     expect(report.optimization).toBe("BYPASSED");
     expect(report.safetyProtectionActive).toBe(false);
     expect(report.handoffProtectionActive).toBe(false);
+    expect(report.credentialProtectionActive).toBe(false);
+    expect(report.credentialInactiveReasons).toEqual([
+      "native macOS attestation verifier unavailable",
+    ]);
+    expect(report.credentialChecks.map((check) => check.id)).toEqual([
+      "platform",
+      "helper-identity",
+      "launcher-identity-and-rollback-floor",
+      "hook-trust-root-binding",
+      "sealed-registry-manifest",
+      "template-registry",
+      "consumer-registry-and-real-probe",
+      "keychain-access",
+      "agent-execution-isolation",
+      "pasteboard-hygiene",
+      "opaque-ref-scope-ttl-revocation",
+      "generic-export-denied",
+    ]);
+    expect(report.credentialChecks[0]).toMatchObject({
+      verdict: "passed",
+      detail: "current Host identity reports macOS",
+    });
+    expect(
+      report.credentialChecks
+        .slice(1)
+        .every(({ verdict }) => verdict === "unknown"),
+    ).toBe(true);
     const formatted = formatDoctorReport(report);
-    expect(formatted).toContain("Review and trust");
+    expect(formatted).toContain("Hook trust authority: HOST_UI");
+    expect(formatted).toContain("Hook trust query: UNAVAILABLE_PUBLIC_API");
+    expect(report.hostDiagnostics).toEqual({
+      hookTrustAuthority: "HOST_UI",
+      hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+      hookExecution: "NOT_OBSERVED",
+      recentHookEvents: [],
+      toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+      inventoryStatus: "PROVIDED_AND_VALIDATED",
+      chromeRoute: "NOT_OBSERVED",
+      blockerCodes: [
+        "HOOK_EXECUTION_NOT_OBSERVED",
+        "CHROME_ROUTE_NOT_OBSERVED",
+      ],
+    });
     expect(formatted).toContain("Plugin package manifest present: PASS");
     expect(formatted).toContain("Oxrail Skill definition present: PASS");
     expect(formatted).toContain("Required Hook definitions present: PASS");
@@ -272,12 +343,22 @@ describe("oxrail doctor", () => {
     expect(formatted).toContain("Synthetic probe: UNKNOWN");
     expect(formatted).toContain("First browser hook seen: NO");
     expect(formatted).toContain("Verification source: none");
+    expect(formatted).toContain(
+      "Credential protection: INACTIVE — native macOS attestation verifier unavailable",
+    );
+    expect(formatted).toContain(
+      "Credential check — helper identity/signature: UNKNOWN — native macOS attestation verifier unavailable",
+    );
+    expect(formatted).not.toContain("fixture has no credential helper");
     expect(report.notices).toContain(
       "Package/definition checks are local file-presence checks, not host registry queries.",
     );
     expect(report.notices).toContain(
       "Current-thread Skill availability is proven only by invoking doctor through the Oxrail Skill.",
     );
+    const persisted = (await loadHostProfile(environment.pluginData)).profile!;
+    expect(persisted.credentialChannel.activation).toBe("INACTIVE");
+    expect(persisted.derived.credentialProtection).toBe("INACTIVE");
   });
 
   it("reports CONFIGURED while passively awaiting the first native browser call", async () => {
@@ -318,6 +399,13 @@ describe("oxrail doctor", () => {
     );
     expect(report.safetyProtectionActive).toBe(false);
     expect(report.handoffProtectionActive).toBe(false);
+    expect(report.hostDiagnostics).toMatchObject({
+      hookExecution: "OBSERVED_CURRENT_DEFINITION",
+      recentHookEvents: ["PreToolUse", "PostToolUse"],
+      inventoryStatus: "PROVIDED_AND_VALIDATED",
+      chromeRoute: "NOT_OBSERVED",
+      blockerCodes: ["CHROME_ROUTE_NOT_OBSERVED"],
+    });
   });
 
   it("becomes VERIFIED after both passive browser hook phases are seen", async () => {
@@ -535,6 +623,12 @@ describe("oxrail doctor", () => {
     expect(fresh.stage).toBe("VERIFIED");
     expect(fresh.resultingMode).toBe("ADVISORY_ONLY");
     expect(fresh.optimization).toBe("BYPASSED");
+    expect(fresh.hostDiagnostics).toMatchObject({
+      hookExecution: "OBSERVED_CURRENT_DEFINITION",
+      inventoryStatus: "PROVIDED_AND_VALIDATED",
+      chromeRoute: "OBSERVED_PASSIVE",
+      blockerCodes: [],
+    });
 
     const otherSession = await runDoctor({
       ...environment,
@@ -590,6 +684,42 @@ describe("oxrail doctor", () => {
       firstBrowserHookSeen: true,
       verificationSource: "passive-first-browser-call",
     });
+  });
+
+  it("separates unavailable public inventory export from Hook execution", async () => {
+    const environment = await setup();
+    const sessionId = "no-public-inventory-session";
+    for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
+      await handleHookEvent(
+        {
+          hook_event_name,
+          session_id: sessionId,
+          tool_name: "fixture.safe.probe",
+          tool_use_id: `inventory-${hook_event_name}`,
+        },
+        environment,
+      );
+    }
+
+    const { hostInventory: _hostInventory, ...withoutInventory } = environment;
+    const report = await runDoctor({ ...withoutInventory, sessionId });
+    expect(report.stage).toBe("INSTALLED");
+    expect(report.hostDiagnostics).toEqual({
+      hookTrustAuthority: "HOST_UI",
+      hookTrustQuery: "UNAVAILABLE_PUBLIC_API",
+      hookExecution: "OBSERVED_CURRENT_DEFINITION",
+      recentHookEvents: ["PreToolUse", "PostToolUse"],
+      toolInventoryExport: "UNAVAILABLE_PUBLIC_API",
+      inventoryStatus: "BLOCKED",
+      chromeRoute: "BLOCKED",
+      blockerCodes: [
+        "HOST_INVENTORY_EXPORT_UNAVAILABLE",
+        "CHROME_ROUTE_NOT_OBSERVED",
+      ],
+    });
+    expect(report.notices).toContain(
+      "No public Host tool-inventory export API is documented; HOST_INVENTORY_EXPORT_UNAVAILABLE keeps matcher/profile BLOCKED.",
+    );
   });
 
   it("uses a harmless host-provided synthetic probe when available", async () => {
@@ -728,6 +858,26 @@ describe("oxrail doctor", () => {
         verificationSource: "passive-first-browser-call",
         optimization: "ACTIVE",
       },
+      route: {
+        ...profile.route,
+        toolSchemaRegistryHash: "c".repeat(64),
+        toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+        browserTools: [
+          {
+            canonicalToolName: "fixture.native.browser",
+            inputSchemaHash: "d".repeat(64),
+            registryManifestBinding: toolRegistryManifestBinding({
+              profileId: profile.profileId,
+              definitionHash: profile.hooks.definitionHash,
+              matcherEvidenceHash: profile.route.matcherEvidenceHash,
+              toolSchemaRegistryHash: "c".repeat(64),
+              toolSchemaRegistryEvidenceId: "EVID-HOST-TOOL-SCHEMA-FIXTURE",
+              canonicalToolName: "fixture.native.browser",
+              inputSchemaHash: "d".repeat(64),
+            }),
+          },
+        ],
+      },
       handoff: {
         ...profile.handoff,
         activation: "ACTIVE",
@@ -751,6 +901,10 @@ describe("oxrail doctor", () => {
         ...profile.derived,
         mode: "MICRO_ACTION_GUARD",
         handoff: "ACTIVE",
+      },
+      hooks: {
+        ...profile.hooks,
+        concurrentConflictProbe: "passed",
       },
     });
     await writeHostProfile(environment.pluginData, activeHandoffProfile);

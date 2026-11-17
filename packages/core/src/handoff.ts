@@ -96,7 +96,9 @@ const completionSignalKinds: readonly CompletionSignalKind[] = [
 ];
 
 function assertNonEmpty(value: string, name: string): void {
-  if (value.length === 0) throw new TypeError(`${name} must not be empty`);
+  if (value.length === 0 || value.includes("\0")) {
+    throw new TypeError(`${name} must be non-empty text without NUL bytes`);
+  }
 }
 
 function assertTimestamp(value: number, name: string): void {
@@ -139,6 +141,11 @@ export function prepareHandoffLease(
     throw new TypeError("nonce must contain at least 32 base64url characters");
   }
   assertTimestamp(input.previousLeaseEpoch, "previousLeaseEpoch");
+  if (input.previousLeaseEpoch === Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(
+      "leaseEpoch cannot advance beyond the safe integer range",
+    );
+  }
   assertTimestamp(input.createdAt, "createdAt");
   assertTimestamp(input.expiresAt, "expiresAt");
   assertScope(input.scope);

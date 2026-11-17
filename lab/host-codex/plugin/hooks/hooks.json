@@ -1,0 +1,31 @@
+{
+  "description": "Internal Oxrail Lab visibility probe. It emits no model context or policy decision.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hook.mjs\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/dist/hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hook.mjs\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ]
+  }
+}

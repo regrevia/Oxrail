@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   mkdir,
@@ -5,6 +6,7 @@ import {
   readFile,
   readdir,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,17 +17,43 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HostProfileSchema,
   NativePrimitiveSchema,
+  toolRegistryManifestBinding,
   type HostProfile,
 } from "../packages/protocol/src/index.js";
+import {
+  MAX_BROWSER_TASK_STATE_BYTES,
+  activatePreparedHandoff,
+  activateUserLease,
+  createBrowserTaskState,
+  handoffScopeBindingHash,
+  initializeCredentialExecutionGate,
+  prepareHandoffBarrier,
+  prepareHandoffLease,
+  readCredentialExecutionGate,
+  readCredentialToolFenceQuiescence,
+  readBrowserTaskState,
+  sanitizeBrowserTaskStateForPersistence,
+  writeBrowserTaskState,
+} from "../packages/core/src/index.js";
 import {
   digestSessionId,
   digestToolUseId,
   handleHookEvent,
+  hookBrowserTaskScope,
+  hookCredentialFenceStateDirectory,
   hookDefinitionHash,
+  hookRuntimeStateDirectory,
+  hostProfileBindingHash,
   markerMatches,
+  MAX_BROWSER_ROUTE_OBSERVATIONS,
   oxrailDataDirectory,
+  recordBrowserHookPhase,
   readBrowserRouteObservations,
   readHookMarker,
+  TOOL_SCHEMA_REGISTRY_FILENAME,
+  ToolSchemaRegistrySchema,
+  toolSchemaRegistryHash,
+  type HookOutput,
   writeHostProfile,
 } from "../packages/host-openai/src/index.js";
 
@@ -40,7 +68,7 @@ afterEach(async () => {
 
 async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
   return HostProfileSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 5,
     profileId: "hp_fixture",
     setup: {
       lifecycle: "CONFIGURED",
@@ -69,6 +97,7 @@ async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
       toolRoute: "direct-mcp",
       canonicalToolMatchers: ["fixture.native.browser"],
       matcherEvidenceHash: "a".repeat(64),
+      browserTools: [],
     },
     action: {
       control: "MICRO_ACTION",
@@ -161,6 +190,20 @@ async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
       oneClickFallback: "unsupported",
       chatMessageRequired: "unknown",
     },
+    credentialChannel: {
+      activation: "INACTIVE",
+      inactiveReasons: ["unsupported on this host"],
+      capability: {
+        platform: "unsupported",
+        surface: "NONE",
+        storage: "NONE",
+        acceptedKinds: [],
+        consumerMode: "NONE",
+        consumerReadiness: "UNSUPPORTED",
+        opaqueReferenceOnly: false,
+        genericSecretExport: "DENIED",
+      },
+    },
     evidence: {
       probeSuiteVersion: "fixture-1",
       fixtureRevision: "fixture-1",
@@ -173,6 +216,7 @@ async function fixtureProfile(definitionHash: string): Promise<HostProfile> {
       mode: "ADVISORY_ONLY",
       safety: "INACTIVE",
       handoff: "INACTIVE",
+      credentialProtection: "INACTIVE",
       allowedClaims: ["fixture-only action guard"],
       forbiddenClaims: ["secret protection", "handoff"],
     },
@@ -184,8 +228,138 @@ async function setup() {
   const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-hook-"));
   temporaryDirectories.push(pluginData);
   const definitionHash = await hookDefinitionHash(pluginRoot);
-  await writeHostProfile(pluginData, await fixtureProfile(definitionHash));
-  return { definitionHash, pluginData, pluginRoot };
+  const profile = await fixtureProfile(definitionHash);
+  await initializeCredentialExecutionGate(
+    hookCredentialFenceStateDirectory(pluginData),
+    1,
+  );
+  await writeHostProfile(pluginData, profile);
+  return { definitionHash, pluginData, pluginRoot, profile };
+}
+
+const sha256 = (value: string | Buffer) =>
+  createHash("sha256").update(value).digest("hex");
+
+async function setupActiveGuard(
+  toolContractPatch: Record<string, unknown> = {},
+  handoffActive = false,
+) {
+  const environment = await setup();
+  const registry = ToolSchemaRegistrySchema.parse({
+    schemaVersion: 1,
+    profileId: "hp_fixture_active",
+    definitionHash: environment.definitionHash,
+    matcherEvidenceHash: "a".repeat(64),
+    tools: [
+      {
+        toolName: "fixture.native.browser",
+        inputSchemaHash: "d".repeat(64),
+        route: "direct-mcp",
+        granularity: "MICRO_ACTION",
+        actionTypePath: ["action"],
+        identityPaths: [["axis"]],
+        impactByAction: { click: "reversible", submit: "high-impact" },
+        defaultImpact: "high-impact",
+        ...toolContractPatch,
+      },
+    ],
+  });
+  const registryHash = toolSchemaRegistryHash(registry);
+  const base = await fixtureProfile(environment.definitionHash);
+  const profile = HostProfileSchema.parse({
+    ...base,
+    profileId: registry.profileId,
+    setup: {
+      ...base.setup,
+      lifecycle: "VERIFIED",
+      firstBrowserHookSeen: true,
+      verificationSource: "passive-first-browser-call",
+      optimization: "ACTIVE",
+    },
+    route: {
+      ...base.route,
+      toolSchemaRegistryHash: registryHash,
+      toolSchemaRegistryEvidenceId: "EVID-HOST-HOOK-ACTIVE-FIXTURE",
+      browserTools: [
+        {
+          canonicalToolName: "fixture.native.browser",
+          inputSchemaHash: registry.tools[0]!.inputSchemaHash,
+          registryManifestBinding: toolRegistryManifestBinding({
+            profileId: registry.profileId,
+            definitionHash: environment.definitionHash,
+            matcherEvidenceHash: registry.matcherEvidenceHash,
+            toolSchemaRegistryHash: registryHash,
+            toolSchemaRegistryEvidenceId: "EVID-HOST-HOOK-ACTIVE-FIXTURE",
+            canonicalToolName: "fixture.native.browser",
+            inputSchemaHash: registry.tools[0]!.inputSchemaHash,
+          }),
+        },
+      ],
+    },
+    derived: {
+      ...base.derived,
+      mode: "MICRO_ACTION_GUARD",
+      safety: "ACTIVE",
+      handoff: handoffActive ? "ACTIVE" : base.derived.handoff,
+    },
+    handoff: handoffActive
+      ? {
+          ...base.handoff,
+          activation: "ACTIVE",
+          inactiveReasons: [],
+          capability: {
+            surface: "FOCUSED_REAL_TAB",
+            lease: "EXCLUSIVE_USER_LEASE",
+            resume: "AUTO_VERIFIED",
+            conversationContextPreserved: true,
+            sameTabBinding: true,
+            originalPlacementRestorable: false,
+          },
+        }
+      : base.handoff,
+    hooks: {
+      ...base.hooks,
+      concurrentConflictProbe: "passed",
+    },
+  });
+  await writeHostProfile(environment.pluginData, profile);
+  const directory = path.join(
+    environment.pluginData,
+    "hosts",
+    profile.profileId,
+  );
+  const registryContents = `${JSON.stringify(registry, null, 2)}\n`;
+  await writeFile(
+    path.join(directory, TOOL_SCHEMA_REGISTRY_FILENAME),
+    registryContents,
+  );
+  const profileContents = await readFile(path.join(directory, "profile.json"));
+  await writeFile(
+    path.join(directory, "manifest.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        profileId: profile.profileId,
+        profileSha256: sha256(profileContents),
+        guard: {
+          toolSchemaRegistryFileSha256: sha256(registryContents),
+          toolSchemaRegistryHash: registryHash,
+          toolSchemaRegistryEvidenceId:
+            profile.route.toolSchemaRegistryEvidenceId,
+          browserTools: profile.route.browserTools,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  return {
+    ...environment,
+    profile,
+    registry,
+    verifyGuardActivation: (candidate: HostProfile) =>
+      candidate.profileId === profile.profileId,
+  };
 }
 
 async function allFiles(directory: string): Promise<string[]> {
@@ -198,6 +372,103 @@ async function allFiles(directory: string): Promise<string[]> {
       }),
     )
   ).flat();
+}
+
+async function runtimeStateLockPath(runtimeRoot: string): Promise<string> {
+  const state = (await allFiles(runtimeRoot)).find(
+    (filename) => path.basename(filename) === "browser-task-state.json",
+  );
+  if (!state) throw new Error("fixture runtime state was not created");
+  return path.join(path.dirname(state), ".browser-task-state.lock");
+}
+
+async function setCredentialGateState(
+  pluginData: string,
+  state: "ACTIVE" | "CLEANUP_PENDING" | "PREPARING" | "UNKNOWN",
+): Promise<void> {
+  const root = hookCredentialFenceStateDirectory(pluginData);
+  const filename = path.join(root, "credential-execution-gate", "current.json");
+  if (state === "UNKNOWN") {
+    await writeFile(filename, "{}\n");
+    return;
+  }
+  const current = await readCredentialExecutionGate(root);
+  if (current.kind !== "KNOWN") throw new Error("missing credential gate");
+  const persisted: Record<string, unknown> = { ...current };
+  delete persisted.kind;
+  await writeFile(
+    filename,
+    `${JSON.stringify({
+      ...persisted,
+      createdAt: 2,
+      expiresAt: 10_000,
+      generation: 1,
+      operationDigest: "a".repeat(64),
+      outcome: state === "PREPARING" ? "NONE" : "ACTIVATED",
+      receiptDigest: state === "PREPARING" ? null : "b".repeat(64),
+      state,
+      updatedAt: 2,
+    })}\n`,
+  );
+}
+
+async function seedUserLease(
+  pluginData: string,
+  profile: HostProfile,
+  sessionId: string,
+): Promise<void> {
+  const scope = hookBrowserTaskScope(sessionId);
+  const runtimeRoot = hookRuntimeStateDirectory(pluginData);
+  const running = createBrowserTaskState({
+    ...scope,
+    hostProfileId: profile.profileId,
+    mode: profile.derived.mode,
+  });
+  await writeBrowserTaskState(runtimeRoot, running, null);
+  await writeBrowserTaskState(
+    runtimeRoot,
+    activateUserLease(running, "fixture-handoff"),
+    running.stateVersion,
+  );
+}
+
+async function prepareFixtureHandoff(
+  environment: Awaited<ReturnType<typeof setupActiveGuard>>,
+  sessionId: string,
+  seedState = false,
+) {
+  const scope = hookBrowserTaskScope(sessionId);
+  const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+  const topOrigin = "https://accounts.example.test";
+  const documentBinding = "document-1";
+  const state = {
+    ...createBrowserTaskState({
+      ...scope,
+      hostProfileId: environment.profile.profileId,
+      mode: environment.profile.derived.mode,
+    }),
+    currentOrigin: topOrigin,
+    documentBinding,
+  };
+  if (seedState) await writeBrowserTaskState(runtimeRoot, state, null);
+  const lease = prepareHandoffLease({
+    handoffId: `${sessionId}-handoff`,
+    previousLeaseEpoch: state.leaseEpoch,
+    nonce: "0123456789abcdef0123456789abcdef",
+    scope: { ...scope, tabId: 17, topOrigin, documentBinding },
+    createdAt: 1_000,
+    expiresAt: 10_000,
+  });
+  await prepareHandoffBarrier(
+    runtimeRoot,
+    lease,
+    {
+      profileBindingHash: hostProfileBindingHash(environment.profile),
+      profileId: environment.profile.profileId,
+    },
+    () => 1_000,
+  );
+  return { lease, runtimeRoot };
 }
 
 describe("public Codex hooks", () => {
@@ -247,12 +518,25 @@ describe("public Codex hooks", () => {
     const unrelated = await handleHookEvent(
       {
         hook_event_name: "PreToolUse",
+        session_id: sessionCanary,
         tool_name: "fixture.native.browser.extra",
+        tool_use_id: "unrelated-call",
         tool_input: { value: canary },
       },
       environment,
     );
     expect(unrelated).toEqual({});
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PostToolUse",
+          session_id: sessionCanary,
+          tool_name: "fixture.native.browser.extra",
+          tool_use_id: "unrelated-call",
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
     expect(await readBrowserRouteObservations(environment.pluginData)).toEqual(
       [],
     );
@@ -316,6 +600,176 @@ describe("public Codex hooks", () => {
     expect(persisted.join("\n")).not.toContain(sessionCanary);
   });
 
+  it("tracks every wildcard tool class and never reads or persists payloads", async () => {
+    const environment = await setup();
+    const canary = "OXRAIL_CREDENTIAL_FENCE_SECRET_CANARY";
+    const calls = [
+      "fixture.native.browser",
+      "fixture.shell.exec",
+      "fixture.screen.capture",
+      "fixture.clipboard.read",
+      "fixture.other.tool",
+    ].map((toolName, index) => ({
+      sessionId: `${canary}-session-${index}`,
+      toolName,
+      toolUseId: `${canary}-call-${index}`,
+    }));
+    const outputs: HookOutput[] = [];
+
+    for (const call of calls) {
+      const pre: Record<string, unknown> = {
+        hook_event_name: "PreToolUse",
+        session_id: call.sessionId,
+        tool_name: call.toolName,
+        tool_use_id: call.toolUseId,
+      };
+      Object.defineProperty(pre, "tool_input", {
+        enumerable: true,
+        get() {
+          throw new Error("credential fence must not read tool_input");
+        },
+      });
+      outputs.push(await handleHookEvent(pre, environment));
+    }
+    expect(outputs).toEqual(calls.map(() => ({})));
+
+    await setCredentialGateState(environment.pluginData, "PREPARING");
+    for (const [index, call] of calls.entries()) {
+      const blocked = await handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: `${canary}-blocked-session-${index}`,
+          tool_name: call.toolName,
+          tool_use_id: `${canary}-blocked-call-${index}`,
+          get tool_input() {
+            throw new Error("blocked fence must not read tool_input");
+          },
+        },
+        environment,
+      );
+      expect(blocked).toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+          ),
+        },
+      });
+      expect(JSON.stringify(blocked)).toContain(
+        "Credential protection remains INACTIVE",
+      );
+      outputs.push(blocked);
+    }
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("PENDING");
+
+    for (const call of calls) {
+      const post: Record<string, unknown> = {
+        hook_event_name: "PostToolUse",
+        session_id: call.sessionId,
+        tool_name: call.toolName,
+        tool_use_id: call.toolUseId,
+      };
+      Object.defineProperties(post, {
+        tool_input: {
+          enumerable: true,
+          get() {
+            throw new Error("credential fence Post must not read tool_input");
+          },
+        },
+        tool_response: {
+          enumerable: true,
+          get() {
+            throw new Error(
+              "credential fence Post must not read tool_response",
+            );
+          },
+        },
+      });
+      outputs.push(await handleHookEvent(post, environment));
+    }
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("QUIESCENT");
+
+    const persisted = await Promise.all(
+      (await allFiles(environment.pluginData)).map((filename) =>
+        readFile(filename, "utf8"),
+      ),
+    );
+    expect(persisted.join("\n")).not.toContain(canary);
+    expect(JSON.stringify(outputs)).not.toContain(canary);
+  });
+
+  it.each(["ACTIVE", "CLEANUP_PENDING", "UNKNOWN"] as const)(
+    "blocks every tool before profile classification when the credential gate is %s",
+    async (state) => {
+      const environment = await setup();
+      await setCredentialGateState(environment.pluginData, state);
+
+      const output = await handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "blocked-before-profile-session",
+          tool_name: "fixture.other.tool",
+          tool_use_id: "blocked-before-profile-call",
+          get tool_input() {
+            throw new Error("blocked fence must not read tool_input");
+          },
+        },
+        environment,
+      );
+
+      expect(output).toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            state === "UNKNOWN"
+              ? "OXRAIL_VERIFICATION_INCONCLUSIVE"
+              : "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+          ),
+        },
+      });
+      expect(JSON.stringify(output)).toContain(
+        "Credential protection remains INACTIVE",
+      );
+    },
+  );
+
+  it("fails open with an explicit inactive status when an OPEN fence cannot journal", async () => {
+    const environment = await setup();
+    const root = hookCredentialFenceStateDirectory(environment.pluginData);
+    await writeFile(path.join(root, ".local-digest-key.json"), "{}\n", {
+      mode: 0o600,
+    });
+
+    const output = await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "degraded-open-session",
+        tool_name: "fixture.other.tool",
+        tool_use_id: "degraded-open-call",
+        tool_input: { untouched: true },
+      },
+      environment,
+    );
+
+    expect(output).toMatchObject({
+      systemMessage: expect.stringContaining(
+        "Oxrail optimization unavailable / BYPASSED",
+      ),
+    });
+    expect(JSON.stringify(output)).toContain(
+      "Oxrail credential protection: INACTIVE",
+    );
+    expect(JSON.stringify(output)).not.toContain("permissionDecision");
+  });
+
   it("fails open when the profile is missing or the hook hash changed", async () => {
     const pluginRoot = process.cwd();
     const pluginData = await mkdtemp(path.join(tmpdir(), "oxrail-hook-open-"));
@@ -353,29 +807,992 @@ describe("public Codex hooks", () => {
     expect(JSON.stringify(staleProfileOutput)).not.toContain("updatedInput");
   });
 
-  it("does not record browser-route evidence without a host session id", async () => {
+  it("blocks malformed tool identity without recording browser-route evidence", async () => {
     const environment = await setup();
     for (const hook_event_name of ["PreToolUse", "PostToolUse"] as const) {
-      await expect(
-        handleHookEvent(
-          {
-            hook_event_name,
-            tool_name: "fixture.native.browser",
-            tool_use_id: "sessionless-browser-call",
-            tool_input: { action: "fixture-no-op" },
-            ...(hook_event_name === "PostToolUse"
-              ? { tool_response: { ok: true } }
-              : {}),
-          },
-          environment,
-        ),
-      ).resolves.toEqual({});
+      const output = await handleHookEvent(
+        {
+          hook_event_name,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "sessionless-browser-call",
+          tool_input: { action: "fixture-no-op" },
+          ...(hook_event_name === "PostToolUse"
+            ? { tool_response: { ok: true } }
+            : {}),
+        },
+        environment,
+      );
+      expect(JSON.stringify(output)).toContain(
+        hook_event_name === "PreToolUse"
+          ? "OXRAIL_VERIFICATION_INCONCLUSIVE"
+          : "BYPASSED",
+      );
     }
 
     await expect(
       readBrowserRouteObservations(environment.pluginData),
     ).resolves.toEqual([]);
   });
+
+  it("completes metadata-only Post after activation evidence drifts", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "raw-active-session-canary";
+    const turnId = "raw-active-turn-canary";
+    const toolUseId = "raw-active-tool-canary";
+    const pre = await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        turn_id: turnId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
+        tool_input: { action: "click", axis: "primary" },
+      },
+      environment,
+    );
+    expect(pre).toEqual({});
+
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({
+      lastAction: {
+        actionType: "click",
+        decision: "ALLOW",
+        reasonCode: "OXRAIL_NORMAL_ACTION_PASSTHROUGH",
+      },
+      pendingNativeActionIds: [expect.stringMatching(/^oxrail-id:/)],
+    });
+    await writeFile(
+      path.join(
+        environment.pluginData,
+        "hosts",
+        environment.profile.profileId,
+        TOOL_SCHEMA_REGISTRY_FILENAME,
+      ),
+      "{}\n",
+    );
+    await writeFile(
+      path.join(
+        environment.pluginData,
+        "hosts",
+        environment.profile.profileId,
+        "manifest.json",
+      ),
+      "{}\n",
+    );
+    environment.verifyGuardActivation = () => {
+      throw new Error("Post cleanup must not require fresh attestation");
+    };
+
+    let responseRead = false;
+    let postInputRead = false;
+    const post: Record<string, unknown> = {
+      hook_event_name: "PostToolUse",
+      session_id: sessionId,
+      turn_id: `${turnId}-next`,
+      tool_name: "fixture.native.browser",
+      tool_use_id: toolUseId,
+    };
+    Object.defineProperties(post, {
+      tool_input: {
+        enumerable: true,
+        get() {
+          postInputRead = true;
+          throw new Error("PostToolUse must not inspect tool_input");
+        },
+      },
+      tool_response: {
+        enumerable: true,
+        get() {
+          responseRead = true;
+          throw new Error("PostToolUse must not inspect tool_response");
+        },
+      },
+    });
+    await expect(handleHookEvent(post, environment)).resolves.toEqual({});
+    expect(postInputRead).toBe(false);
+    expect(responseRead).toBe(false);
+    await setCredentialGateState(environment.pluginData, "PREPARING");
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("QUIESCENT");
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({ pendingNativeActionIds: [] });
+    expect(
+      (await allFiles(runtimeRoot)).filter(
+        (filename) =>
+          filename.includes(
+            `${path.sep}tool-calls${path.sep}active${path.sep}`,
+          ) && /\.(json|indexing)$/.test(path.basename(filename)),
+      ),
+    ).toEqual([]);
+
+    const persisted = await Promise.all(
+      (await allFiles(environment.pluginData)).map((filename) =>
+        readFile(filename, "utf8"),
+      ),
+    );
+    expect(persisted.join("\n")).not.toContain(sessionId);
+    expect(persisted.join("\n")).not.toContain(turnId);
+    expect(persisted.join("\n")).not.toContain(toolUseId);
+  });
+
+  it("does not enforce a seeded lease without an external attestation verifier", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "unattested-session";
+    await seedUserLease(environment.pluginData, environment.profile, sessionId);
+    const { verifyGuardActivation: _untrustedTestSeam, ...production } =
+      environment;
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "unattested-call",
+          tool_input: { action: "submit", axis: "primary" },
+        },
+        production,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+  });
+
+  it("denies a PREPARING handoff before a live task lock can fail open", async () => {
+    const environment = await setupActiveGuard({}, true);
+    const sessionId = "preparing-handoff-session";
+    const { runtimeRoot } = await prepareFixtureHandoff(
+      environment,
+      sessionId,
+      true,
+    );
+    await writeFile(
+      await runtimeStateLockPath(runtimeRoot),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        createdAt: Date.now(),
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-preparing-handoff",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_VERIFICATION_INCONCLUSIVE",
+        ),
+      },
+    });
+  });
+
+  it("denies an ACTIVE handoff as a user-owned lease", async () => {
+    const environment = await setupActiveGuard({}, true);
+    const sessionId = "active-handoff-session";
+    const { lease, runtimeRoot } = await prepareFixtureHandoff(
+      environment,
+      sessionId,
+      true,
+    );
+    await expect(
+      activatePreparedHandoff(
+        runtimeRoot,
+        lease,
+        {
+          profileBindingHash: hostProfileBindingHash(environment.profile),
+          profileId: environment.profile.profileId,
+        },
+        () => ({
+          admissionGeneration: 1,
+          browserInstanceBindingHash: "a".repeat(64),
+          expiresAt: 10_000,
+          hostProfileBindingHash: hostProfileBindingHash(environment.profile),
+          nativeActionFenceHash: "e".repeat(64),
+          observedAt: 1_001,
+          receiptHash: "b".repeat(64),
+          scopeBindingHash: handoffScopeBindingHash(lease.scope),
+        }),
+        () => 1_001,
+      ),
+    ).resolves.toMatchObject({ kind: "ACTIVE" });
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-active-handoff",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_USER_LEASE_ACTIVE",
+        ),
+      },
+    });
+  });
+
+  it("bypasses a malformed handoff gate without state proof", async () => {
+    const environment = await setupActiveGuard({}, true);
+    const sessionId = "malformed-handoff-session";
+    const { runtimeRoot } = await prepareFixtureHandoff(environment, sessionId);
+    const barrier = (await allFiles(runtimeRoot)).find((filename) =>
+      /handoff-barriers\/.*\/lease-1\.json$/.test(filename),
+    );
+    if (!barrier) throw new Error("fixture handoff barrier was not created");
+    await writeFile(barrier, "{}\n", { mode: 0o600 });
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-with-malformed-handoff-gate",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+  });
+
+  it("ignores local handoff gates while profile handoff is INACTIVE", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "inactive-profile-handoff-session";
+    await prepareFixtureHandoff(environment, sessionId);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-with-inactive-handoff-profile",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("keeps CONFIGURED first-call verification passive despite seeded state", async () => {
+    const environment = await setup();
+    const sessionId = "configured-seeded-session";
+    await seedUserLease(environment.pluginData, environment.profile, sessionId);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "configured-seeded-call",
+          tool_input: { action: "click" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("never applies a browser lease to an unrelated tool", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "unrelated-seeded-session";
+    await seedUserLease(environment.pluginData, environment.profile, sessionId);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.unrelated.tool",
+          tool_use_id: "unrelated-seeded-call",
+          tool_input: { action: "click" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("migrates an idle session state to the current verified profile", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "profile-migration-session";
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    await writeBrowserTaskState(
+      runtimeRoot,
+      createBrowserTaskState({
+        ...scope,
+        hostProfileId: "hp_previous_fixture",
+        mode: "ADVISORY_ONLY",
+      }),
+      null,
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "profile-migration-call",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({});
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({
+      hostProfileId: environment.profile.profileId,
+      actionSignatureKeyId: expect.stringMatching(/^[a-f0-9]{64}$/),
+      mode: "MICRO_ACTION_GUARD",
+      revision: 1,
+      targetCacheEpoch: 1,
+      stateVersion: 1,
+      pendingNativeActionIds: [expect.stringMatching(/^oxrail-id:/)],
+    });
+  });
+
+  it("fails open without overflowing an exhausted profile-migration counter", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "profile-migration-overflow-session";
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const exhausted = {
+      ...createBrowserTaskState({
+        ...scope,
+        hostProfileId: "hp_previous_fixture",
+        mode: "ADVISORY_ONLY",
+      }),
+      revision: Number.MAX_SAFE_INTEGER,
+      targetCacheEpoch: Number.MAX_SAFE_INTEGER,
+    };
+    await writeBrowserTaskState(runtimeRoot, exhausted, null);
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "profile-migration-overflow-call",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toEqual({
+      systemMessage: expect.stringContaining(
+        "Oxrail optimization unavailable / BYPASSED",
+      ),
+    });
+    await expect(readBrowserTaskState(runtimeRoot, scope)).resolves.toEqual(
+      exhausted,
+    );
+  });
+
+  it("keeps a denied high-impact call pending without Host terminal evidence", async () => {
+    const environment = await setupActiveGuard();
+    const input = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: "high-impact-session",
+      turn_id: "high-impact-turn",
+      tool_name: "fixture.native.browser",
+      tool_use_id: "high-impact-call",
+      tool_input: { action: "submit", axis: "primary" },
+    };
+
+    const first = await handleHookEvent(input, environment);
+    const duplicate = await handleHookEvent(input, environment);
+    expect(first).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "OXRAIL_HUMAN_BOUNDARY: This action requires host-native approval; Oxrail cannot create approval proactively.",
+      },
+    });
+    expect(duplicate).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+        ),
+      },
+    });
+    await setCredentialGateState(environment.pluginData, "PREPARING");
+    await expect(
+      readCredentialToolFenceQuiescence(
+        hookCredentialFenceStateDirectory(environment.pluginData),
+      ),
+    ).resolves.toBe("PENDING");
+  });
+
+  it("never replays an allowed native action for duplicate or mismatched Pre delivery", async () => {
+    const environment = await setupActiveGuard({
+      originPath: ["origin"],
+      revisionPath: ["revision"],
+    });
+    const input = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: "duplicate-allow-session",
+      tool_name: "fixture.native.browser",
+      tool_use_id: "duplicate-allow-call",
+      tool_input: {
+        action: "click",
+        axis: "primary",
+        origin: "https://example.test",
+        revision: 0,
+      },
+    };
+
+    await expect(handleHookEvent(input, environment)).resolves.toEqual({});
+    for (const duplicate of [
+      input,
+      {
+        ...input,
+        tool_input: {
+          ...input.tool_input,
+          axis: "changed",
+        },
+      },
+      {
+        ...input,
+        tool_input: {
+          ...input.tool_input,
+          origin: "https://changed.example.test",
+        },
+      },
+      {
+        ...input,
+        tool_input: {
+          ...input.tool_input,
+          revision: 1,
+        },
+      },
+    ]) {
+      await expect(
+        handleHookEvent(duplicate, environment),
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+          ),
+        },
+      });
+    }
+  });
+
+  it("serializes concurrent duplicate Pre delivery before native execution", async () => {
+    const environment = await setupActiveGuard();
+    const input = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: "concurrent-duplicate-session",
+      tool_name: "fixture.native.browser",
+      tool_use_id: "concurrent-duplicate-call",
+      tool_input: { action: "click", axis: "primary" },
+    };
+    const outputs = await Promise.all(
+      Array.from({ length: 2 }, () => handleHookEvent(input, environment)),
+    );
+
+    expect(
+      outputs.filter((output) => JSON.stringify(output) === "{}"),
+    ).toHaveLength(1);
+    expect(
+      outputs.filter(
+        (output) =>
+          "hookSpecificOutput" in output &&
+          output.hookSpecificOutput.permissionDecision === "deny",
+      ),
+    ).toHaveLength(1);
+
+    const highImpact = {
+      ...input,
+      session_id: "concurrent-high-impact-session",
+      tool_use_id: "concurrent-high-impact-call",
+      tool_input: { action: "submit", axis: "primary" },
+    };
+    const denials = await Promise.all(
+      Array.from({ length: 2 }, () => handleHookEvent(highImpact, environment)),
+    );
+    expect(
+      denials.map((output) =>
+        "hookSpecificOutput" in output
+          ? output.hookSpecificOutput.permissionDecisionReason.split(":")[0]
+          : "ALLOW",
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "OXRAIL_HUMAN_BOUNDARY",
+        "OXRAIL_CREDENTIAL_FENCE_BLOCKED",
+      ]),
+    );
+  });
+
+  it("preserves a computed high-impact deny when state persistence fails", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "oversized-state-session";
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const initial = {
+      ...createBrowserTaskState({
+        ...scope,
+        hostProfileId: environment.profile.profileId,
+        mode: environment.profile.derived.mode,
+      }),
+      pendingNativeActionIds: Array.from(
+        { length: 843 },
+        (_, index) => `oxrail-id:${index.toString(16).padStart(64, "0")}`,
+      ),
+    };
+    expect(
+      Buffer.byteLength(
+        `${JSON.stringify(sanitizeBrowserTaskStateForPersistence(initial))}\n`,
+      ),
+    ).toBeLessThanOrEqual(MAX_BROWSER_TASK_STATE_BYTES);
+    await writeBrowserTaskState(runtimeRoot, initial, null);
+
+    const request = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: sessionId,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "oversized-state-call",
+      tool_input: { action: "submit", axis: "primary" },
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(
+        handleHookEvent(
+          { ...request, tool_use_id: `${request.tool_use_id}-${attempt}` },
+          environment,
+        ),
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: "deny",
+          permissionDecisionReason: expect.stringContaining(
+            "OXRAIL_HUMAN_BOUNDARY",
+          ),
+        },
+      });
+    }
+    await expect(readBrowserTaskState(runtimeRoot, scope)).resolves.toEqual(
+      initial,
+    );
+  });
+
+  it("preserves ownership and high-impact denials when local digest protection is unavailable", async () => {
+    const environment = await setupActiveGuard();
+    const leasedSession = "digest-key-lease-session";
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    await seedUserLease(
+      environment.pluginData,
+      environment.profile,
+      leasedSession,
+    );
+    await writeFile(
+      path.join(runtimeRoot, ".local-digest-key.json"),
+      Buffer.alloc(32),
+      {
+        mode: 0o644,
+      },
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: leasedSession,
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-lease",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_USER_LEASE_ACTIVE",
+        ),
+      },
+    });
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "digest-key-high-impact-session",
+          tool_name: "fixture.native.browser",
+          tool_use_id: "high-impact-call",
+          tool_input: { action: "submit", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining(
+          "OXRAIL_HUMAN_BOUNDARY",
+        ),
+      },
+    });
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "digest-key-pass-through-session",
+          tool_name: "fixture.native.browser",
+          tool_use_id: "ordinary-call",
+          tool_input: { action: "click", axis: "primary" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+  });
+
+  it("does not compare or overwrite action signatures after key loss", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "digest-key-loss-session";
+    const request = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: sessionId,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "keyed-call-1",
+      tool_input: { action: "click", axis: "primary" },
+    };
+    await expect(handleHookEvent(request, environment)).resolves.toEqual({});
+    await handleHookEvent(
+      { ...request, hook_event_name: "PostToolUse" as const },
+      environment,
+    );
+
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const scope = hookBrowserTaskScope(sessionId);
+    const keyed = await readBrowserTaskState(runtimeRoot, scope);
+    if (!keyed?.actionSignatureKeyId) {
+      throw new Error("fixture action signature key was not persisted");
+    }
+    await writeBrowserTaskState(
+      runtimeRoot,
+      { ...keyed, noProgressCount: 2, stateVersion: keyed.stateVersion + 1 },
+      keyed.stateVersion,
+    );
+    await unlink(path.join(runtimeRoot, ".local-digest-key.json"));
+
+    await expect(
+      handleHookEvent({ ...request, tool_use_id: "keyed-call-2" }, environment),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+    await expect(
+      readBrowserTaskState(runtimeRoot, scope),
+    ).resolves.toMatchObject({
+      actionSignatureKeyId: keyed.actionSignatureKeyId,
+      noProgressCount: 2,
+      pendingNativeActionIds: [],
+    });
+  });
+
+  it("does not enforce a persisted lease after activation evidence drifts", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "lease-session";
+    const turnId = "lease-turn";
+    const seedTool = "seed-call";
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        turn_id: turnId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: seedTool,
+        tool_input: { action: "click", axis: "primary" },
+      },
+      environment,
+    );
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        session_id: sessionId,
+        turn_id: turnId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: seedTool,
+      },
+      environment,
+    );
+    const scope = hookBrowserTaskScope(sessionId);
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const running = await readBrowserTaskState(runtimeRoot, scope);
+    if (!running) throw new Error("fixture state was not created");
+    const leased = activateUserLease(running, "fixture-handoff");
+    await writeBrowserTaskState(runtimeRoot, leased, running.stateVersion);
+    const driftedProfileId = "hp_fixture_active_drifted";
+    const driftedProfile = HostProfileSchema.parse({
+      ...environment.profile,
+      profileId: driftedProfileId,
+      setup: {
+        ...environment.profile.setup,
+        lifecycle: "CONFIGURED",
+        firstBrowserHookSeen: false,
+        verificationSource: "none",
+        optimization: "BYPASSED",
+      },
+      route: {
+        ...environment.profile.route,
+        browserTools: environment.profile.route.browserTools.map((tool) => ({
+          ...tool,
+          registryManifestBinding: toolRegistryManifestBinding({
+            profileId: driftedProfileId,
+            definitionHash: environment.profile.hooks.definitionHash,
+            matcherEvidenceHash: environment.profile.route.matcherEvidenceHash,
+            toolSchemaRegistryHash:
+              environment.profile.route.toolSchemaRegistryHash!,
+            toolSchemaRegistryEvidenceId:
+              environment.profile.route.toolSchemaRegistryEvidenceId!,
+            canonicalToolName: tool.canonicalToolName,
+            inputSchemaHash: tool.inputSchemaHash,
+          }),
+        })),
+      },
+      derived: {
+        ...environment.profile.derived,
+        mode: "ADVISORY_ONLY",
+        safety: "INACTIVE",
+      },
+    });
+    await writeHostProfile(environment.pluginData, driftedProfile);
+
+    const request = {
+      hook_event_name: "PreToolUse" as const,
+      session_id: sessionId,
+      turn_id: `${turnId}-next`,
+      tool_name: "fixture.native.browser",
+      tool_use_id: "call-during-user-lease",
+      tool_input: { action: "click", axis: "primary" },
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(
+        handleHookEvent(
+          { ...request, tool_use_id: `${request.tool_use_id}-${attempt}` },
+          environment,
+        ),
+      ).resolves.toEqual({});
+    }
+
+    await writeFile(
+      path.join(
+        environment.pluginData,
+        "hosts",
+        driftedProfileId,
+        "manifest.json",
+      ),
+      "{}\n",
+    );
+    await expect(
+      handleHookEvent(
+        { ...request, tool_use_id: `${request.tool_use_id}-drifted` },
+        environment,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("fails open when the session state lock is unavailable", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "locked-session";
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "seed-lock-state",
+        tool_input: { action: "click", axis: "seed" },
+      },
+      environment,
+    );
+    await handleHookEvent(
+      {
+        hook_event_name: "PostToolUse",
+        session_id: sessionId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: "seed-lock-state",
+      },
+      environment,
+    );
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const lockPath = await runtimeStateLockPath(runtimeRoot);
+    await writeFile(
+      lockPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        createdAt: Date.now(),
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          turn_id: "next-turn",
+          tool_name: "fixture.native.browser",
+          tool_use_id: "call-during-lock",
+          tool_input: { action: "click", axis: "next" },
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      systemMessage: expect.stringContaining("BYPASSED"),
+    });
+    await unlink(lockPath);
+  });
+
+  it("retries metadata-only Post cleanup after a transient state lock", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "post-retry-session";
+    const toolUseId = "post-retry-call";
+    await handleHookEvent(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        tool_name: "fixture.native.browser",
+        tool_use_id: toolUseId,
+        tool_input: { action: "click", axis: "primary" },
+      },
+      environment,
+    );
+    const runtimeRoot = hookRuntimeStateDirectory(environment.pluginData);
+    const lockPath = await runtimeStateLockPath(runtimeRoot);
+    await writeFile(
+      lockPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        createdAt: Date.now(),
+        nonce: "00000000-0000-4000-8000-000000000000",
+      })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+    const post = {
+      hook_event_name: "PostToolUse" as const,
+      session_id: sessionId,
+      turn_id: "later-turn",
+      tool_name: "fixture.native.browser",
+      tool_use_id: toolUseId,
+    };
+    const releaseLock = new Promise<void>((resolve, reject) => {
+      setTimeout(() => void unlink(lockPath).then(resolve, reject), 1);
+    });
+    await expect(handleHookEvent(post, environment)).resolves.toEqual({});
+    await releaseLock;
+    await expect(
+      readBrowserTaskState(runtimeRoot, hookBrowserTaskScope(sessionId)),
+    ).resolves.toMatchObject({ pendingNativeActionIds: [] });
+  });
+
+  it("does not invent no-progress outcomes from metadata-only Post events", async () => {
+    const environment = await setupActiveGuard();
+    const sessionId = "no-progress-session";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const toolUseId = `no-progress-call-${attempt}`;
+      await expect(
+        handleHookEvent(
+          {
+            hook_event_name: "PreToolUse",
+            session_id: sessionId,
+            tool_name: "fixture.native.browser",
+            tool_use_id: toolUseId,
+            tool_input: { action: "click", axis: "same" },
+          },
+          environment,
+        ),
+      ).resolves.toEqual({});
+      await handleHookEvent(
+        {
+          hook_event_name: "PostToolUse",
+          session_id: sessionId,
+          tool_name: "fixture.native.browser",
+          tool_use_id: toolUseId,
+        },
+        environment,
+      );
+    }
+
+    await expect(
+      readBrowserTaskState(
+        hookRuntimeStateDirectory(environment.pluginData),
+        hookBrowserTaskScope(sessionId),
+      ),
+    ).resolves.toMatchObject({ noProgressCount: 0 });
+  });
+
+  // 288 sequential marker writes plus a full re-read: I/O-bound, not logic-bound.
+  it(
+    "bounds passive browser-route evidence without storing tool ids",
+    { timeout: 30_000 },
+    async () => {
+      const environment = await setup();
+      for (
+        let index = 0;
+        index < MAX_BROWSER_ROUTE_OBSERVATIONS + 32;
+        index++
+      ) {
+        await recordBrowserHookPhase(
+          environment.pluginData,
+          "PreToolUse",
+          {
+            definitionHash: environment.definitionHash,
+            profileId: "hp_fixture",
+            sessionDigest: digestSessionId("bounded-session"),
+            synthetic: false,
+            toolUseDigest: digestToolUseId(`raw-tool-use-${index}`),
+          },
+          index,
+        );
+      }
+
+      const observations = await readBrowserRouteObservations(
+        environment.pluginData,
+      );
+      expect(observations.length).toBeLessThanOrEqual(
+        MAX_BROWSER_ROUTE_OBSERVATIONS,
+      );
+      const persisted = await Promise.all(
+        (await allFiles(environment.pluginData)).map((filename) =>
+          readFile(filename, "utf8"),
+        ),
+      );
+      expect(persisted.join("\n")).not.toContain("raw-tool-use-");
+    },
+  );
 
   it("surfaces a fixed inactive status when the Hook CLI fails internally", () => {
     const canary = "OXRAIL_INTERNAL_ERROR_INPUT_MUST_NOT_LEAK";
@@ -402,9 +1819,33 @@ describe("public Codex hooks", () => {
     expect(JSON.parse(result.stdout)).toEqual({
       systemMessage:
         "Oxrail optimization unavailable / BYPASSED. Native Computer Use remains available. " +
-        "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE.",
+        "Oxrail safety protection: INACTIVE. Oxrail handoff protection: INACTIVE. " +
+        "Oxrail credential protection: INACTIVE.",
     });
     expect(result.stdout).not.toContain(canary);
+  });
+
+  it("fails open visibly when the current-hash Hook marker cannot be written", async () => {
+    const environment = await setup();
+    const invalidDataRoot = path.join(
+      environment.pluginData,
+      "not-a-directory",
+    );
+    await writeFile(invalidDataRoot, "fixture");
+
+    await expect(
+      handleHookEvent(
+        {
+          hook_event_name: "UserPromptSubmit",
+          session_id: "marker-write-failure",
+        },
+        { ...environment, pluginData: invalidDataRoot },
+      ),
+    ).resolves.toEqual({
+      systemMessage: expect.stringContaining(
+        "Oxrail optimization unavailable / BYPASSED",
+      ),
+    });
   });
 
   it("never bypasses host approvals or hook trust", async () => {

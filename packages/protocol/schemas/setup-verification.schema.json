@@ -6,6 +6,7 @@
       "enum": ["passed", "partial", "failed", "unsupported", "unknown"],
       "type": "string"
     },
+    "credentialProtectionActive": { "type": "boolean" },
     "firstBrowserHookSeen": { "type": "boolean" },
     "handoffCapability": {
       "additionalProperties": false,
@@ -102,6 +103,7 @@
     "optimization",
     "safetyProtectionActive",
     "handoffProtectionActive",
+    "credentialProtectionActive",
     "resultingMode"
   ],
   "type": "object"

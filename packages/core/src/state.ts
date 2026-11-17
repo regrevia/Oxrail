@@ -2,6 +2,7 @@ import {
   BrowserTaskStateSchema,
   type ActionEnvelope,
   type BrowserTaskState,
+  type HandoffVerificationMarker,
   type HostMode,
   type PolicyDecision,
   type StateFingerprint,
@@ -9,10 +10,17 @@ import {
 } from "../../protocol/src/index.js";
 
 import {
+  type ActionSignatureProtector,
   actionDigestIdentity,
   actionIdentity,
   createActionDigest,
 } from "./policy.js";
+import {
+  canonicalPersistentHandoffId,
+  canonicalPersistentToolUseId,
+  persistentHandoffId,
+  persistentToolUseId,
+} from "./safe-state.js";
 
 export class StateVersionConflictError extends Error {
   constructor(expected: number, actual: number) {
@@ -28,7 +36,58 @@ export interface NewBrowserTaskState {
   taskId: string;
   hostProfileId: string;
   mode: HostMode;
-  goalSummary?: string;
+}
+
+function incrementCounter(value: number, name: string): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw new RangeError(
+      `${name} cannot advance beyond the safe integer range`,
+    );
+  }
+  return value + 1;
+}
+
+function assertActionSignatureKey(
+  state: BrowserTaskState,
+  protector: ActionSignatureProtector,
+): void {
+  if (
+    (state.actionSignatureKeyId !== undefined &&
+      state.actionSignatureKeyId !== protector.keyId) ||
+    (state.actionSignatureKeyId === undefined && state.lastAction !== undefined)
+  ) {
+    throw new Error("Action signature key does not match BrowserTaskState");
+  }
+}
+
+/** Clears only an idle legacy repetition baseline before its next atomic write. */
+export function migrateLegacyActionSignatureBaseline(
+  state: BrowserTaskState,
+  keyId: string,
+): BrowserTaskState {
+  if (state.actionSignatureKeyId !== undefined) {
+    if (state.actionSignatureKeyId !== keyId) {
+      throw new Error("Action signature key does not match BrowserTaskState");
+    }
+    return state;
+  }
+  if (
+    state.phase !== "RUNNING" ||
+    state.pointerOwner !== "NATIVE" ||
+    state.pendingNativeActionIds.length > 0
+  ) {
+    throw new Error("Legacy action baseline cannot be migrated while active");
+  }
+  const { lastAction: _legacyLastAction, ...legacy } = state;
+  return BrowserTaskStateSchema.parse({
+    ...legacy,
+    actionSignatureKeyId: keyId,
+    noProgressCount: 0,
+  });
 }
 
 export function createBrowserTaskState(
@@ -38,7 +97,7 @@ export function createBrowserTaskState(
     schemaVersion: 3,
     sessionId: input.sessionId,
     taskId: input.taskId,
-    goalSummary: input.goalSummary ?? "browser task",
+    goalSummary: "browser task",
     hostProfileId: input.hostProfileId,
     hostProfileStatus: "VALID",
     mode: input.mode,
@@ -63,6 +122,56 @@ export function stateFingerprintDigest(fingerprint: StateFingerprint): string {
   );
 }
 
+export function stageToolDecision(
+  state: BrowserTaskState,
+  action: ActionEnvelope,
+  decision: PolicyDecision,
+  signatureProtector: ActionSignatureProtector,
+): BrowserTaskState {
+  assertActionSignatureKey(state, signatureProtector);
+  const toolUseId = persistentToolUseId(action.toolUseId);
+  const executed =
+    decision.disposition === "PASS_THROUGH_ORIGINAL" ||
+    decision.disposition === "SEMANTIC_HINT_ONLY";
+  const pendingNativeActionIds = [
+    ...new Set(state.pendingNativeActionIds.map(canonicalPersistentToolUseId)),
+  ];
+  if (executed && !pendingNativeActionIds.includes(toolUseId)) {
+    pendingNativeActionIds.push(toolUseId);
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    lastAction: {
+      ...createActionDigest(action, decision, Date.now(), signatureProtector),
+      toolUseId,
+    },
+    actionSignatureKeyId: signatureProtector.keyId,
+    pendingNativeActionIds,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
+  });
+}
+
+export function completePendingTool(
+  state: BrowserTaskState,
+  toolUseId: string,
+): BrowserTaskState {
+  const persistentId = persistentToolUseId(toolUseId);
+  if (
+    !state.pendingNativeActionIds.some(
+      (pendingId) => canonicalPersistentToolUseId(pendingId) === persistentId,
+    )
+  ) {
+    return state;
+  }
+  return BrowserTaskStateSchema.parse({
+    ...state,
+    pendingNativeActionIds: state.pendingNativeActionIds
+      .map(canonicalPersistentToolUseId)
+      .filter((pendingId) => pendingId !== persistentId),
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
+  });
+}
+
 export interface ActionOutcome {
   meaningfulProgress: boolean;
   expectedStateVersion?: number;
@@ -74,6 +183,7 @@ export function recordActionOutcome(
   action: ActionEnvelope,
   decision: PolicyDecision,
   outcome: ActionOutcome,
+  signatureProtector: ActionSignatureProtector,
 ): BrowserTaskState {
   if (
     outcome.expectedStateVersion !== undefined &&
@@ -89,22 +199,33 @@ export function recordActionOutcome(
     decision.disposition === "SEMANTIC_HINT_ONLY";
   const sameAsLast =
     state.lastAction !== undefined &&
-    actionIdentity(action) === actionDigestIdentity(state.lastAction);
+    actionIdentity(action, signatureProtector) ===
+      actionDigestIdentity(state.lastAction);
   if (!executed) {
     return BrowserTaskStateSchema.parse({
       ...state,
-      stateVersion: state.stateVersion + 1,
+      stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
     });
   }
+  assertActionSignatureKey(state, signatureProtector);
   return BrowserTaskStateSchema.parse({
     ...state,
-    lastAction: createActionDigest(action, decision, outcome.timestamp),
+    lastAction: {
+      ...createActionDigest(
+        action,
+        decision,
+        outcome.timestamp,
+        signatureProtector,
+      ),
+      toolUseId: persistentToolUseId(action.toolUseId),
+    },
+    actionSignatureKeyId: signatureProtector.keyId,
     noProgressCount: outcome.meaningfulProgress
       ? 0
       : sameAsLast
-        ? state.noProgressCount + 1
+        ? incrementCounter(state.noProgressCount, "noProgressCount")
         : 1,
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -126,6 +247,9 @@ export function activateUserLease(
   expectedStateVersion = state.stateVersion,
 ): BrowserTaskState {
   assertVersion(state, expectedStateVersion);
+  if (state.pendingNativeActionIds.length > 0) {
+    throw new Error("User lease cannot start while native actions are pending");
+  }
   if (state.pointerOwner !== "NATIVE" || state.phase !== "RUNNING") {
     throw new Error(
       "User lease can only start while Native owns a running task",
@@ -134,10 +258,51 @@ export function activateUserLease(
   return BrowserTaskStateSchema.parse({
     ...state,
     phase: "USER_LEASE_ACTIVE",
-    activeHandoffId: handoffId,
-    leaseEpoch: state.leaseEpoch + 1,
+    activeHandoffId: persistentHandoffId(handoffId),
+    leaseEpoch: incrementCounter(state.leaseEpoch, "leaseEpoch"),
     pointerOwner: "HUMAN",
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
+  });
+}
+
+export interface BeginHandoffVerificationInput {
+  currentDocumentBinding: string;
+  currentOrigin: string;
+  expectedStateVersion: number;
+  handoffId: string;
+  leaseEpoch: number;
+  marker: HandoffVerificationMarker;
+}
+
+/** Atomically records the fixture-only consume proof while Human keeps ownership. */
+export function beginHandoffVerification(
+  state: BrowserTaskState,
+  input: BeginHandoffVerificationInput,
+): BrowserTaskState {
+  assertVersion(state, input.expectedStateVersion);
+  if (
+    state.phase !== "USER_LEASE_ACTIVE" ||
+    state.pointerOwner !== "HUMAN" ||
+    !state.activeHandoffId ||
+    state.activeHandoffId !== persistentHandoffId(input.handoffId) ||
+    state.leaseEpoch !== input.leaseEpoch ||
+    input.marker.leaseEpoch !== input.leaseEpoch ||
+    state.pendingNativeActionIds.length > 0 ||
+    state.handoffVerificationMarker !== undefined
+  ) {
+    throw new Error(
+      "Only the unconsumed active Human lease may begin verification",
+    );
+  }
+  const { currentUrlKey: _currentUrlKey, ...safeState } = state;
+  return BrowserTaskStateSchema.parse({
+    ...safeState,
+    currentOrigin: input.currentOrigin,
+    documentBinding: input.currentDocumentBinding,
+    handoffVerificationMarker: input.marker,
+    phase: "HANDOFF_VERIFYING",
+    pointerOwner: "HUMAN",
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -148,7 +313,9 @@ export function beginResume(
 ): BrowserTaskState {
   if (
     state.phase !== "USER_LEASE_ACTIVE" ||
-    state.activeHandoffId !== handoffId ||
+    !state.activeHandoffId ||
+    canonicalPersistentHandoffId(state.activeHandoffId) !==
+      persistentHandoffId(handoffId) ||
     state.leaseEpoch !== leaseEpoch
   ) {
     throw new Error("Only the active handoff and lease epoch may begin resume");
@@ -162,10 +329,13 @@ export function beginResume(
     ...safeState,
     phase: "RESUMING",
     pointerOwner: "NONE",
-    revision: state.revision + 1,
-    targetCacheEpoch: state.targetCacheEpoch + 1,
+    revision: incrementCounter(state.revision, "revision"),
+    targetCacheEpoch: incrementCounter(
+      state.targetCacheEpoch,
+      "targetCacheEpoch",
+    ),
     pendingNativeActionIds: [],
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }
 
@@ -176,7 +346,9 @@ export function finishResume(
 ): BrowserTaskState {
   if (
     state.phase !== "RESUMING" ||
-    state.activeHandoffId !== handoffId ||
+    !state.activeHandoffId ||
+    canonicalPersistentHandoffId(state.activeHandoffId) !==
+      persistentHandoffId(handoffId) ||
     state.leaseEpoch !== leaseEpoch
   ) {
     throw new Error(
@@ -188,6 +360,6 @@ export function finishResume(
     ...safeState,
     phase: "RUNNING",
     pointerOwner: "NATIVE",
-    stateVersion: state.stateVersion + 1,
+    stateVersion: incrementCounter(state.stateVersion, "stateVersion"),
   });
 }

@@ -10,11 +10,17 @@ import {
 export interface PolicyContext {
   action: ActionEnvelope;
   state: BrowserTaskState;
+  signatureProtector?: ActionSignatureProtector;
   routeCovered?: boolean;
   currentTargetFingerprint?: string;
   hostApprovalAvailable?: boolean;
   handoffAvailable?: boolean;
   requiresHumanBoundary?: boolean;
+}
+
+export interface ActionSignatureProtector {
+  readonly keyId: string;
+  protect(purpose: "input" | "target", digest: string): string;
 }
 
 const pass = (reasonCode: PolicyDecision["reasonCode"]): PolicyDecision => ({
@@ -23,15 +29,33 @@ const pass = (reasonCode: PolicyDecision["reasonCode"]): PolicyDecision => ({
   recoverable: true,
 });
 
-export function actionIdentity(action: ActionEnvelope): string {
+const protectSignature = (
+  protector: ActionSignatureProtector | undefined,
+  purpose: "input" | "target",
+  digest: string,
+) => (protector ? protector.protect(purpose, digest) : digest);
+
+export function actionIdentity(
+  action: ActionEnvelope,
+  signatureProtector?: ActionSignatureProtector,
+): string {
   return redactedDeterministicDigest("oxrail-action-identity-v1", {
     route: action.route,
     granularity: action.granularity,
     actionType: action.actionType,
     targetSignature: action.target
-      ? redactedDeterministicDigest("oxrail-target-signature-v1", action.target)
+      ? protectSignature(
+          signatureProtector,
+          "target",
+          redactedDeterministicDigest(
+            "oxrail-target-signature-v1",
+            action.target,
+          ),
+        )
       : undefined,
-    inputSignature: action.inputDigest,
+    inputSignature: action.inputDigest
+      ? protectSignature(signatureProtector, "input", action.inputDigest)
+      : undefined,
   });
 }
 
@@ -49,6 +73,7 @@ export function createActionDigest(
   action: ActionEnvelope,
   decision: PolicyDecision,
   timestamp = Date.now(),
+  signatureProtector?: ActionSignatureProtector,
 ): ActionDigest {
   const decisionKind: ActionDigest["decision"] =
     decision.disposition === "PASS_THROUGH_ORIGINAL"
@@ -65,14 +90,26 @@ export function createActionDigest(
     actionType: action.actionType,
     ...(action.target
       ? {
-          targetSignature: redactedDeterministicDigest(
-            "oxrail-target-signature-v1",
-            action.target,
+          targetSignature: protectSignature(
+            signatureProtector,
+            "target",
+            redactedDeterministicDigest(
+              "oxrail-target-signature-v1",
+              action.target,
+            ),
           ),
           sourceRevision: action.target.sourceRevision,
         }
       : {}),
-    ...(action.inputDigest ? { inputSignature: action.inputDigest } : {}),
+    ...(action.inputDigest
+      ? {
+          inputSignature: protectSignature(
+            signatureProtector,
+            "input",
+            action.inputDigest,
+          ),
+        }
+      : {}),
     decision: decisionKind,
     reasonCode: decision.reasonCode,
     timestamp,
@@ -102,19 +139,25 @@ function targetIsStale(context: PolicyContext): boolean {
 function repeatsWithoutProgress(
   action: ActionEnvelope,
   state: BrowserTaskState,
+  signatureProtector?: ActionSignatureProtector,
 ): boolean {
   if (
+    !signatureProtector ||
+    state.actionSignatureKeyId !== signatureProtector.keyId ||
     !state.lastAction ||
     state.noProgressCount < 2 ||
     action.granularity === "NONE"
   )
     return false;
-  return actionIdentity(action) === actionDigestIdentity(state.lastAction);
+  return (
+    actionIdentity(action, signatureProtector) ===
+    actionDigestIdentity(state.lastAction)
+  );
 }
 
-export function evaluateAction(context: PolicyContext): PolicyDecision {
-  const { action, state } = context;
-
+export function browserOwnershipDecision(
+  state: BrowserTaskState,
+): PolicyDecision | undefined {
   if (
     state.phase === "USER_LEASE_ACTIVE" ||
     state.phase === "HANDOFF_VERIFYING" ||
@@ -126,13 +169,31 @@ export function evaluateAction(context: PolicyContext): PolicyDecision {
       recoverable: true,
     };
   }
-  if (state.phase === "RESUMING" || state.pointerOwner === "NONE") {
+  if (
+    state.phase === "RESUMING" ||
+    state.phase === "RESTORING_TAB" ||
+    state.pointerOwner === "NONE"
+  ) {
     return {
       disposition: "BLOCK_BEFORE_EXECUTION",
       reasonCode: "OXRAIL_POST_HANDOFF_TARGET_INVALIDATED",
       recoverable: true,
     };
   }
+  if (state.phase === "HANDOFF_PREPARING") {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_VERIFICATION_INCONCLUSIVE",
+      recoverable: true,
+    };
+  }
+  return undefined;
+}
+
+export function evaluateAction(context: PolicyContext): PolicyDecision {
+  const { action, state } = context;
+  const ownershipDecision = browserOwnershipDecision(state);
+  if (ownershipDecision) return ownershipDecision;
 
   const freshAndCovered =
     context.routeCovered !== false && state.hostProfileStatus === "VALID";
@@ -148,6 +209,18 @@ export function evaluateAction(context: PolicyContext): PolicyDecision {
           : "OXRAIL_HOST_PROFILE_STALE"
         : "OXRAIL_HOST_ROUTE_UNPROVEN",
     );
+  }
+
+  if (
+    state.currentOrigin !== undefined &&
+    action.origin !== undefined &&
+    action.origin !== state.currentOrigin
+  ) {
+    return {
+      disposition: "BLOCK_BEFORE_EXECUTION",
+      reasonCode: "OXRAIL_UNSAFE_ORIGIN",
+      recoverable: true,
+    };
   }
 
   if (context.requiresHumanBoundary) {
@@ -194,7 +267,7 @@ export function evaluateAction(context: PolicyContext): PolicyDecision {
     };
   }
 
-  if (repeatsWithoutProgress(action, state)) {
+  if (repeatsWithoutProgress(action, state, context.signatureProtector)) {
     return {
       disposition: "BLOCK_BEFORE_EXECUTION",
       reasonCode: "OXRAIL_REDUNDANT_ACTION",
@@ -220,6 +293,7 @@ export function deriveHostMode(
     profile.hooks.trustState !== "active" ||
     profile.hooks.policy === "disabled" ||
     profile.hooks.policy === "managed-only" ||
+    profile.hooks.concurrentConflictProbe !== "passed" ||
     !profile.evidence.validUntilHostChange
   ) {
     return "UNSUPPORTED";
@@ -227,6 +301,19 @@ export function deriveHostMode(
   if (
     profile.setup.lifecycle !== "VERIFIED" ||
     profile.setup.optimization !== "ACTIVE"
+  ) {
+    return "ADVISORY_ONLY";
+  }
+  const pinnedToolNames = new Set(
+    profile.route.browserTools.map((tool) => tool.canonicalToolName),
+  );
+  if (
+    !profile.route.toolSchemaRegistryHash ||
+    !profile.route.toolSchemaRegistryEvidenceId ||
+    pinnedToolNames.size !== profile.route.canonicalToolMatchers.length ||
+    profile.route.canonicalToolMatchers.some(
+      (toolName) => !pinnedToolNames.has(toolName),
+    )
   ) {
     return "ADVISORY_ONLY";
   }
