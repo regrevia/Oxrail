@@ -458,7 +458,29 @@ describe("MCP server", () => {
     const second = firstBlock(await harness.waitForReply(2)).text as string;
     expect(second).toContain("truncated: true");
     expect(second).toContain("controls: 2");
+    /* A bare `truncated` leaves the caller unable to tell a control budget
+       from a character one, and the two ask for different next reads. */
+    expect(second).not.toContain("limit:");
     expect(second).not.toContain("title:");
+
+    /* When a cap did fire, the render says which one, so the caller knows
+       whether to re-read with `map` or with `article`. */
+    harness.route.snapshot = {
+      ...harness.route.snapshot,
+      title: "",
+      truncated: true,
+      limit: "controls",
+    };
+    harness.send({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: { maxChars: 40 } },
+    });
+    const third = firstBlock(await harness.waitForReply(3)).text as string;
+    expect(third).toContain("limit: controls");
+    expect(third).toContain("truncated: true");
+
     expect(harness.route.lastReadOptions).toEqual({ maxChars: 40 });
     await harness.end();
   });

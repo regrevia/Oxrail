@@ -223,6 +223,12 @@ export function snapshotExpression(options: {
 
   let nodes = 0;
   let truncated = false;
+  /* Which ceiling was hit, not just that one was: a caller told only
+     "truncated" cannot tell a page with more controls than the read
+     shows from one whose words were cut, and the two need different
+     next moves. */
+  let limit = "";
+  const capped = (why) => { truncated = true; limit = why; };
 
   /* A document is not the whole page: components live in shadow roots, and a
      checkout, a player or a chat widget lives in an iframe. Reading only
@@ -271,7 +277,7 @@ export function snapshotExpression(options: {
     }
   };
   walkFrames(document, 0);
-  if (unseen.length > 0) truncated = true;
+  if (unseen.length > 0) capped("frames");
 
   const offsetOf = (holder) => {
     let x = 0;
@@ -301,9 +307,9 @@ export function snapshotExpression(options: {
      corner to add. */
   const collect = (root, slot) => {
     for (const el of deepQuery(root, SELECTOR)) {
-      if (controls.length >= MAX_CONTROLS) { truncated = true; return; }
+      if (controls.length >= MAX_CONTROLS) { capped("controls"); return; }
       nodes += 1;
-      if (nodes > MAX_NODES) { truncated = true; return; }
+      if (nodes > MAX_NODES) { capped("nodes"); return; }
       if (!visible(el)) continue;
       const name = nameOf(el);
       if (name === "" && !el.hasAttribute("contenteditable") && el.tagName.toLowerCase() !== "input") continue;
@@ -321,7 +327,7 @@ export function snapshotExpression(options: {
   };
   collect(document, 0);
   for (let slot = 1; slot <= frames.length; slot += 1) {
-    if (controls.length >= MAX_CONTROLS) { truncated = true; break; }
+    if (controls.length >= MAX_CONTROLS) { capped("controls"); break; }
     collect(frames[slot - 1].doc, slot);
   }
 
@@ -342,7 +348,7 @@ export function snapshotExpression(options: {
      four times too much of it. Same rule as the term counter in read.js. */
   const runs = everything.match(/[a-z0-9]+|[\\u3400-\\u9fff]/gi);
   const words = runs === null ? 0 : runs.length;
-  if (text.length > MAX_CHARS) { text = text.slice(0, MAX_CHARS); truncated = true; }
+  if (text.length > MAX_CHARS) { text = text.slice(0, MAX_CHARS); capped("chars"); }
   text = text.replace(/\\n{3,}/g, "\\n\\n").trim();
 
   if (MODE === "links") {
@@ -384,7 +390,7 @@ export function snapshotExpression(options: {
       const said = nameOf(el);
       if (said === "") continue;
       outline.push("#".repeat(Math.min(6, Math.max(1, depth))) + " " + said);
-      if (outline.length >= 80) { truncated = true; break; }
+      if (outline.length >= 80) { capped("headings"); break; }
     }
     text = outline.length > 0 ? outline.join("\\n") : "(no headings)";
   }
@@ -395,6 +401,7 @@ export function snapshotExpression(options: {
     text,
     controls,
     truncated,
+    limit,
     blindFrames: unseen.length,
     words,
   };
@@ -625,6 +632,7 @@ export class CdpBrowserRoute implements BrowserRoute {
         text: snapshot.text,
         controls: snapshot.controls,
         truncated: snapshot.truncated === true,
+        limit: typeof snapshot.limit === "string" && snapshot.limit !== "" ? snapshot.limit : undefined,
         /* Carried out of the page expression, or a caller counting only what it
            received would call a page with an unreadable frame complete. */
         blindFrames: snapshot.blindFrames ?? 0,
@@ -667,6 +675,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           text: page.text,
           controls: [],
           truncated: page.truncated === true,
+          limit: page.truncated === true ? "chars" : undefined,
           mode: "article",
           words: seen.words,
           chars: page.text.length,
@@ -684,6 +693,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           text: page.text,
           controls: page.controls,
           truncated: page.truncated === true,
+          limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : undefined,
           mode: "map",
           words: page.words ?? 0,
           chars: page.text.length,
@@ -712,6 +722,7 @@ export class CdpBrowserRoute implements BrowserRoute {
               : text,
           controls: page.controls,
           truncated: found.rows.length < found.matched,
+          limit: found.rows.length < found.matched ? "passages" : undefined,
           mode: "query",
           words: page.words ?? 0,
           chars: text.length,
@@ -737,6 +748,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           text: page.text,
           controls: page.controls,
           truncated: page.truncated === true,
+          limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : undefined,
           mode: "changed",
           words: page.words ?? 0,
           chars: page.text.length,
@@ -752,6 +764,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           delta.text === "" ? "(no change since the last read)" : delta.text,
         controls: delta.controls,
         truncated: page.truncated === true,
+        limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : undefined,
         mode: "changed",
         words: page.words ?? 0,
         chars: delta.text.length,

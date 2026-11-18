@@ -499,7 +499,9 @@ function formatSnapshot(snapshot: Snapshot): string {
     );
   }
   if (snapshot.truncated) {
-    lines.push(`controls: ${snapshot.controls.length}`, "truncated: true");
+    lines.push(`controls: ${snapshot.controls.length}`);
+    if (snapshot.limit !== undefined) lines.push(`limit: ${snapshot.limit}`);
+    lines.push("truncated: true");
   }
   return lines.join("\n");
 }
