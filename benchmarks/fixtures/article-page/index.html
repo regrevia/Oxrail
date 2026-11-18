@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Refunds and returns — article fixture</title>
+  </head>
+  <body>
+    <!--
+      A second page shape, on purpose: long prose, almost no controls, one
+      answer. The long-page fixture is the opposite (short sections, 60 links),
+      so the two together test whether the shape the document claims -- a
+      question costs the answer, not the page -- is a property of the reading
+      modes or a property of that one fixture. Synthetic, and deliberately not
+      realistic prose: it repeats so the page is long without being dense.
+    -->
+    <h1>Refunds and returns</h1>
+
+    <p>
+      This article collects the questions support receives most often. It is
+      long because the policy is long, and most of it does not answer the one
+      question a person usually has when they open it.
+    </p>
+
+    <h2>When a refund arrives</h2>
+    <p>
+      A refund appears on the original payment method five to ten business days
+      after the return is scanned by the courier. The window is set by the card
+      network rather than by the shop, which is why support cannot shorten it
+      and why the number on a statement can lag the email that announced it.
+    </p>
+    <p>
+      Nothing else changes the timing: not the amount, not the reason for the
+      return, not whether the parcel arrived at a depot or a shop counter. The
+      refund is issued once and appears once, and a second email about the same
+      refund is a notification rather than a second payment.
+    </p>
+
+    <h2>Return windows</h2>
+    <p>
+      An order can be returned within thirty days of delivery. The window opens
+      when the parcel is delivered, not when it was ordered, so an order placed
+      in one month and delivered in the next gets its thirty days from the day
+      the tracking says it arrived.
+    </p>
+    <p>
+      Items bought in a sale follow the same rule. The only exception is an item
+      that was made to order, which carries the window stated on its own page,
+      because it cannot be resold once it has been cut.
+    </p>
+
+    <h2>What can be returned</h2>
+    <p>
+      Anything unused, in its packaging, with its labels attached. That includes
+      gifts received from someone else, which can be returned for store credit
+      without the buyer being involved.
+    </p>
+    <p>
+      Some items cannot come back for hygiene or safety reasons: opened
+      cosmetics, pierced jewellery, perishable food, and anything that has been
+      cut to size. These are listed on the item page before the order is placed,
+      and the list is the same in every region where the shop trades.
+    </p>
+
+    <h2>Return costs</h2>
+    <p>
+      A return costs nothing when the item was faulty or when the wrong item was
+      sent. Otherwise the cost of the label is deducted from the refund, and the
+      amount is shown before the label is issued rather than after.
+    </p>
+    <p>
+      Collection from an address costs more than dropping a parcel at a shop,
+      because the courier charges for the visit. Both options use the same
+      tracking and the same thirty-day window.
+    </p>
+
+    <h2>Exchanges</h2>
+    <p>
+      An exchange is a return followed by a new order, which means the new order
+      is charged immediately and the refund for the old one follows the timing
+      above. Sizes and colours can be exchanged this way; nothing else can.
+    </p>
+    <p>
+      Reserving an exchange item for the duration of a return is not something
+      the shop can do, so an item that sells out between the two orders cannot
+      be exchanged into, only refunded.
+    </p>
+
+    <h2>Damaged or faulty items</h2>
+    <p>
+      A damaged item is replaced if a photograph is supplied within thirty days
+      of delivery. The photograph is used to decide the outcome, so the parcel
+      does not have to come back first.
+    </p>
+    <p>
+      A fault that appears later is covered by the manufacturer rather than by
+      the shop once the return window has closed, and the manufacturer's process
+      is usually the faster route at that point.
+    </p>
+
+    <h2>Missing parcels</h2>
+    <p>
+      A parcel that tracking says was delivered but is not where it should be is
+      treated as missing after twenty-four hours. Support asks for the delivery
+      address once, then either finds the parcel or refunds it.
+    </p>
+    <p>
+      A parcel still in transit after the estimated date is not missing, and a
+      refund cannot be issued for it until the carrier closes the investigation.
+    </p>
+
+    <h2>Gift returns</h2>
+    <p>
+      A gift can be returned for store credit without a receipt, provided the
+      sender did not mark the order as non-returnable. Store credit does not
+      expire and can be used against any order.
+    </p>
+
+    <h2>International orders</h2>
+    <p>
+      Returns from outside the country the order was placed in are charged the
+      outbound shipping as well as the return label, because neither leg can be
+      recovered from the carrier.
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      The policy is reviewed twice a year. A change applies to orders placed
+      after the change, never to orders already placed, and the date at the top
+      of this page is the date of the last change.
+    </p>
+
+    <h2>Contacting support</h2>
+    <p>
+      Support answers in the order messages arrive. A message that includes the
+      order number and a photograph is answered faster than one that asks a
+      question the article above already answers, which is the reason the
+      article is here.
+    </p>
+
+    <button id="show-status" type="button">Show delivery status</button>
+    <p id="status" hidden>Your parcel is out for delivery.</p>
+    <script>
+      document.getElementById("show-status").addEventListener("click", () => {
+        const status = document.getElementById("status");
+        status.hidden = false;
+      });
+    </script>
+
+    <ul>
+      <li><a href="#returns">Return policy</a></li>
+      <li><a href="#refunds">Refund timing</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+  </body>
+</html>
