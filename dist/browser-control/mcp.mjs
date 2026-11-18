@@ -1636,6 +1636,9 @@ function snapshotExpression(options) {
   };
 })()`;
 }
+function capOf(raw) {
+  return typeof raw === "string" && raw !== "" ? raw : void 0;
+}
 function inspectBinary(env = process.env) {
   const binary = (env.OXRAIL_CHROME ?? "").trim();
   if (binary !== "" && existsSync2(binary)) {
@@ -1844,7 +1847,7 @@ var init_route = __esm({
             text: snapshot.text,
             controls: snapshot.controls,
             truncated: snapshot.truncated === true,
-            limit: typeof snapshot.limit === "string" && snapshot.limit !== "" ? snapshot.limit : void 0,
+            limit: capOf(snapshot.limit),
             /* Carried out of the page expression, or a caller counting only what it
                received would call a page with an unreadable frame complete. */
             blindFrames: snapshot.blindFrames ?? 0,
@@ -1897,7 +1900,7 @@ var init_route = __esm({
               text: page2.text,
               controls: page2.controls,
               truncated: page2.truncated === true,
-              limit: typeof page2.limit === "string" && page2.limit !== "" ? page2.limit : void 0,
+              limit: capOf(page2.limit),
               mode: "map",
               words: page2.words ?? 0,
               chars: page2.text.length
@@ -1945,7 +1948,7 @@ var init_route = __esm({
               text: page.text,
               controls: page.controls,
               truncated: page.truncated === true,
-              limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : void 0,
+              limit: capOf(page.limit),
               mode: "changed",
               words: page.words ?? 0,
               chars: page.text.length
@@ -1960,7 +1963,7 @@ var init_route = __esm({
             text: delta.text === "" ? "(no change since the last read)" : delta.text,
             controls: delta.controls,
             truncated: page.truncated === true,
-            limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : void 0,
+            limit: capOf(page.limit),
             mode: "changed",
             words: page.words ?? 0,
             chars: delta.text.length

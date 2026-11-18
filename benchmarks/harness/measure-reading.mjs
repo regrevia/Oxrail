@@ -163,6 +163,10 @@ async function main() {
         controlChars: receipt.controls.length,
         words: snapshot.words ?? null,
         truncated: snapshot.truncated === true,
+        /* Which ceiling fired, not only that one did: a row that says
+           "truncated" without naming the cap cannot be compared with one
+           that hit a different cap on the same page. */
+        limit: snapshot.truncated === true ? (snapshot.limit ?? null) : null,
         ms: Math.round(elapsed * 100) / 100,
       });
     }
@@ -198,8 +202,9 @@ async function main() {
   for (const row of rows) {
     const percent =
       row.ofView === null ? "" : ` (${(row.ofView * 100).toFixed(1)}%)`;
+    const capped = row.limit === null ? "" : `  capped: ${row.limit}`;
     console.log(
-      `${row.call.padEnd(width)}  ${String(row.chars).padStart(5)} chars${percent.padEnd(9)} ${String(row.ms).padStart(6)}ms  ${row.why}`,
+      `${row.call.padEnd(width)}  ${String(row.chars).padStart(5)} chars${percent.padEnd(9)} ${String(row.ms).padStart(6)}ms${capped}  ${row.why}`,
     );
   }
   console.log(
