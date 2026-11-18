@@ -103,9 +103,23 @@ Both columns are the call's cost: the text it returns, and the numbered controls
 
 Reproduce this rather than trusting it: `node benchmarks/harness/measure-reading.mjs` measures `packages/browser-control/src/route.ts` against `benchmarks/fixtures/long-page/index.html` in a headless Chrome on this machine.
 
-Which number is a baseline and which is this page's: the ratios are the baseline, because they follow from the shape of each mode rather than from this fixture's prose — `query` receiving 25% of what `browser_view` receives, `changed` after an action costing the change and nothing else. The absolute characters are this page's, and `article` coming back larger than `browser_view` is expected on a prose page: it trades numbered control lines for heading and list markers, and it is for reading or quoting a page, not for saving on a page you were going to read anyway.
+The same five calls on the opposite page shape — 758 words of prose, three links, no long control list — is `node benchmarks/harness/measure-reading.mjs --fixture article-page`:
 
-Those are one fixture on one machine, not a benchmark; nothing here is a claim about other pages. Each call above took tens of milliseconds in the page. What repeats on any page is the shape: a question costs the answer, not the page — plus, when a write may follow, the addresses to act on it.
+| Call                                                            | Text | Controls | Total | Share of `browser_view` |
+| --------------------------------------------------------------- | ---- | -------- | ----- | ----------------------- |
+| `browser_view`                                                  | 4269 | 94       | 4363  | 1                       |
+| `browser_read {mode:"article", maxChars:24000}`                 | 4279 | 0        | 4279  | 0.98                    |
+| `browser_read {mode:"map"}`                                     | 251  | 94       | 345   | 0.08                    |
+| `browser_read {mode:"query", query:"how long do refunds take"}` | 364  | 94       | 458   | 0.11                    |
+| `browser_read {mode:"changed"}` after a click                   | 17   | 0        | 17    | 0.004                   |
+
+Two pages is not a corpus, but it is enough to separate what repeats from what does not, and the first version of this section got that wrong: it called the ratios the portable part. They are not. `query` costs 25% of `browser_view` on the link-heavy page and 11% here, because on that page the 61 control lines are most of what a readable mode has to carry, and here there are three. The ratios follow the page's control density, not the mode.
+
+What repeats on both is the ordering and the reason for it: `map` and `query` receive a fraction of the page, `changed` after an action receives the change and nothing else, and each mode's cost is the text it returns plus the addresses a following write needs. On a page with almost no controls the saving is larger, not smaller.
+
+`article` is the mode that does not save: it came back at 98% of `browser_view` here and 110% on the long page. That is expected, and it is not what the mode is for — it trades numbered control lines for heading and list markers, and it exists to read or quote a page, not to save on a page you were going to read anyway.
+
+Those are two fixtures on one machine, not a benchmark; nothing here is a claim about other pages. Each call above took single-digit to low-tens of milliseconds in the page.
 
 Ranking happens in this process with no model, no network and no third-party library. A question is folded to terms (plurals and participles collapse: `refunds` and `refund` are the same, `shipping` and `shipped` both become `ship`), scored against the page's blocks with saturation and length normalization, and the best passages are emitted with the heading they sit under. `query` also reports what it did not show: `passages: 2 of 40 blocks`.
 

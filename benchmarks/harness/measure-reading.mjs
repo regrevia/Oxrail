@@ -2,10 +2,13 @@
  *
  * `docs/product/browser-control.md` quotes five character counts. Quoted
  * numbers that no script produces are numbers that drift, so this is the
- * script: it serves `benchmarks/fixtures/long-page/`, opens it once, and runs
- * the five calls the document describes.
+ * script: it serves one fixture, opens it once, and runs the five calls the
+ * document describes.
  *
- *   node benchmarks/harness/measure-reading.mjs [--json]
+ *   node benchmarks/harness/measure-reading.mjs [--fixture <name>] [--json]
+ *
+ * The default fixture is `benchmarks/fixtures/long-page/`; `--fixture
+ * article-page` runs the same five calls on `benchmarks/fixtures/article-page/`.
  *
  * It reports characters returned to the caller -- the part that occupies a
  * context window -- not bytes on the wire. The distinction matters: a control's
@@ -23,8 +26,25 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const pagePath = resolve(here, "../fixtures/long-page/index.html");
 const QUESTION = "how long do refunds take";
+
+/* One fixture by default, so the numbers the document quotes stay reproducible
+   by the command it quotes. `--fixture article-page` runs the same five calls
+   on a page of the opposite shape -- long prose, three links -- which is how
+   the shape claim is checked rather than asserted: if a mode only saves on one
+   page shape it is a property of that page, not of the mode. */
+const fixtureName =
+  (() => {
+    const flag = process.argv.indexOf("--fixture");
+    if (flag !== -1 && process.argv[flag + 1])
+      return process.argv[flag + 1].replace(/\/+$/, "");
+    const inline = process.argv.find((arg) => arg.startsWith("--fixture="));
+    return inline
+      ? inline.slice("--fixture=".length).replace(/\/+$/, "")
+      : null;
+  })() ?? "long-page";
+const fixturePath = resolve(here, "../fixtures", fixtureName);
+const pagePath = resolve(fixturePath, "index.html");
 
 /* The five calls the document tabulates, in the order it lists them. Each entry
    says what it is for, so a mode that stops being useful is visible as a number
@@ -58,7 +78,11 @@ const CALLS = [
 ];
 
 async function serve() {
-  const body = await readFile(pagePath, "utf8");
+  const body = await readFile(pagePath, "utf8").catch(() => {
+    throw new Error(
+      `no fixture at ${pagePath}; pass --fixture <name> for a directory under benchmarks/fixtures/`,
+    );
+  });
   const server = createServer((request, response) => {
     if (request.url !== "/" && request.url !== "/index.html") {
       response.writeHead(404).end("not found");
@@ -157,7 +181,7 @@ async function main() {
   if (process.argv.includes("--json")) {
     console.log(
       JSON.stringify(
-        { fixture: "benchmarks/fixtures/long-page", rows },
+        { fixture: `benchmarks/fixtures/${fixtureName}`, rows },
         null,
         2,
       ),
@@ -179,7 +203,7 @@ async function main() {
     );
   }
   console.log(
-    "\nOne fixture on one machine, headless Chrome. Not a benchmark, and not a claim about other pages.",
+    `\nOne fixture on one machine, headless Chrome: benchmarks/fixtures/${fixtureName}. Not a benchmark, and not a claim about other pages.`,
   );
 }
 
