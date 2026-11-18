@@ -430,6 +430,13 @@ type EvaluateResult = {
  * The route. One page is enough: every tool call addresses "the page", and a
  * second tab would only make the numbered controls ambiguous.
  */
+/* The page expression reports "" when nothing was capped, and a missing
+   field when the expression did not run at all. Both mean the same thing to a
+   caller: no cap to name. */
+function capOf(raw: unknown): string | undefined {
+  return typeof raw === "string" && raw !== "" ? raw : undefined;
+}
+
 export class CdpBrowserRoute implements BrowserRoute {
   private chrome: ChromeProcess | null = null;
   private cdp: CdpConnection | null = null;
@@ -632,7 +639,7 @@ export class CdpBrowserRoute implements BrowserRoute {
         text: snapshot.text,
         controls: snapshot.controls,
         truncated: snapshot.truncated === true,
-        limit: typeof snapshot.limit === "string" && snapshot.limit !== "" ? snapshot.limit : undefined,
+        limit: capOf(snapshot.limit),
         /* Carried out of the page expression, or a caller counting only what it
            received would call a page with an unreadable frame complete. */
         blindFrames: snapshot.blindFrames ?? 0,
@@ -693,7 +700,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           text: page.text,
           controls: page.controls,
           truncated: page.truncated === true,
-          limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : undefined,
+          limit: capOf(page.limit),
           mode: "map",
           words: page.words ?? 0,
           chars: page.text.length,
@@ -748,7 +755,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           text: page.text,
           controls: page.controls,
           truncated: page.truncated === true,
-          limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : undefined,
+          limit: capOf(page.limit),
           mode: "changed",
           words: page.words ?? 0,
           chars: page.text.length,
@@ -764,7 +771,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           delta.text === "" ? "(no change since the last read)" : delta.text,
         controls: delta.controls,
         truncated: page.truncated === true,
-        limit: typeof page.limit === "string" && page.limit !== "" ? page.limit : undefined,
+        limit: capOf(page.limit),
         mode: "changed",
         words: page.words ?? 0,
         chars: delta.text.length,
