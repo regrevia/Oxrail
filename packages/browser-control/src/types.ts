@@ -39,6 +39,11 @@ export interface Snapshot {
   readonly text: string;
   readonly controls: readonly Control[];
   readonly truncated: boolean;
+  /** Which ceiling the reading stopped at, when it stopped at one: `controls`,
+   * `chars`, `nodes`, `headings` or `frames`. A caller that knows which one was
+   * hit knows what to do next — read `map` when controls ran out, `article` when
+   * characters did — where a bare `truncated` only says "there is more". */
+  readonly limit?: string | undefined;
   /** Frames whose contents could not be read, so a short reading of a page
    * that visibly has more is explained instead of looking complete. */
   readonly blindFrames?: number;

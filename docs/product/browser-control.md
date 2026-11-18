@@ -129,6 +129,8 @@ A control keeps its number for as long as it is on the page: the page-side store
 
 `maxChars` bounds each mode (default 2000, minimum 200). It is a character budget, not a token one: the same characters cost more in Chinese than in English.
 
+When a read hits one of its own limits it says so, and says which: `truncated: true` is paired with a `limit:` line naming the cap that fired. `controls` means the page had more controls than one reading numbers, and the next read should be `map`, which returns the outline and the controls without the prose; `chars` means the text budget ran out after the controls were already collected, so `article` with a larger `maxChars`, or `query`, is what recovers the rest. `nodes` is the DOM walk limit, `headings` the outline's, `frames` an unreadable frame, and `passages` the number of blocks a `query` ranked but did not return. One `truncated` alone cannot tell a control budget from a character one, and the two ask for different next calls.
+
 ## Composed pages: shadow roots and frames
 
 A flat document query is correct on a plain page and wrong on a modern one. Controls increasingly live in an open shadow root or inside an iframe, where `document.querySelectorAll` cannot see them; the page then reads as if the button does not exist, and a click has nothing to land on. `browser_view` reaches both:
