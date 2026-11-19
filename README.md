@@ -10,7 +10,7 @@
 
 Oxrail is an experimental, native-preserving control layer for agent browser work. It does not replace Chrome or Computer Use, and it never owns the pointer or keyboard. Its job is to add only the browser guard behavior proven for the current host profile.
 
-> **Benchmark in progress. No performance claim yet.**
+> **Benchmark in progress. No performance claim yet.** What is claimed is a bound, not a speed: every reading is capped by budgets it declares, so a page cannot make one cost more than its caps. The figures, and the page that breaks a tool without them, are in [Browser Control](docs/product/browser-control.md).
 
 The authoritative product contract is [spec/OXRAIL_SPEC.md](spec/OXRAIL_SPEC.md). Any shorter description here yields to that specification.
 
