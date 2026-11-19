@@ -1238,6 +1238,7 @@ function evidence(blocks, query, options = {}) {
   const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
   const chosen = [];
   const left = units.filter((unit) => unit.score > 0);
+  const scored = left.length;
   let used = 0;
   let lastHeading = "";
   while (left.length > 0 && chosen.length < limit) {
@@ -1279,7 +1280,7 @@ function evidence(blocks, query, options = {}) {
       step: one.step
     })),
     total: blocks.length,
-    matched: chosen.length
+    matched: scored
   };
 }
 function passagesToText(passages) {
@@ -1930,7 +1931,7 @@ var init_route = __esm({
               mode: "query",
               words: page2.words ?? 0,
               chars: text.length,
-              matched: found.rows.length,
+              matched: found.matched,
               total: found.total
             };
           }
