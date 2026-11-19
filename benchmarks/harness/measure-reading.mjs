@@ -16,6 +16,14 @@
  * context window -- not bytes on the wire. The distinction matters: a control's
  * ref costs characters, and the browser does not care about that.
  *
+ * Above the table it prints what the page costs when nothing is bounded: the
+ * characters the server sends, and the characters its prose occupies once the
+ * markup is gone. Without those two numbers the table is a list of sizes with
+ * nothing to be small against, and "255 characters" reads as a win even on a
+ * page that only had 300. The ratio between them is the only honest headline:
+ * it is large when a page is long somewhere other than its words, and close to
+ * one when the page is prose, which is a normal page and not a failure.
+ *
  * This is one fixture on one machine. It is not a benchmark and the output says
  * so; the claim being checked is a shape (a question costs the answer, not the
  * page), and a shape that only holds in a script is worth less than one that
@@ -99,7 +107,15 @@ async function serve() {
   });
   await new Promise((done) => server.listen(0, "127.0.0.1", done));
   const { port } = server.address();
-  return { origin: `http://127.0.0.1:${port}/`, server };
+  /* The bytes the server hands over are the fixture file verbatim, so this
+     length is a measurement, not an estimate. It is the comparison the five
+     calls above are missing: without it "255 characters" is a number with
+     nothing to be small against. */
+  return {
+    origin: `http://127.0.0.1:${port}/`,
+    server,
+    sourceChars: body.length,
+  };
 }
 
 /** What the caller actually receives as text: the words plus the control lines. */
@@ -115,7 +131,7 @@ function receiptOf(snapshot) {
 }
 
 async function main() {
-  const { origin, server } = await serve();
+  const { origin, server, sourceChars } = await serve();
   /* The route is TypeScript and the product build only emits the MCP entry, so
      the route is bundled here rather than requiring a build first: measuring
      should not depend on an artefact that exists only in a release layout. */
@@ -143,6 +159,7 @@ async function main() {
   });
 
   const rows = [];
+  let wholeProseChars = 0;
   try {
     await route.open({ url: origin });
     for (const call of CALLS) {
@@ -172,6 +189,13 @@ async function main() {
         ms: Math.round(elapsed * 100) / 100,
       });
     }
+    /* One more question, asked of the same session: what does this page cost
+       if nothing is bounded? An article read with a budget larger than the page
+       returns the whole column, so this is the prose size itself. It is the
+       second half of the comparison -- the source is what an unbounded reader
+       forwards, this is what one actually has to read. */
+    const whole = await route.digest({ mode: "article", maxChars: 1_000_000 });
+    wholeProseChars = whole.text.length;
   } finally {
     await route.close().catch(() => {});
     server.close();
@@ -187,13 +211,30 @@ async function main() {
   if (process.argv.includes("--json")) {
     console.log(
       JSON.stringify(
-        { fixture: `benchmarks/fixtures/${fixtureName}`, rows },
+        {
+          fixture: `benchmarks/fixtures/${fixtureName}`,
+          page: { sourceChars, wholeProseChars },
+          rows,
+        },
         null,
         2,
       ),
     );
     return;
   }
+  /* The page measured two ways that involve no budget: what the server sends,
+     and what is left of it once the markup is gone. `browser_view` is then
+     stated against the first, because what a bounded read buys is the ratio
+     between the two -- a number is only small against something. */
+  const multiple =
+    view === 0 ? null : Math.round((sourceChars / view) * 10) / 10;
+  console.log(`the page as served: ${sourceChars} chars of HTML`);
+  console.log(`read whole, as prose: ${wholeProseChars} chars`);
+  if (multiple !== null)
+    console.log(
+      `browser_view sends 1 char for every ${multiple} the page serves`,
+    );
+  console.log("");
   const width = Math.max(...rows.map((row) => row.call.length));
   console.log(`${"".padEnd(width)}  text chars | controls | total`);
   for (const row of rows)

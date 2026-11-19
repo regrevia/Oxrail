@@ -89,6 +89,10 @@ A read is also what makes its page writable: the controls it returns are the ref
 
 That is why `map` and `query` are not free on a page with many links, and why `query` on such a page still costs its 61 `[n]` lines.
 
+Those totals mean nothing without a scale, and the page supplies two that involve no budget at all. The same long page is served as 14766 characters of HTML, and its prose — every visible word with the markup gone — is 8159 characters. `browser_view` returns 7402, so it sends one character for every two the page has. That ratio is not an achievement and the harness prints it anyway: on a page that is mostly prose, a whole-page read costs about what the prose costs.
+
+Where the ratio does move is a page whose length is not prose. A single button whose `aria-label` holds 60000 characters is served as 60744 characters and reads whole as 77 characters of prose; `browser_view` returns 255, one character for every 238 the page has. Both numbers come from the same command, which is the point — `node benchmarks/harness/measure-reading.mjs --fixture huge-label` prints the page as served, the prose it holds, and the ratio above the table, so a rise in the ratio is visible as a page that grew somewhere other than its words.
+
 `query` is the mode worth reaching for first. Measured on one long page — 40 near-identical sections, three headings, a list of 60 links, one answer, one button — the same browser session gave, in characters received by the caller:
 
 | Call                                                            | Text | Controls | Total |
@@ -148,7 +152,26 @@ node benchmarks/harness/measure-reading.mjs --fixture deep-outline
 browser_read {mode:"map"}  1059 chars (21.9%)  capped: headings
 ```
 
-Four of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one. `nodes` and `frames` are asserted by unit tests but no fixture reaches them on this machine. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed), so it is not a cap this document is guessing at.
+Neither of the remaining caps is about length. A page that ships nine thousand edit fields in its markup, hidden until a row is opened, is stopped by the walk before any of them is numbered:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture huge-dom
+browser_view            253 chars (100.0%)  capped: nodes
+browser_read {mode:"map"}  59 chars (23.3%)  capped: nodes
+```
+
+Nothing was cut from that reading: the page is shorter than the article fixture and has fewer visible controls. The read stopped looking, and says so, which is the whole difference between a short answer and a partial one.
+
+The last cap is not a budget at all. A checkout page with its card fields in a frame from another origin cannot be read through, and no larger budget changes that:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture blocked-frame
+browser_view            264 chars (100.0%)  capped: frames
+```
+
+The reading around the frame is complete, and the frame is named separately as unread — one frame, cross-origin — rather than left out without comment.
+
+All six of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one, `nodes` on the warehouse page, `frames` on the checkout page. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed). Every cap a reader can be handed is reachable here by a command, not only by reading the source.
 
 ## Composed pages: shadow roots and frames
 
