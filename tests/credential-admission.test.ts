@@ -301,7 +301,17 @@ describe("credential admission", () => {
       gate: "PREPARING",
       kind: "PREPARED_FIXTURE_NON_AUTHORIZING",
     });
-    await expect(pre).resolves.toBe("BLOCKED");
+    // The Pre arrived while the preparation held the mutex, so it either got in
+    // afterwards and found the gate rewritten (BLOCKED) or ran out of retries
+    // while the mutex was still held (UNKNOWN). The spec fixes that second
+    // verdict: "mutex 获取/释放或锁外异常一律 UNKNOWN，禁止与并发 PREPARE 穿透",
+    // and the Host admits neither. Asserting BLOCKED alone made this test depend
+    // on the wait finishing inside the retry budget, which a loaded runner does
+    // not owe it. What must never appear is a verdict that lets the call through,
+    // so that is what the assertion pins; the deterministic BLOCKED path is
+    // covered by "linearizes fixture ticket minting and PREPARING against global
+    // Pre", where the preparation is awaited before the Pre is issued.
+    await expect(pre).resolves.toMatch(/^(BLOCKED|UNKNOWN)$/);
   });
 
   it("recovers a dead gate lock before deriving the next generation", async () => {
