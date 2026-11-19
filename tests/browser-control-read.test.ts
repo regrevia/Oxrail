@@ -168,6 +168,28 @@ describe("evidence", () => {
     expect(found.rows).toEqual([]);
     expect(passagesToText(found)).toBe("");
   });
+
+  /* A short page can put the answer in the label rather than in a sentence:
+     "Watering schedule" is all the page says about watering, and no paragraph
+     repeats the word. A sentence-only reader says nothing answers, which is
+     false; the page named the answer in its heading. */
+  it("answers from a heading when no sentence repeats the word", () => {
+    const labelled = block("One row per bed.", { h: "Watering schedule" });
+    const found = evidence([labelled, other], "when should i water");
+    expect(found.rows.length).toBe(1);
+    expect(found.matched).toBe(1);
+    expect(passagesToText(found)).toContain("Watering schedule");
+  });
+
+  /* The fallback must not turn a heading into a hit for words it does not say:
+     "Contact" is not an answer to a question about quantum chromodynamics. */
+  it("does not answer from a heading that shares no term with the query", () => {
+    const labelled = block("Our office is open from nine to five.", {
+      h: "Contact",
+    });
+    const found = evidence([labelled], "quantum chromodynamics");
+    expect(found.rows).toEqual([]);
+  });
 });
 
 describe("trailOf and brief", () => {

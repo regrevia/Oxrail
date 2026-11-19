@@ -489,7 +489,33 @@ export function evidence(
   );
   const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
   const chosen: typeof units = [];
-  const left = units.filter((unit) => unit.score > 0);
+  let left = units.filter((unit) => unit.score > 0);
+  /* A short page can answer in its own label rather than in a sentence: the
+     heading says "Watering schedule" and no paragraph repeats the word. Read
+     as sentences alone, the page looks like it answers nothing, which is
+     false. Fall back to the labels only when no sentence answered, so a real
+     passage is never displaced by a heading that happens to share a word. */
+  if (left.length === 0) {
+    const labels: typeof units = [];
+    for (const row of near) {
+      const label = trailOf(row.block);
+      if (label === "" || label.length > 200) continue;
+      const said = terms(label);
+      if (!asked.some((term) => said.includes(term))) continue;
+      if (labels.some((one) => one.text === label)) continue;
+      labels.push({
+        text: label,
+        terms: said,
+        heading: "",
+        at: blocks.indexOf(row.block),
+        step: -1,
+        prior: row.score,
+        block: row.block,
+        score: row.score,
+      });
+    }
+    left = labels;
+  }
   /* How many blocks actually answer the question, as opposed to how many the
      caller is handed: the two differ when the passage limit or the character
      ceiling drops some, and that difference is what makes a read partial. */
