@@ -19,6 +19,7 @@
     "doctor": "node dist/doctor.mjs",
     "fixture:serve": "node benchmarks/harness/server.mjs",
     "measure:reading": "node benchmarks/harness/measure-reading.mjs",
+    "compare:competitors": "node benchmarks/harness/compare-competitors.mjs",
     "format:check": "prettier --check .",
     "lint": "node scripts/lint.mjs",
     "pilot": "pnpm build:lab && node lab/dist/pilot.mjs",
