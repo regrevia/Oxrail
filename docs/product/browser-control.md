@@ -127,9 +127,28 @@ Ranking happens in this process with no model, no network and no third-party lib
 
 A control keeps its number for as long as it is on the page: the page-side store maps the element itself to a ref, so re-reading a page whose first control disappeared does not renumber everything below it and report the whole page as changed. The numbering starts over when the document does, which is why a navigation invalidates every old ref — `browser_click` says the ref is stale instead of guessing.
 
-`maxChars` bounds each mode (default 2000, minimum 200). It is a character budget, not a token one: the same characters cost more in Chinese than in English.
+`maxChars` bounds each mode, and it is a character budget, not a token one: the same characters cost more in Chinese than in English. `browser_read` defaults to 2000 and accepts a minimum of 200; `browser_view` keeps the larger 6000, because naming controls costs characters that reading prose does not.
 
 When a read hits one of its own limits it says so, and says which: `truncated: true` is paired with a `limit:` line naming the cap that fired. `controls` means the page had more controls than one reading numbers, and the next read should be `map`, which returns the outline and the controls without the prose; `chars` means the text budget ran out after the controls were already collected, so `article` with a larger `maxChars`, or `query`, is what recovers the rest. `nodes` is the DOM walk limit, `headings` the outline's, `frames` an unreadable frame, and `passages` the number of blocks a `query` ranked but did not return. One `truncated` alone cannot tell a control budget from a character one, and the two ask for different next calls.
+
+## What a cap tells you to do next
+
+The cap a page hits depends on the page, and two more fixtures show the other two common ones. A short page with many controls — 173 buttons, 1.7k characters of prose — is stopped by its control budget before its text budget:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture wide-page
+browser_view            4994 chars (100.0%)  capped: controls
+browser_read {mode:"map"}  3354 chars (67.2%)  capped: controls
+```
+
+The figures above are the columns that do not move between runs; the elapsed time in the harness output does, so it is left out here. That is the case a single `truncated` flag cannot describe: 4994 characters is under the 6000-character budget, so raising `maxChars` would recover nothing. The ceiling was reached on controls, and `map` is the call that makes progress. Reversing the shape — 85 headings, one button — reaches the outline limit instead, and says so:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture deep-outline
+browser_read {mode:"map"}  1059 chars (21.9%)  capped: headings
+```
+
+Four of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one. `nodes` and `frames` are asserted by unit tests but no fixture reaches them on this machine. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed), so it is not a cap this document is guessing at.
 
 ## Composed pages: shadow roots and frames
 

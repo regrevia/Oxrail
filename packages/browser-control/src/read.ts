@@ -490,6 +490,10 @@ export function evidence(
   const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
   const chosen: typeof units = [];
   const left = units.filter((unit) => unit.score > 0);
+  /* How many blocks actually answer the question, as opposed to how many the
+     caller is handed: the two differ when the passage limit or the character
+     ceiling drops some, and that difference is what makes a read partial. */
+  const scored = left.length;
   let used = 0;
   let lastHeading = "";
   while (left.length > 0 && chosen.length < limit) {
@@ -536,7 +540,7 @@ export function evidence(
       step: one.step,
     })),
     total: blocks.length,
-    matched: chosen.length,
+    matched: scored,
   };
 }
 
