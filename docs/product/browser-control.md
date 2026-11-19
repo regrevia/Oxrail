@@ -173,6 +173,34 @@ The reading around the frame is complete, and the frame is named separately as u
 
 All six of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one, `nodes` on the warehouse page, `frames` on the checkout page. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed). Every cap a reader can be handed is reachable here by a command, not only by reading the source.
 
+## Against another browser MCP, measured the same way
+
+The numbers above say what this product costs. They do not say whether that is good, because a cost has no meaning without something to compare it to. `pnpm compare:competitors` serves the same fixtures and drives `@playwright/mcp@0.0.86` at them, counting characters received and whether the answer is in them — the second half matters, because a cheap call that does not answer is worthless.
+
+Every row below comes from that command. Both columns are the cheapest call that actually returned the answer, not the cheapest call either product can make: the competitor was pinned to a version, given the fixture text, and allowed its own best call for each page — `browser_find` with the word a competent agent would search for.
+
+| Fixture                                | Cheapest call that answers               | Oxrail best | Playwright best |
+| -------------------------------------- | ---------------------------------------- | ----------- | --------------- |
+| `long-page` (prose, 14766)             | `browser_find("refund", maxResults:3)`   | 1827        | **1219**        |
+| `wide-page` (160 controls, 10360)      | `browser_find("watering", maxResults:1)` | 4995        | **417**         |
+| `huge-dom` (9000 fields, 65022)        | `browser_read {mode:"query"}`            | **143**     | 383             |
+| `huge-label` (60000-char label, 60744) | `browser_find("deliver", maxResults:1)`  | 254         | **220**         |
+
+Three of four go to Playwright, and the honest reading is that its `browser_find` is a good tool: it searches the accessibility tree and returns snippets with refs, so when the caller already knows the word to search for, it is cheaper than asking a question in words.
+
+Where this product wins is a whole-page read, and the margin is steady rather than dramatic:
+
+| Fixture      | `browser_view` | `browser_snapshot` | Ratio |
+| ------------ | -------------- | ------------------ | ----- |
+| `long-page`  | 7403           | 17391              | 2.3×  |
+| `wide-page`  | 4995           | 11392              | 2.3×  |
+| `huge-dom`   | 254            | 533                | 2.1×  |
+| `huge-label` | 256            | 308                | 1.2×  |
+
+So: half the cost of a snapshot to see a whole page, and behind on targeted lookup unless the question cannot be reduced to a keyword. A question in words ("how many warehouses are listed") is exactly the case where `query` pulls ahead — `huge-dom` is the one row this product wins, and it is the one row where the answer is not a word the caller could have known to search for.
+
+What this does not establish is that either product is better. Both were measured on four fixtures chosen by the author of this one, on a local server, with no network and no human. The competitor was not tuned, and neither was this product; `maxResults` was varied only to find its best case. Claiming a ranking from this would be claiming more than four rows can carry — which is why the README still says there is no performance claim.
+
 ## Composed pages: shadow roots and frames
 
 A flat document query is correct on a plain page and wrong on a modern one. Controls increasingly live in an open shadow root or inside an iframe, where `document.querySelectorAll` cannot see them; the page then reads as if the button does not exist, and a click has nothing to land on. `browser_view` reaches both:
