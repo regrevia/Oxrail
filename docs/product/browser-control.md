@@ -133,7 +133,7 @@ When a read hits one of its own limits it says so, and says which: `truncated: t
 
 ## What a cap tells you to do next
 
-The cap a page hits depends on the page, and two more fixtures show the other two common ones. A short page with many controls — 173 buttons, 1.7k characters of prose — is stopped by its control budget before its text budget:
+The cap a page hits depends on the page, and four more fixtures show the four less obvious ones. A short page with many controls — 173 buttons, 1.7k characters of prose — is stopped by its control budget before its text budget:
 
 ```
 node benchmarks/harness/measure-reading.mjs --fixture wide-page
@@ -148,7 +148,26 @@ node benchmarks/harness/measure-reading.mjs --fixture deep-outline
 browser_read {mode:"map"}  1059 chars (21.9%)  capped: headings
 ```
 
-Three of the caps this document names fire on a fixture page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one. `nodes` and `frames` are asserted by unit tests but no fixture reaches them on this machine. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed), so it is not a cap this document is guessing at.
+Neither of the remaining caps is about length. A page that ships nine thousand edit fields in its markup, hidden until a row is opened, is stopped by the walk before any of them is numbered:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture huge-dom
+browser_view            253 chars (100.0%)  capped: nodes
+browser_read {mode:"map"}  59 chars (23.3%)  capped: nodes
+```
+
+Nothing was cut from that reading: the page is shorter than the article fixture and has fewer visible controls. The read stopped looking, and says so, which is the whole difference between a short answer and a partial one.
+
+The last cap is not a budget at all. A checkout page with its card fields in a frame from another origin cannot be read through, and no larger budget changes that:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture blocked-frame
+browser_view            264 chars (100.0%)  capped: frames
+```
+
+The reading around the frame is complete, and the frame is named separately as unread — one frame, cross-origin — rather than left out without comment.
+
+All six of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one, `nodes` on the warehouse page, `frames` on the checkout page. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed). Every cap a reader can be handed is reachable here by a command, not only by reading the source.
 
 ## Composed pages: shadow roots and frames
 

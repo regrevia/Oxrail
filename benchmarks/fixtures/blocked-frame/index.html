@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Checkout — blocked frame fixture</title>
+  </head>
+  <body>
+    <!--
+      One embedded widget from another origin, which is what a payment form
+      looks like. The page around it is fully readable; the frame is not, and
+      the read has to say so rather than report an unqualified success. The
+      frame is sandboxed without allow-same-origin, so it is a real opaque
+      origin here and not a stand-in for one.
+    -->
+    <h1>Checkout</h1>
+    <p>
+      Two lines, one delivery address, and the card fields in the frame below.
+      Everything above the frame is ours; the fields inside it are not.
+    </p>
+    <h2>Delivery</h2>
+    <p>Deliveries leave the depot at seven in the morning.</p>
+    <button
+      type="button"
+      id="delivery-status"
+      onclick='document.getElementById("delivery-status-text").hidden = false'
+    >
+      Show delivery status
+    </button>
+    <p id="delivery-status-text" hidden>Left the depot at 07:12.</p>
+    <iframe
+      title="Card details"
+      sandbox="allow-forms"
+      srcdoc="<p>Card number</p><button>Pay 42.00</button>"
+    ></iframe>
+  </body>
+</html>
