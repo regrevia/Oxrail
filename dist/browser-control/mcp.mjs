@@ -1286,8 +1286,19 @@ function evidence(blocks, query, options = {}) {
     }
     if (at < 0 || bestValue <= 0) break;
     const pick = left.splice(at, 1)[0];
-    const heading = pick.heading !== lastHeading && pick.heading !== "" ? pick.heading.length + 8 : 0;
-    if (used + pick.text.length + heading > ceiling && chosen.length > 0) break;
+    const trail = pick.heading.length > TRAIL_CAP ? pick.heading.slice(0, TRAIL_CAP) : pick.heading;
+    let heading = trail !== lastHeading && trail !== "" ? trail.length + 8 : 0;
+    if (used + heading + PASSAGE_FLOOR > ceiling) {
+      pick.heading = "";
+      heading = 0;
+    } else {
+      pick.heading = trail;
+    }
+    const room = ceiling - used - heading;
+    if (pick.text.length > room) {
+      if (chosen.length > 0 || room < PASSAGE_FLOOR) break;
+      pick.text = `${pick.text.slice(0, room - 1).trimEnd()}\u2026`;
+    }
     lastHeading = pick.heading;
     used += pick.text.length + heading;
     chosen.push(pick);
@@ -1329,13 +1340,15 @@ function deltaOf(before, after) {
   const lines = after.text.split("\n").filter((line) => line.trim() !== "" && !seen.has(line.trim()));
   return { text: lines.join("\n"), controls };
 }
-var TOKEN, SATURATION, SENTENCE_BREAK;
+var TOKEN, SATURATION, SENTENCE_BREAK, TRAIL_CAP, PASSAGE_FLOOR;
 var init_read = __esm({
   "packages/browser-control/src/read.ts"() {
     "use strict";
     TOKEN = /[a-z0-9]+|[\u3400-\u9fff]/g;
     SATURATION = 1.5;
     SENTENCE_BREAK = /(?<=[。！？；])|(?<=[.!?;])\s+/u;
+    TRAIL_CAP = 200;
+    PASSAGE_FLOOR = 40;
   }
 });
 

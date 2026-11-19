@@ -169,26 +169,105 @@ describe("evidence", () => {
     expect(passagesToText(found)).toBe("");
   });
 
-  /* A short page can put the answer in the label rather than in a sentence:
-     "Watering schedule" is all the page says about watering, and no paragraph
-     repeats the word. A sentence-only reader says nothing answers, which is
-     false; the page named the answer in its heading. */
-  it("answers from a heading when no sentence repeats the word", () => {
-    const labelled = block("One row per bed.", { h: "Watering schedule" });
-    const found = evidence([labelled, other], "when should i water");
-    expect(found.rows.length).toBe(1);
+  /* The ceiling is a promise the caller can rely on before it calls: whatever
+     the page says, a passage set cannot cost more than the budget asked for.
+     Three inputs used to break it — one sentence as long as the block cap
+     allows, a heading repeated at the top of every section, and the first
+     sentence being the only one that matches — so each is checked here rather
+     than only on a page that has to be fetched. */
+  /* A heading is not a sentence, so a page that only names its subject used to
+     read as silent about it. The measured case is the `wide-page` fixture: its
+     h1 says "Watering schedule", no paragraph repeats the word, and `query`
+     answered "(nothing on this page answers …)" over 173 blocks. Only the
+     labels are read this way, and only once no sentence answered. */
+  it("answers from the label when no sentence repeats the word", () => {
+    const page = [
+      block("Beds", { h: "Watering schedule", p: "Watering schedule › Beds" }),
+      block("Our office is open from nine to five.", { h: "Contact" }),
+    ];
+    const found = evidence(page, "when should i water");
     expect(found.matched).toBe(1);
     expect(passagesToText(found)).toContain("Watering schedule");
   });
 
-  /* The fallback must not turn a heading into a hit for words it does not say:
-     "Contact" is not an answer to a question about quantum chromodynamics. */
-  it("does not answer from a heading that shares no term with the query", () => {
-    const labelled = block("Our office is open from nine to five.", {
-      h: "Contact",
-    });
-    const found = evidence([labelled], "quantum chromodynamics");
-    expect(found.rows).toEqual([]);
+  it("never lets a label displace a sentence that answered", () => {
+    const page = [
+      block("Refunds take three working days.", { h: "Refunds" }),
+      block("Refunds", { h: "Refunds", p: "Help › Refunds" }),
+    ];
+    const found = evidence(page, "how long do refunds take");
+    expect(passagesToText(found)).toContain("three working days");
+  });
+
+  it("keeps passages inside the ceiling whatever the page says", () => {
+    const ceiling = 2_000;
+    const cases: Block[][] = [
+      // 4000 characters is the largest block the page expression will push.
+      [block(`refund ${"x".repeat(3_993)}`, { h: "Refunds" })],
+      // A trail is printed once per group, and the page picks its length.
+      [
+        block("A refund takes five days.", {
+          h: `Refunds ${"y".repeat(5_000)}`,
+        }),
+      ],
+      [
+        block("Refunds take a week.", {
+          h: "Refunds",
+          p: `Help › ${"z".repeat(9_000)}`,
+        }),
+      ],
+      // The first match is the only match: it still may not exceed the whole.
+      [block(`refund ${"w".repeat(59_000)}`, { h: "Refunds" })],
+      // Many sentences, each short, in a page that mentions the word everywhere.
+      ...Array.from({ length: 40 }, (_, at) => [
+        block(`Refund ${at} is reviewed within ${at + 1} days.`, {
+          h: "Refunds",
+        }),
+      ]),
+    ];
+    for (const blocks of cases) {
+      const rendered = passagesToText(
+        evidence(blocks, "refund", { maxChars: ceiling }),
+      );
+      expect(rendered.length, rendered.slice(0, 80)).toBeLessThanOrEqual(
+        ceiling,
+      );
+    }
+  });
+
+  /* A ninety-word trail fits a large budget, so the ceiling alone would let it
+     through. A field has a ceiling of its own, the way a title does. */
+  it("caps the trail even when the budget would allow it", () => {
+    const found = evidence(
+      [
+        block("A refund takes five days.", {
+          h: `Refunds ${"y".repeat(5_000)}`,
+        }),
+      ],
+      "refund",
+      { maxChars: 24_000 },
+    );
+    const text = passagesToText(found);
+    expect(text.length).toBeLessThanOrEqual(
+      200 + 8 + "A refund takes five days.".length,
+    );
+    expect(text).toContain("A refund takes five days.");
+  });
+
+  /* A cut passage is worth more than no passage, but only when it is still a
+     passage: four words and an ellipsis is not an answer. */
+  it("cuts the first answer to fit rather than returning it whole or not at all", () => {
+    const one = evidence(
+      [block(`refund ${"x".repeat(3_800)}`, { h: "Refunds" })],
+      "refund",
+      {
+        maxChars: 2_000,
+      },
+    );
+    expect(one.rows.length).toBe(1);
+    const text = passagesToText(one);
+    expect(text.length).toBeLessThanOrEqual(2_000);
+    expect(text.endsWith("…")).toBe(true);
   });
 });
 
