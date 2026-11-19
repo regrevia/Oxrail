@@ -1400,7 +1400,7 @@ function snapshotExpression(options) {
 
   const nameOf = (el) => {
     const aria = el.getAttribute("aria-label");
-    if (aria && aria.trim() !== "") return aria.trim();
+    if (aria && aria.trim() !== "") return aria.trim().slice(0, 160);
     const text = (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
     if (text !== "") return text.slice(0, 160);
     const title = el.getAttribute("title");
@@ -1625,9 +1625,15 @@ function snapshotExpression(options) {
     text = outline.length > 0 ? outline.join("\\n") : "(no headings)";
   }
 
+  /* Every branch above builds its own text after the body budget was applied, so
+     a page made of nothing but links, form values or headings would otherwise
+     raise its own ceiling: the body was cut, then discarded, and the replacement
+     was never measured. One guard covers every mode, and the next one too. */
+  if (text.length > MAX_CHARS) { text = text.slice(0, MAX_CHARS); capped("chars"); }
+
   return {
     url: location.href,
-    title: document.title || "",
+    title: (document.title || "").slice(0, 200),
     text,
     controls,
     truncated,
@@ -1671,7 +1677,7 @@ var init_route = __esm({
   const body = document.body;
   const everything = body ? body.innerText || "" : "";
   const runs = everything.match(/[a-z0-9]+|[\\u3400-\\u9fff]/gi);
-  return { url: location.href, title: document.title || "", words: runs === null ? 0 : runs.length };
+  return { url: location.href, title: (document.title || "").slice(0, 200), words: runs === null ? 0 : runs.length };
 })()`;
     CdpBrowserRoute = class _CdpBrowserRoute {
       chrome = null;
@@ -2944,6 +2950,9 @@ function textResult(text) {
 function failure(text) {
   return { content: [{ type: "text", text }], isError: true };
 }
+function squashUrl(url) {
+  return url.length <= 2048 ? url : `${url.slice(0, 2048)}\u2026 (${url.length - 2048} more characters)`;
+}
 function formatSnapshot(snapshot) {
   const lines = [];
   if (snapshot.text !== "") lines.push(snapshot.text);
@@ -2952,7 +2961,7 @@ function formatSnapshot(snapshot) {
     lines.push(`[${control.ref}] ${control.role} "${control.name}"`);
   }
   if (lines.length === 0) lines.push("(blank page)");
-  if (snapshot.url !== "") lines.push(`url: ${snapshot.url}`);
+  if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
   if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
   if (snapshot.chars !== void 0) lines.push(`chars: ${snapshot.chars}`);
   if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);

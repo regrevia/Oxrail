@@ -387,4 +387,66 @@ describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
       }
     },
   );
+
+  /* A page decides how big its own words are, and a budget spent on the body
+     says nothing about the parts that replace the body. Each field here is the
+     shape that used to slip through: a title, a label, a form value, a link
+     address and ninety headings, all far past a reading budget on their own. */
+  it("keeps every mode inside its budget when the page supplies the words", async () => {
+    const big = "x".repeat(60_000);
+    const headings = Array.from(
+      { length: 90 },
+      (_, at) => `<h2>${"h".repeat(300)} ${at}</h2>`,
+    ).join("");
+    const hostile =
+      `data:text/html;charset=utf-8,` +
+      encodeURIComponent(
+        `<!doctype html><html><head><title>${big}</title></head><body>` +
+          `<h1>Hostile</h1><p>Small body.</p>` +
+          `<input id="f" value="${big}">` +
+          `<a href="data:text/plain,${big}">big link</a>` +
+          `<button type="button" aria-label="${big}">Pay</button>` +
+          headings +
+          `</body></html>`,
+      );
+    const env = {
+      ...process.env,
+      OXRAIL_BROWSER_HEADLESS: "1",
+      OXRAIL_BROWSER_PROFILE: `live-hostile-${process.pid}-${Date.now()}`,
+      OXRAIL_BROWSER_IDLE_MS: "60000",
+    } as NodeJS.ProcessEnv;
+    const route = new CdpBrowserRoute({ env });
+    try {
+      await route.open({ url: hostile });
+
+      const text = await route.read({});
+      expect(text.text.length).toBeLessThanOrEqual(6000);
+      /* A title is not a place to put a document. */
+      expect(text.title.length).toBeLessThanOrEqual(200);
+      /* A control name is bounded like any other field, or one label is worth
+           more than the whole budget the read was given. */
+      const named = text.controls.find((control) => control.role === "button");
+      expect(named?.name.length ?? 0).toBeLessThanOrEqual(160);
+
+      const links = await route.read({ mode: "links" });
+      expect(links.text.length).toBeLessThanOrEqual(6000);
+      expect(links.truncated).toBe(true);
+      expect(links.limit).toBe("chars");
+
+      const forms = await route.read({ mode: "forms" });
+      expect(forms.text.length).toBeLessThanOrEqual(6000);
+      expect(forms.truncated).toBe(true);
+
+      const map = await route.digest({ mode: "map" });
+      expect(map.text.length).toBeLessThanOrEqual(2000);
+      expect(map.truncated).toBe(true);
+    } finally {
+      await route.close();
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      if (dir !== "")
+        await import("node:fs").then((fs) =>
+          fs.rmSync(dir, { recursive: true, force: true }),
+        );
+    }
+  });
 });

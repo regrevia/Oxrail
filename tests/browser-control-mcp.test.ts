@@ -561,6 +561,30 @@ describe("MCP server", () => {
     await harness.end();
   });
 
+  it("shortens a page-supplied URL instead of handing it over whole", async () => {
+    const harness = createHarness();
+    /* A `data:` URL carries an entire document in its own address, so the
+       address is page text and gets the same suspicion as page text. The
+       snapshot keeps it exact — a `changed` read compares it against the last
+       one — and only the rendering is cut. */
+    const long = `https://example.test/search?q=${"x".repeat(5000)}`;
+    harness.route.snapshot = { ...harness.route.snapshot, url: long };
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: {} },
+    });
+    const text = firstBlock(await harness.waitForReply(1)).text as string;
+    expect(text.length).toBeLessThan(long.length);
+    expect(text).toContain("more characters)");
+    expect(text).not.toContain(long);
+    /* What is kept is the part that identifies the page, not a prefix so short
+       that two pages look alike. */
+    expect(text).toContain("https://example.test/search?q=xxxx");
+    await harness.end();
+  });
+
   it("refuses the answer mode without a question", async () => {
     const harness = createHarness();
     harness.send({

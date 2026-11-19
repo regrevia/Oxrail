@@ -477,6 +477,16 @@ function failure(text: string): ToolResult {
   return { content: [{ type: "text", text }], isError: true };
 }
 
+/* A URL is page-controlled text like any other, and a `data:` URL carries a
+   whole document in its own address. The snapshot keeps the URL exact because a
+   `changed` read compares it against the previous one; what the caller is handed
+   does not need more than the part that identifies the page. */
+function squashUrl(url: string): string {
+  return url.length <= 2048
+    ? url
+    : `${url.slice(0, 2048)}… (${url.length - 2048} more characters)`;
+}
+
 function formatSnapshot(snapshot: Snapshot): string {
   const lines: string[] = [];
   if (snapshot.text !== "") lines.push(snapshot.text);
@@ -485,7 +495,7 @@ function formatSnapshot(snapshot: Snapshot): string {
     lines.push(`[${control.ref}] ${control.role} "${control.name}"`);
   }
   if (lines.length === 0) lines.push("(blank page)");
-  if (snapshot.url !== "") lines.push(`url: ${snapshot.url}`);
+  if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
   if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
   /* What the read cost and what it left behind, so a caller can tell a short
      page from a page it is only seeing part of. */

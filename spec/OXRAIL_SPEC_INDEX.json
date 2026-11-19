@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-17",
+  "generated_at": "2026-11-19",
   "canonical_file": "OXRAIL_SPEC.md",
-  "spec_version": "1.0.33",
-  "spec_sha256": "87aa610606a375f1cd5b7c8f62f77479032623149a68739256c156b73e516e2b",
+  "spec_version": "1.0.34",
+  "spec_sha256": "90809917504326174ace6899e812af1fd0aa29b183069438fc36e3f89a012bb3",
   "counts": {
     "sections": 53,
     "requirements": 131,
@@ -632,7 +632,7 @@
       "title": "文档实时维护、变更与归档协议",
       "anchor": "sec-50",
       "start_line": 12050,
-      "end_line": 12467,
+      "end_line": 12473,
       "keywords": [
         "living-spec",
         "maintenance",
@@ -644,14 +644,14 @@
     "SEC-51": {
       "anchor": "sec-51",
       "title": "产品 Skill 与内部 Lab 分离实施合同",
-      "start_line": 12468,
-      "end_line": 12933
+      "start_line": 12474,
+      "end_line": 12939
     },
     "SEC-52": {
       "anchor": "sec-52",
       "title": "Opt-in Browser Control 路由（MCP / CDP）",
-      "start_line": 12934,
-      "end_line": 12972
+      "start_line": 12940,
+      "end_line": 12978
     }
   },
   "requirements": {
@@ -2078,7 +2078,7 @@
       "locations": [
         186,
         10607,
-        12407
+        12413
       ]
     },
     "REQ-CRED-002": {
@@ -2358,7 +2358,7 @@
         4444,
         8479,
         10024,
-        12400
+        12406
       ]
     },
     "REQ-SEC-002": {
@@ -4795,7 +4795,7 @@
         7989,
         8254,
         8855,
-        12418
+        12424
       ]
     },
     "REQ-HOST-008": {
@@ -5011,7 +5011,7 @@
         137,
         8254,
         10607,
-        12407
+        12413
       ]
     },
     "REQ-BCTL-001": {
@@ -5027,9 +5027,9 @@
       ],
       "locations": [
         11882,
-        12248,
-        12952,
-        12971
+        12254,
+        12958,
+        12977
       ]
     },
     "REQ-BCTL-002": {
@@ -5045,7 +5045,7 @@
       ],
       "locations": [
         11882,
-        12953
+        12959
       ]
     },
     "REQ-BCTL-003": {
@@ -5061,7 +5061,7 @@
       ],
       "locations": [
         11882,
-        12954
+        12960
       ]
     },
     "REQ-BCTL-004": {
@@ -5077,9 +5077,9 @@
       ],
       "locations": [
         11882,
-        12248,
-        12955,
-        12971
+        12254,
+        12961,
+        12977
       ]
     }
   },
@@ -5297,7 +5297,7 @@
         10607,
         10638,
         10692,
-        12407
+        12413
       ]
     },
     "GATE-G16": {
@@ -5311,9 +5311,9 @@
       "locations": [
         7057,
         11882,
-        12248,
-        12939,
-        12971
+        12254,
+        12945,
+        12977
       ]
     }
   },
@@ -5669,7 +5669,7 @@
         11982,
         11990,
         12021,
-        12232
+        12238
       ]
     },
     "KILL-K19": {
@@ -5842,7 +5842,7 @@
       "locations": [
         7052,
         10658,
-        12407
+        12413
       ]
     },
     "KILL-K30": {
@@ -5916,9 +5916,9 @@
         11967,
         11982,
         12023,
-        12248,
-        12939,
-        12971
+        12254,
+        12945,
+        12977
       ]
     }
   },
@@ -9879,8 +9879,8 @@
       "title": "合同与现状冻结",
       "status": "READY",
       "depends_on": [],
-      "start_line": 12579,
-      "end_line": 12591
+      "start_line": 12585,
+      "end_line": 12597
     },
     "WP-LAB-001": {
       "anchor": "wp-lab-001",
@@ -9889,8 +9889,8 @@
       "depends_on": [
         "WP-LAB-000"
       ],
-      "start_line": 12592,
-      "end_line": 12610
+      "start_line": 12598,
+      "end_line": 12616
     },
     "WP-LAB-002": {
       "anchor": "wp-lab-002",
@@ -9899,8 +9899,8 @@
       "depends_on": [
         "WP-LAB-001"
       ],
-      "start_line": 12611,
-      "end_line": 12629
+      "start_line": 12617,
+      "end_line": 12635
     },
     "WP-LAB-003": {
       "anchor": "wp-lab-003",
@@ -9909,8 +9909,8 @@
       "depends_on": [
         "WP-LAB-002"
       ],
-      "start_line": 12630,
-      "end_line": 12646
+      "start_line": 12636,
+      "end_line": 12652
     },
     "WP-LAB-004": {
       "anchor": "wp-lab-004",
@@ -9919,8 +9919,8 @@
       "depends_on": [
         "WP-LAB-003"
       ],
-      "start_line": 12647,
-      "end_line": 12667
+      "start_line": 12653,
+      "end_line": 12673
     },
     "WP-LAB-005": {
       "anchor": "wp-lab-005",
@@ -9929,8 +9929,8 @@
       "depends_on": [
         "WP-LAB-004"
       ],
-      "start_line": 12668,
-      "end_line": 12688
+      "start_line": 12674,
+      "end_line": 12694
     },
     "WP-LAB-006": {
       "anchor": "wp-lab-006",
@@ -9939,8 +9939,8 @@
       "depends_on": [
         "WP-LAB-005"
       ],
-      "start_line": 12689,
-      "end_line": 12703
+      "start_line": 12695,
+      "end_line": 12709
     },
     "WP-LAB-007": {
       "anchor": "wp-lab-007",
@@ -9954,8 +9954,8 @@
         "WP-LAB-005",
         "WP-LAB-006"
       ],
-      "start_line": 12704,
-      "end_line": 12716
+      "start_line": 12710,
+      "end_line": 12722
     },
     "WP-BCTL-002": {
       "title": "Context-efficient Browser reads (`browser_read`)",
@@ -11498,7 +11498,7 @@
       "locations": [
         6306,
         10639,
-        12407
+        12413
       ],
       "sections": [
         "SEC-35",
@@ -11586,7 +11586,7 @@
         9615,
         9786,
         9830,
-        12309
+        12315
       ],
       "sections": [
         "SEC-35",
@@ -12360,7 +12360,7 @@
       "locations": [
         6397,
         10639,
-        12407
+        12413
       ],
       "sections": [
         "SEC-36",
@@ -12473,7 +12473,7 @@
         6406,
         10645,
         10702,
-        12302
+        12308
       ],
       "sections": [
         "SEC-36",
@@ -12489,7 +12489,7 @@
         6407,
         10646,
         10703,
-        12296
+        12302
       ],
       "sections": [
         "SEC-36",
@@ -12505,7 +12505,7 @@
         6408,
         10647,
         10704,
-        12290
+        12296
       ],
       "sections": [
         "SEC-36",
@@ -12521,7 +12521,7 @@
         6409,
         10648,
         10705,
-        12284
+        12290
       ],
       "sections": [
         "SEC-36",
@@ -12537,7 +12537,7 @@
         6410,
         10649,
         10706,
-        12278
+        12284
       ],
       "sections": [
         "SEC-36",
@@ -12553,7 +12553,7 @@
         6411,
         10650,
         10707,
-        12272
+        12278
       ],
       "sections": [
         "SEC-36",
@@ -12569,7 +12569,7 @@
         6412,
         10651,
         10708,
-        12266
+        12272
       ],
       "sections": [
         "SEC-36",
@@ -12585,7 +12585,7 @@
         6413,
         10652,
         10709,
-        12260
+        12266
       ],
       "sections": [
         "SEC-36",
@@ -12778,7 +12778,7 @@
         8016,
         8287,
         8884,
-        12418
+        12424
       ],
       "sections": [
         "SEC-10",
@@ -12897,142 +12897,142 @@
       "title": "扫描产品依赖图和安装产物",
       "expected": "无Lab、benchmark、Demo运行依赖及实验CLI",
       "locations": [
-        12253,
-        12865
+        12259,
+        12871
       ]
     },
     "TEST-LAB-002": {
       "title": "只保留产品安装根运行",
       "expected": "不寻找Lab，不创建Lab数据目录，能力状态诚实",
       "locations": [
-        12866
+        12872
       ]
     },
     "TEST-LAB-003": {
       "title": "设置遗留实验环境变量运行产品",
       "expected": "不能启动实验采集或Demo",
       "locations": [
-        12867
+        12873
       ]
     },
     "TEST-LAB-004": {
       "title": "完全没有Oxrail时启动Lab",
       "expected": "可采集受控宿主事件；真实主机项单独记录",
       "locations": [
-        12868
+        12874
       ]
     },
     "TEST-LAB-005": {
       "title": "检查baseline的新会话/配置",
       "expected": "没有产品Skill/Hook/任务上下文残留；无法证明则BLOCKED",
       "locations": [
-        12869
+        12875
       ]
     },
     "TEST-LAB-006": {
       "title": "监控OFF启动新会话",
       "expected": "无Lab监控Hook/collector；不冒充有详细轨迹",
       "locations": [
-        12870
+        12876
       ]
     },
     "TEST-LAB-007": {
       "title": "对Lab适配器投递各类合法/非法事件",
       "expected": "不返回allow/deny/模型上下文、不改写原调用",
       "locations": [
-        12871
+        12877
       ]
     },
     "TEST-LAB-008": {
       "title": "collector退出、断链、慢盘、满盘",
       "expected": "不影响浏览器权限或动作；报告数据不完整",
       "locations": [
-        12872
+        12878
       ]
     },
     "TEST-LAB-009": {
       "title": "重复/乱序/缺失Pre/Post、并发子代理",
       "expected": "幂等、正确关联、不伪造执行与完成",
       "locations": [
-        12873
+        12879
       ]
     },
     "TEST-LAB-010": {
       "title": "复合工具只暴露事务事件",
       "expected": "不输出逐点击或逐键精确统计",
       "locations": [
-        12874
+        12880
       ]
     },
     "TEST-LAB-011": {
       "title": "宿主不提供Token/用量混合多个run",
       "expected": "值为null并有原因，不输出假精确总量",
       "locations": [
-        12875
+        12881
       ]
     },
     "TEST-LAB-012": {
       "title": "秘密诱饵藏入输入/URL/header/异常字段",
       "expected": "trace、IPC持久化、日志、临时/崩溃文件零泄漏",
       "locations": [
-        12876
+        12882
       ]
     },
     "TEST-LAB-013": {
       "title": "登录fixture期间采集",
       "expected": "只有许可阶段元数据，无截图/输入值/键盘/剪贴板",
       "locations": [
-        12877
+        12883
       ]
     },
     "TEST-LAB-014": {
       "title": "持有Handoff租约时关闭/删除Lab",
       "expected": "产品安全锁不解除、不绕过验证恢复Agent",
       "locations": [
-        12878
+        12884
       ]
     },
     "TEST-LAB-015": {
       "title": "A/B任一环境字段/初态/监控hash不一致",
       "expected": "比较拒绝或标不可比，不自动忽略",
       "locations": [
-        12879
+        12885
       ]
     },
     "TEST-LAB-016": {
       "title": "Guard请求实际为ADVISORY/BYPASSED",
       "expected": "TREATMENT_NOT_ACTIVE，不计为Guard成绩",
       "locations": [
-        12880
+        12886
       ]
     },
     "TEST-LAB-017": {
       "title": "真实宿主四象限smoke",
       "expected": "有实际证据的分别通过；未跑不能PASS",
       "locations": [
-        12881
+        12887
       ]
     },
     "TEST-LAB-018": {
       "title": "实际插件安装及源目录移除",
       "expected": "安装根无实验残留且路径/hash正确",
       "locations": [
-        12882
+        12888
       ]
     },
     "TEST-LAB-019": {
       "title": "尝试由任务Agent读实验计划/报告",
       "expected": "正式隔离路径应拒绝；否则标隔离未证明",
       "locations": [
-        12883
+        12889
       ]
     },
     "TEST-LAB-020": {
       "title": "Lab purge与旧Demo迁移",
       "expected": "不越界删除产品状态、Keychain或历史release evidence",
       "locations": [
-        12253,
-        12884
+        12259,
+        12890
       ]
     },
     "TEST-BCTL-001": {
@@ -13041,8 +13041,8 @@
         11882,
         11893,
         11908,
-        12248,
-        12971
+        12254,
+        12977
       ],
       "sections": [
         "SEC-52"
@@ -13087,7 +13087,7 @@
         11882,
         11893,
         11908,
-        12248
+        12254
       ],
       "sections": [
         "SEC-52"
@@ -13100,7 +13100,7 @@
     },
     "TEST-BCTL-005": {
       "title": "读取模式回答且受预算约束",
-      "expected": "长页面上 `query` 必须返回含答案的段落并报告未展示部分（`matched`/`total`）；四种模式都受限 `maxChars`；`query` 缺问题时拒绝，未知模式指名报错；`browser_view` 的行为与编号语义不变",
+      "expected": "长页面上 `query` 必须返回含答案的段落并报告未展示部分（`matched`/`total`）；四种模式都受限 `maxChars`，页面提供的非散文字段（控件名、标题、地址）同样不得越过该预算；`query` 缺问题时拒绝，未知模式指名报错；`browser_view` 的行为与编号语义不变",
       "sections": [
         "SEC-52"
       ],
@@ -13112,8 +13112,9 @@
         11929,
         11940,
         11959,
-        12241,
-        12242
+        12207,
+        12247,
+        12248
       ]
     },
     "TEST-BCTL-006": {
@@ -13130,8 +13131,8 @@
         11929,
         11940,
         11959,
-        12241,
-        12242
+        12247,
+        12248
       ]
     },
     "TEST-BCTL-007": {
@@ -13147,8 +13148,8 @@
         6082,
         11982,
         12015,
-        12231,
-        12971
+        12237,
+        12977
       ]
     }
   },
@@ -13337,7 +13338,7 @@
       "title": "产品与内部 Lab 独立交付",
       "path": "docs/adr/ADR-LAB-001.md",
       "locations": [
-        12586
+        12592
       ]
     },
     "ADR-BROWSERCTL-001": {
@@ -13346,9 +13347,9 @@
       "locations": [
         11882,
         11892,
-        12248,
-        12939,
-        12971
+        12254,
+        12945,
+        12977
       ]
     },
     "ADR-BROWSERCTL-002": {
@@ -13359,8 +13360,8 @@
         11939,
         11982,
         11997,
-        12241,
-        12971
+        12247,
+        12977
       ]
     }
   },
