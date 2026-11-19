@@ -1,18 +1,21 @@
 #!/usr/bin/env node
 /**
- * Measure this product against another browser MCP on the same page and the
+ * Measure this product against two other browser MCPs on the same page and the
  * same question, in characters the caller receives.
  *
  * The table this prints is deliberately not a scoreboard. Two numbers decide
  * each row: what the call costs, and whether the answer is in it. A cheap call
  * that does not answer is worthless, and this script says so on the row.
  *
- * Method: serve a fixture over loopback, drive both products at it, and count
- * the characters of the tool result -- the part that occupies a context
- * window. The answer is checked by literal substring, so a case only passes if
- * the exact text the page used comes back.
+ * Method: serve a fixture over loopback, drive all three products at it, and
+ * count the characters of the tool result -- the part that occupies a context
+ * window. A call answers only if it contains the exact text the page used, and
+ * for a question about a control, only if that text is on a line carrying a
+ * handle the product can act on. Each product is measured across everything it
+ * has: this one across all four read modes, Playwright across three keywords
+ * times five `maxResults`, Chrome DevTools at its one reading call.
  *
- * Requirements: network (the competitor is fetched with `npx -y`), Chrome.
+ * Requirements: network (the competitors are fetched with `npx -y`), Chrome.
  * Deliberately outside `pnpm check`: a comparison that depends on a network
  * download must never be the reason the suite is red.
  *
@@ -21,7 +24,7 @@
  *   node benchmarks/harness/compare-competitors.mjs --case long-page
  *   node benchmarks/harness/compare-competitors.mjs --json
  *
- * Pin the competitor version. "Whatever is latest" is not a comparison.
+ * Pin the competitor versions. "Whatever is latest" is not a comparison.
  */
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -33,7 +36,8 @@ import { spawn } from "node:child_process";
 import { build } from "esbuild";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const COMPETITOR = { pkg: "@playwright/mcp", version: "0.0.86" };
+const PLAYWRIGHT = { pkg: "@playwright/mcp", version: "0.0.86" };
+const CHROME_DEVTOOLS = { pkg: "chrome-devtools-mcp", version: "1.13.0" };
 
 /**
  * Each case names a page, a question a user would actually ask, the text the
@@ -45,27 +49,54 @@ const CASES = [
     fixture: "long-page",
     question: "how long do refunds take",
     answer: "five to seven business days",
-    term: "refund",
+    /* `business days` is in the answer, not the question, so only a caller who
+       already knows the answer could search for it. Kept in the sweep and
+       labelled, because hiding it would overstate the gap just as much as
+       reporting it unlabelled understates it. */
+    terms: ["refund", "refunds take", "business days"],
+    oracleTerms: ["business days"],
   },
   {
     fixture: "wide-page",
-    question: "when should i water",
-    answer: "Watering schedule",
-    term: "watering",
+    question: "what does each row button do",
+    answer: "opens that bed for editing",
+    terms: ["row", "bed", "opens that bed"],
+    oracleTerms: ["opens that bed", "bed"],
   },
   {
     fixture: "huge-dom",
-    question: "how many warehouses are listed",
-    answer: "Warehouse list",
-    term: "warehouse",
+    question: "when do deliveries leave the depot",
+    answer: "seven in the morning",
+    terms: ["deliver", "depot", "seven"],
+    oracleTerms: ["seven"],
   },
   {
     fixture: "huge-label",
-    question: "confirm the order",
+    question: "which control shows the delivery status",
     answer: "Show delivery status",
-    term: "deliver",
+    terms: ["deliver", "status"],
+    oracleTerms: [],
+    needsAddress: true,
   },
 ];
+
+/* An address each product prints next to a control it can act on: this
+   product's `[12]`, Playwright's `[ref=e12]`, Chrome DevTools' `uid=1_4`. The
+   formats differ; what matters is that the line a control's name appears on
+   also carries a handle. A control whose name is all a reading returns names
+   it without letting anyone click it, which is not an answer to "which control
+   shows the delivery status". */
+const ADDRESS = /(\[\d+\]|\[ref=[^\]]+\]|uid=\d+_\d+)/;
+
+function answers(text, testCase) {
+  const named = text.split("\n").filter((one) => one.includes(testCase.answer));
+  if (named.length === 0) return false;
+  /* "Mentioned" is not "reachable": a control question is answered only by a
+     mention that carries a handle, and the mention in the prose never does. */
+  return testCase.needsAddress === true
+    ? named.some((one) => ADDRESS.test(one))
+    : true;
+}
 
 const argv = process.argv.slice(2);
 const asJson = argv.includes("--json");
@@ -161,7 +192,7 @@ async function measureOxrail(origin, testCase) {
       product: "oxrail",
       call: "browser_view",
       chars: view.length,
-      answered: view.includes(testCase.answer),
+      answered: answers(view, testCase),
     });
     const query = asRendered(
       await route.digest({ mode: "query", query: testCase.question }),
@@ -170,7 +201,26 @@ async function measureOxrail(origin, testCase) {
       product: "oxrail",
       call: `browser_read query(${JSON.stringify(testCase.question)})`,
       chars: query.length,
-      answered: query.includes(testCase.answer),
+      answered: answers(query, testCase),
+    });
+    /* Every mode this product has, so "its best call" means the same thing for
+       both sides: the cheapest one that actually answered, not the one the
+       author expected to win. */
+    const map = asRendered(await route.digest({ mode: "map" }));
+    rows.push({
+      product: "oxrail",
+      call: "browser_read map",
+      chars: map.length,
+      answered: answers(map, testCase),
+    });
+    const article = asRendered(
+      await route.digest({ mode: "article", maxChars: 1_000_000 }),
+    );
+    rows.push({
+      product: "oxrail",
+      call: "browser_read article",
+      chars: article.length,
+      answered: answers(article, testCase),
     });
   } finally {
     await route.close().catch(() => {});
@@ -179,7 +229,7 @@ async function measureOxrail(origin, testCase) {
   return rows;
 }
 
-async function measureCompetitor(origin, testCase) {
+async function measurePlaywright(origin, testCase) {
   // The competitor writes snapshot sidecars into its working directory, so
   // it runs in one that is thrown away rather than in the checkout.
   const scratch = await mkdtemp(join(tmpdir(), "compare-competitor-"));
@@ -187,7 +237,7 @@ async function measureCompetitor(origin, testCase) {
     "npx",
     [
       "-y",
-      `${COMPETITOR.pkg}@${COMPETITOR.version}`,
+      `${PLAYWRIGHT.pkg}@${PLAYWRIGHT.version}`,
       "--headless",
       "--isolated",
     ],
@@ -209,21 +259,70 @@ async function measureCompetitor(origin, testCase) {
       product: "playwright-mcp",
       call: "browser_snapshot",
       chars: snapshot.length,
-      answered: snapshot.includes(testCase.answer),
+      answered: answers(snapshot, testCase),
     });
-    for (const maxResults of [1, 2, 3, 5, 40]) {
-      const found = await call("browser_find", {
-        text: testCase.term,
-        maxResults,
-      });
-      rows.push({
-        product: "playwright-mcp",
-        call: `browser_find(${JSON.stringify(testCase.term)}, maxResults:${maxResults})`,
-        chars: found.length,
-        answered: found.includes(testCase.answer),
-      });
-    }
+    /* A keyword search is only as good as the keyword, so every term a
+       competent caller might pick is tried and the cheapest that answers is
+       what gets reported. Picking one term here would be picking the result. */
+    for (const term of testCase.terms)
+      for (const maxResults of [1, 2, 3, 5, 40]) {
+        const found = await call("browser_find", { text: term, maxResults });
+        rows.push({
+          product: "playwright-mcp",
+          call: `browser_find(${JSON.stringify(term)}, maxResults:${maxResults})`,
+          chars: found.length,
+          answered: answers(found, testCase),
+          blind: !testCase.oracleTerms.includes(term),
+        });
+      }
     await call("browser_close", {});
+  } finally {
+    child.kill("SIGKILL");
+    await rm(scratch, { recursive: true, force: true });
+  }
+  return rows;
+}
+
+/**
+ * chrome-devtools-mcp reads a page with `take_snapshot`, an accessibility dump.
+ * It has no keyword search, so a full snapshot is its only way to answer a
+ * question -- `wait_for` re-sends the snapshot rather than a matching snippet.
+ * Every call after `list_pages` has to name a page id, so the id is looked up
+ * per run rather than assumed.
+ */
+async function measureChromeDevtools(origin, testCase) {
+  const scratch = await mkdtemp(join(tmpdir(), "compare-devtools-"));
+  const { child, send } = connect(
+    "npx",
+    [
+      "-y",
+      `${CHROME_DEVTOOLS.pkg}@${CHROME_DEVTOOLS.version}`,
+      "--headless",
+      "--isolated",
+    ],
+    scratch,
+  );
+  const call = async (name, callArgs) =>
+    resultText(await send("tools/call", { name, arguments: callArgs }));
+  const rows = [];
+  try {
+    await send("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "compare", version: "0" },
+    });
+    await send("notifications/initialized", {});
+    const pages = await call("list_pages", {});
+    const listed = /^\s*(\d+):/m.exec(pages);
+    const pageId = listed ? Number(listed[1]) : 1;
+    await call("navigate_page", { url: origin, pageId });
+    const snapshot = await call("take_snapshot", { pageId });
+    rows.push({
+      product: "chrome-devtools",
+      call: "take_snapshot",
+      chars: snapshot.length,
+      answered: answers(snapshot, testCase),
+    });
   } finally {
     child.kill("SIGKILL");
     await rm(scratch, { recursive: true, force: true });
@@ -242,7 +341,8 @@ for (const testCase of CASES) {
   try {
     const rows = [
       ...(await measureOxrail(origin, testCase)),
-      ...(await measureCompetitor(origin, testCase)),
+      ...(await measurePlaywright(origin, testCase)),
+      ...(await measureChromeDevtools(origin, testCase)),
     ];
     report.push({ ...testCase, sourceChars: body.length, rows });
     if (!asJson) {
@@ -252,16 +352,31 @@ for (const testCase of CASES) {
       );
       for (const row of rows) {
         const verdict = row.answered ? "answers" : "does not answer";
+        const caveat =
+          row.blind === false ? ", but needs a word from the answer" : "";
         console.log(
-          `    ${String(row.chars).padStart(7)}  ${row.product.padEnd(15)} ${row.call}   (${verdict})`,
+          `    ${String(row.chars).padStart(7)}  ${row.product.padEnd(15)} ${row.call}   (${verdict}${caveat})`,
         );
       }
-      const answered = rows
-        .filter((row) => row.answered)
-        .sort((a, b) => a.chars - b.chars);
-      if (answered.length > 0) {
+      /* Two summaries, because one would hide a real dependency. The blind one
+         is what a caller who only has the question can actually achieve; the
+         other is what opening with a word from the answer buys. This product's
+         `query` takes the question itself, and `map`/`article`/`view` need no
+         words at all, so all of its rows are blind. */
+      for (const [label, pool] of [
+        [
+          "smallest call that answers, given only the question",
+          rows.filter((row) => row.blind !== false),
+        ],
+        ["smallest call that answers, given a word from the answer", rows],
+      ]) {
+        const answered = pool
+          .filter((row) => row.answered)
+          .sort((a, b) => a.chars - b.chars);
         console.log(
-          `  smallest call that actually answers: ${answered[0].chars} chars, ${answered[0].product} ${answered[0].call}`,
+          answered.length === 0
+            ? `  ${label}: none`
+            : `  ${label}: ${answered[0].chars} chars, ${answered[0].product} ${answered[0].call}`,
         );
       }
     }

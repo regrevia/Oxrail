@@ -89,6 +89,8 @@ A read is also what makes its page writable: the controls it returns are the ref
 
 That is why `map` and `query` are not free on a page with many links, and why `query` on such a page still costs its 61 `[n]` lines.
 
+`query` ranks body blocks, and a heading is not one. Measured directly against the `wide-page` fixture: `browser_read {mode:"query", query:"when should i water"}` came back `(nothing on this page answers …)` with `matched: 0` over 173 blocks, because the page's only mention of watering is its `h1` — while `map` returned 3355 characters that contained it. So when the question is _what is this page_, `map` is the mode; `query` is for questions the page answers in a sentence.
+
 Those totals mean nothing without a scale, and the page supplies two that involve no budget at all. The same long page is served as 14766 characters of HTML, and its prose — every visible word with the markup gone — is 8159 characters. `browser_view` returns 7402, so it sends one character for every two the page has. That ratio is not an achievement and the harness prints it anyway: on a page that is mostly prose, a whole-page read costs about what the prose costs.
 
 Where the ratio does move is a page whose length is not prose. A single button whose `aria-label` holds 60000 characters is served as 60744 characters and reads whole as 77 characters of prose; `browser_view` returns 255, one character for every 238 the page has. Both numbers come from the same command, which is the point — `node benchmarks/harness/measure-reading.mjs --fixture huge-label` prints the page as served, the prose it holds, and the ratio above the table, so a rise in the ratio is visible as a page that grew somewhere other than its words.
@@ -173,33 +175,61 @@ The reading around the frame is complete, and the frame is named separately as u
 
 All six of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one, `nodes` on the warehouse page, `frames` on the checkout page. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed). Every cap a reader can be handed is reachable here by a command, not only by reading the source.
 
-## Against another browser MCP, measured the same way
+## Against two other browser MCPs, measured the same way
 
-The numbers above say what this product costs. They do not say whether that is good, because a cost has no meaning without something to compare it to. `pnpm compare:competitors` serves the same fixtures and drives `@playwright/mcp@0.0.86` at them, counting characters received and whether the answer is in them — the second half matters, because a cheap call that does not answer is worthless.
+The numbers above say what this product costs. They do not say whether that is good, because a cost means nothing without something to compare it to. `pnpm compare:competitors` serves the same fixtures over loopback and drives `@playwright/mcp@0.0.86` and `chrome-devtools-mcp@1.13.0` at them, counting characters received and whether the answer is in what came back. The second half is the one that matters: a cheap call that does not answer is worth nothing.
 
-Every row below comes from that command. Both columns are the cheapest call that actually returned the answer, not the cheapest call either product can make: the competitor was pinned to a version, given the fixture text, and allowed its own best call for each page — `browser_find` with the word a competent agent would search for.
+Each product is given its own best case, not a strawman. Every mode this product has is measured (`view`, `article`, `map`, `query`), and the table reports whichever answered for the fewest characters. Playwright gets `browser_find` swept over three plausible keywords and five `maxResults` values. Chrome DevTools reads with `take_snapshot` and nothing else: it has no keyword search, and its `wait_for` re-sends the whole snapshot rather than a matching snippet.
 
-| Fixture                                | Cheapest call that answers               | Oxrail best | Playwright best |
-| -------------------------------------- | ---------------------------------------- | ----------- | --------------- |
-| `long-page` (prose, 14766)             | `browser_find("refund", maxResults:3)`   | 1827        | **1219**        |
-| `wide-page` (160 controls, 10360)      | `browser_find("watering", maxResults:1)` | 4995        | **417**         |
-| `huge-dom` (9000 fields, 65022)        | `browser_read {mode:"query"}`            | **143**     | 383             |
-| `huge-label` (60000-char label, 60744) | `browser_find("deliver", maxResults:1)`  | 254         | **220**         |
+A call counts as answering only if the answer appears, and for a question about a control, only if it appears on a line that carries a handle — `[12]` here, `[ref=e12]` in Playwright, `uid=1_4` in Chrome DevTools. Naming a control without letting anyone click it is not an answer to "which control shows the delivery status".
 
-Three of four go to Playwright, and the honest reading is that its `browser_find` is a good tool: it searches the accessibility tree and returns snippets with refs, so when the caller already knows the word to search for, it is cheaper than asking a question in words.
+There is one asymmetry a comparison of this kind cannot design away, so it is labelled instead: a keyword search needs a keyword, and the best keyword is sometimes a word from the answer. `browser_find("business days", 1)` returns the `long-page` answer in 764 characters — but a caller who does not already know the answer would search the question's words, and `refund` needs three results and 1219 characters. The table below is what a caller who has only the question can achieve. This product's `query` takes the question itself, and `map`, `article` and `view` need no words at all, so nothing on its side depends on that knowledge.
 
-Where this product wins is a whole-page read, and the margin is steady rather than dramatic:
+Cheapest call that actually answered, in characters received, given only the question:
 
-| Fixture      | `browser_view` | `browser_snapshot` | Ratio |
-| ------------ | -------------- | ------------------ | ----- |
-| `long-page`  | 7403           | 17391              | 2.3×  |
-| `wide-page`  | 4995           | 11392              | 2.3×  |
-| `huge-dom`   | 254            | 533                | 2.1×  |
-| `huge-label` | 256            | 308                | 1.2×  |
+| Fixture                                | This product | Playwright | Chrome DevTools |
+| -------------------------------------- | ------------ | ---------- | --------------- |
+| `long-page` (prose, 14766)             | 1827         | **1219**   | 13087           |
+| `wide-page` (160 controls, 10360)      | 2030         | **450**    | 5427            |
+| `huge-dom` (9000 fields, 65022)        | **112**      | 422        | 432             |
+| `huge-label` (60000-char label, 60744) | **213**      | 219        | 60217           |
 
-So: half the cost of a snapshot to see a whole page, and behind on targeted lookup unless the question cannot be reduced to a keyword. A question in words ("how many warehouses are listed") is exactly the case where `query` pulls ahead — `huge-dom` is the one row this product wins, and it is the one row where the answer is not a word the caller could have known to search for.
+These totals count the whole tool result, so they run exactly one character above the text-plus-controls tables earlier in this section: the formatted result separates the prose block from what follows with a blank line.
 
-What this does not establish is that either product is better. Both were measured on four fixtures chosen by the author of this one, on a local server, with no network and no human. The competitor was not tuned, and neither was this product; `maxResults` was varied only to find its best case. Claiming a ranking from this would be claiming more than four rows can carry — which is why the README still says there is no performance claim.
+A whole-page read of the same four pages:
+
+| Fixture      | `browser_view` | `browser_snapshot` | `take_snapshot` |
+| ------------ | -------------- | ------------------ | --------------- |
+| `long-page`  | 7403           | 17391              | 13087           |
+| `wide-page`  | 4995           | 11392              | 5427            |
+| `huge-dom`   | 254            | 533                | 432             |
+| `huge-label` | 256            | 308                | 60217           |
+
+Playwright wins two of four on targeted lookup, by 1.5× and 4.5×. Its `browser_find` is a good tool: it searches the accessibility tree and returns snippets with refs, so when the caller can name the word, it is cheaper than ranking a question. This product wins the other two — `huge-dom` by 3.8×, and `huge-label` by 3%, which is a tie and should be read as one.
+
+The two losses and the two wins have one cause between them, and it is not speed.
+
+On `wide-page` the answer is one sentence — "Each row has a button that opens that bed for editing" — and 2030 characters is what carrying it costs here: `query` returns that sentence as 75 characters of text and then hands all 160 controls — a read is what makes a page writable — and the control lines are the rest of the 3391. `article` returns the same sentence plus the 76 row names as list items, none of them addressable, for 2030. `browser_find("row", 1)` returns the matched neighbourhood and its refs for 450. That gap is the price of the addressing guarantee described above, not a defect, and it is the one number in this table that a narrower hand-back would move — the spec allows a read to carry fewer controls, and it currently does not.
+
+On `huge-dom` the same cause runs the other way. The page serves 65022 characters of DOM and holds one useful sentence. `query` returns that sentence without the 9000 fields, because they are not prose and it does not rank them, for 112. `browser_find` returns the matched accessibility subtree, which on this page is larger. The lesson is the shape of the cost, not who is faster: this product pays for the controls it hands back and for the prose it returns, and pays nothing for DOM it did not index.
+
+That is also why the whole-page column barely moves: `browser_view` is 2.1×–2.3× below Playwright's snapshot on the first three pages and 1.1×–1.8× below Chrome DevTools', and only `huge-label` breaks the pattern, where the gap to Playwright narrows to 1.2× because both bound the name and differ only in how much they send around it. Those ratios follow from what each product sends, not from a page's shape.
+
+The `huge-label` column is a different kind of fact. One button has a 60000-character accessible name. Chrome DevTools prints it in full: 60217 characters, of which a single line is 60019. This product sends 256 for the same page and Playwright 308, both because a name has a ceiling. That is `KILL-K18` — one unbounded field taking the context with it — reproduced by one command instead of argued from a design document. `huge-label` is a synthetic page built to be pathological; its value is that it separates a bound from a tendency. On the other three pages all three products are within one order of magnitude, and the differences are matters of degree.
+
+Chrome DevTools is not reducible to that number either. Its `evaluate_script` returns the answer in a handful of characters — but only after the caller writes page-specific JavaScript, which is the thing all three products exist to avoid, and it is unbounded by construction, so the harness counts it for nobody.
+
+### The first version of this comparison was wrong
+
+The section above replaced one that had been measured badly, and the error is worth keeping because it was not a rounding difference.
+
+That version used four pages and reported this product losing three. Three of its four "answers" were not answers: on `wide-page` and `huge-dom` the answer string was the page's own heading ("Watering schedule", "Warehouse list"), and on `huge-label` the question ("confirm the order") had nothing to do with the answer ("Show delivery status"). A question of the form _how many warehouses are listed_ was scored as answered by a reading that merely contained the heading `Warehouse list` — and the page lists no count at all. The result was a table that understated this product and, worse, a claim built on it: that `browser_find` wins wherever the answer is a keyword. With real answers and a keyword sweep, it wins two of four, not three.
+
+Three further changes came out of redoing it. A control question now requires an addressable mention, which correctly disqualifies `article` — it names a button in prose but hands out no ref, so it cannot be clicked. Chrome DevTools was added as a second competitor, because a single competitor's design choices are a weak basis for any conclusion. And the keyword a competitor is given is now labelled by whether it is derivable from the question, because the first corrected table credited Playwright with 764 characters on `long-page` using a term that only appears in the answer — a favourable-to-them number that no caller could reach, which is the same error in the opposite direction. The blind comparison is 1219 against 1827, not 764 against 1827.
+
+### What this measurement does not establish
+
+Not a ranking. Four fixtures chosen by the author of one of the three products, on a local server, with each competitor given its best case, is not a corpus. The README still says there is no performance claim, and this does not create one. What it establishes is narrower: where the advantage is (whole-page cost, a bound on every field, a question that can be asked in words) and where it is not (looking something up once you know the word).
 
 ## Composed pages: shadow roots and frames
 
