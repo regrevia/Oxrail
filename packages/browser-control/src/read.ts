@@ -229,6 +229,15 @@ const SATURATION = 1.5;
  * semicolon, including the CJK equivalents. */
 const SENTENCE_BREAK = /(?<=[。！？；])|(?<=[.!?;])\s+/u;
 
+/** A trail is printed once per group, so a page can repeat a 5000-character
+ * heading at the top of every section it changes. It gets the same ceiling a
+ * title does. */
+const TRAIL_CAP = 200;
+
+/** Below this a passage is a fragment rather than an answer, so the ceiling is
+ * better spent on nothing than on four words and an ellipsis. */
+const PASSAGE_FLOOR = 40;
+
 /** "shipp" and "ship" are the same word; "class" and "clas" are not, so only a
  * consonant that was doubled can lose one letter. */
 function undouble(word: string): string {
@@ -548,11 +557,29 @@ export function evidence(
        repeat of one already picked — the answer is complete. */
     if (at < 0 || bestValue <= 0) break;
     const pick = left.splice(at, 1)[0] as (typeof units)[number];
-    const heading =
-      pick.heading !== lastHeading && pick.heading !== ""
-        ? pick.heading.length + 8
-        : 0;
-    if (used + pick.text.length + heading > ceiling && chosen.length > 0) break;
+    /* The heading is printed once per group, so it is charged once per group —
+       and capped, because the page chooses its length. */
+    const trail =
+      pick.heading.length > TRAIL_CAP
+        ? pick.heading.slice(0, TRAIL_CAP)
+        : pick.heading;
+    let heading = trail !== lastHeading && trail !== "" ? trail.length + 8 : 0;
+    /* A trail that would spend the whole ceiling is not worth printing: the
+       sentence is why the caller asked. */
+    if (used + heading + PASSAGE_FLOOR > ceiling) {
+      pick.heading = "";
+      heading = 0;
+    } else {
+      pick.heading = trail;
+    }
+    const room = ceiling - used - heading;
+    /* The first sentence is the answer. A page can put all 4000 characters the
+       block cap allows into one, which is longer than the whole ceiling, so it
+       is cut to what fits instead of being returned whole or dropped. */
+    if (pick.text.length > room) {
+      if (chosen.length > 0 || room < PASSAGE_FLOOR) break;
+      pick.text = `${pick.text.slice(0, room - 1).trimEnd()}…`;
+    }
     lastHeading = pick.heading;
     used += pick.text.length + heading;
     chosen.push(pick);
