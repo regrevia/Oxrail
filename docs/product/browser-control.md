@@ -148,7 +148,7 @@ node benchmarks/harness/measure-reading.mjs --fixture deep-outline
 browser_read {mode:"map"}  1059 chars (21.9%)  capped: headings
 ```
 
-Four of the caps this document names fire on a page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one. `nodes` and `frames` are asserted by unit tests but no fixture reaches them on this machine. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed), so it is not a cap this document is guessing at.
+Three of the caps this document names fire on a fixture page you can run here — `chars` on the long and article pages, `controls` on the wide one, `headings` on the deep one. `nodes` and `frames` are asserted by unit tests but no fixture reaches them on this machine. `passages` is the one that needs a question rather than a page shape: a query that ranks more blocks than the passage limit returns sets it, and the live regression asserts exactly that (`matched` counts the blocks that answered, so the two diverge as soon as a query answers more than it is handed), so it is not a cap this document is guessing at.
 
 ## Composed pages: shadow roots and frames
 
