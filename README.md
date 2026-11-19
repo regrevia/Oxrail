@@ -182,6 +182,31 @@ policy are in [Browser Control](docs/product/browser-control.md) and
 
 No token reduction, cross-surface coverage, per-click interception, or end-to-end secret guarantee is claimed without reproducible evidence.
 
+## Measured, and what is not
+
+Browser Control is measured against other browser MCP servers on four fixture
+pages, given only the question and not its answer. Characters each product
+returned:
+
+| Fixture (page size)  | Oxrail  | Playwright | Chrome DevTools |
+| -------------------- | ------- | ---------- | --------------- |
+| `long-page` (14766)  | 1827    | **1219**   | 13087           |
+| `wide-page` (10360)  | 2030    | **450**    | 5427            |
+| `huge-dom` (65022)   | **112** | 422        | 432             |
+| `huge-label` (60744) | **213** | 219        | 60217           |
+
+Playwright is cheaper on two of four, by 1.5× and 4.5×, because a keyword
+search beats ranking a question when the caller can name the word. Oxrail is
+cheaper on the other two; the 3% on `huge-label` is a tie. Benchmarking is in
+progress and no general speed or size claim follows from this table.
+
+What is claimed is a bound. One button on `huge-label` has a 60000-character
+accessible name; Chrome DevTools returns it, 60217 characters in a single
+result, and Oxrail returns 213 because a name has a ceiling. Every reading is
+capped by budgets it declares, and a page cannot make one cost more than its
+caps. The caps, the commands that reach each of them, and the full comparison
+are in [Browser Control](docs/product/browser-control.md).
+
 ## Development
 
 ```bash
