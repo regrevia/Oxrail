@@ -160,6 +160,25 @@ describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
         expect(answer.matched ?? 0).toBeGreaterThan(0);
         expect(answer.total ?? 0).toBeGreaterThan(answer.matched ?? 0);
 
+        /* A budget too small for every answering block: "matched" has to keep
+           reporting the answers the page gave, not the rows that survived the
+           trim, or a partial read looks complete. */
+        const tight = await route.digest({
+          mode: "query",
+          query: "paragraph repeats page",
+          maxChars: 200,
+        });
+        expect(tight.chars ?? 0).toBeLessThanOrEqual(200);
+        /* The page is the same page: how many blocks answer the question cannot
+           depend on how much of the answer the caller asked to be handed. If
+           "matched" counted the rows that survived the trim, this equality
+           would break exactly when the read is partial. */
+        expect(tight.matched ?? 0).toBeGreaterThan(1);
+        /* And because fewer rows came back than answered, the read has to say
+           it dropped some: this is the only way "limit: passages" ever fires. */
+        expect(tight.truncated).toBe(true);
+        expect(tight.limit).toBe("passages");
+
         /* Reading the column costs far less than reading the page: the link
            farm and the surrounding chrome are not prose. */
         expect(article.text.length).toBeLessThan(viewChars * 0.8);

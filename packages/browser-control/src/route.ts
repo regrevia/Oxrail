@@ -733,7 +733,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           mode: "query",
           words: page.words ?? 0,
           chars: text.length,
-          matched: found.rows.length,
+          matched: found.matched,
           total: found.total,
         };
       }

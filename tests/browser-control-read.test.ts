@@ -141,6 +141,28 @@ describe("evidence", () => {
     expect(found.matched).toBeLessThanOrEqual(found.total);
   });
 
+  /* The passage limit drops blocks that did answer the question. If "matched"
+     only counted what came back it would always equal rows.length, and a caller
+     could not tell a page that mentions refunds twice from one that mentions
+     them everywhere. */
+  it("counts every block that answered, not just the ones it returned", () => {
+    const many = [
+      long,
+      block("Refunds are reviewed by a person within one working day.", {
+        h: "Refunds",
+      }),
+      block("Refund requests older than a year need a manager.", {
+        h: "Refunds",
+      }),
+      other,
+    ];
+    const capped = evidence(many, "refund", { limit: 1 });
+    expect(capped.rows.length).toBe(1);
+    expect(capped.matched).toBeGreaterThan(capped.rows.length);
+    const wide = evidence(many, "refund", { limit: 24 });
+    expect(wide.matched).toBe(wide.rows.length);
+  });
+
   it("returns nothing rather than a random sentence when nothing matches", () => {
     const found = evidence([long, other], "quantum chromodynamics");
     expect(found.rows).toEqual([]);

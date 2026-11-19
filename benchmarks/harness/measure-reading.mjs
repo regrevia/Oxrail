@@ -9,6 +9,8 @@
  *
  * The default fixture is `benchmarks/fixtures/long-page/`; `--fixture
  * article-page` runs the same five calls on `benchmarks/fixtures/article-page/`.
+ * `wide-page` (many controls, little prose) and `deep-outline` (many headings,
+ * one control) reach the control and outline ceilings, which `capped:` names.
  *
  * It reports characters returned to the caller -- the part that occupies a
  * context window -- not bytes on the wire. The distinction matters: a control's
