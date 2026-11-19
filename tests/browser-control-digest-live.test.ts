@@ -440,6 +440,32 @@ describe.skipIf(!live || !hasChrome)("Browser Control reading layer", () => {
       const map = await route.digest({ mode: "map" });
       expect(map.text.length).toBeLessThanOrEqual(2000);
       expect(map.truncated).toBe(true);
+
+      /* The three modes a question goes through were not covered here, and
+           they are the ones a page can steer: a question costs a page walk,
+           a control hand-back and a passage ranking. Whatever the page puts in
+           those fields, the caller's ceiling is the sum of caps, never the
+           page's size — this page is 60000 characters in three separate
+           fields, and none of it reaches the caller unbounded. */
+      for (const reading of [
+        await route.digest({ mode: "article" }),
+        await route.digest({ mode: "query", query: "big" }),
+        await route.digest({ mode: "changed" }),
+      ]) {
+        expect(reading.text.length).toBeLessThanOrEqual(2000);
+        expect(reading.controls.length).toBeLessThanOrEqual(160);
+        for (const control of reading.controls)
+          expect(control.name.length).toBeLessThanOrEqual(160);
+        /* A rendered reading is its text plus one bounded line per control,
+           so the whole thing is bounded by caps the caller was told about. */
+        const rendered =
+          reading.text.length +
+          reading.controls.reduce(
+            (sum, control) => sum + control.name.length,
+            0,
+          );
+        expect(rendered).toBeLessThanOrEqual(2000 + 160 * 160);
+      }
     } finally {
       await route.close();
       const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
