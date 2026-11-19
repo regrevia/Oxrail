@@ -1237,7 +1237,28 @@ function evidence(blocks, query, options = {}) {
   );
   const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
   const chosen = [];
-  const left = units.filter((unit) => unit.score > 0);
+  let left = units.filter((unit) => unit.score > 0);
+  if (left.length === 0) {
+    const labels = [];
+    for (const row of near) {
+      const label = trailOf(row.block);
+      if (label === "" || label.length > 200) continue;
+      const said = terms(label);
+      if (!asked.some((term) => said.includes(term))) continue;
+      if (labels.some((one) => one.text === label)) continue;
+      labels.push({
+        text: label,
+        terms: said,
+        heading: "",
+        at: blocks.indexOf(row.block),
+        step: -1,
+        prior: row.score,
+        block: row.block,
+        score: row.score
+      });
+    }
+    left = labels;
+  }
   const scored = left.length;
   let used = 0;
   let lastHeading = "";
