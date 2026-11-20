@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Oxrail Browser-Steuerung",
+    "description": "Öffnet ein Headless-Chrome, liest eine Seite innerhalb eines Zeichenbudgets, damit ein riesiges DOM den Kontext nicht flutet, und klickt über die Nummer, die die Ausgabe gedruckt hat.",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,22 @@
+# Oxrail Browser Control, as an MCP stdio client.
+#
+# `process.execPath`, not `node`: a desktop Host is started by launchd with the
+# system default PATH, which has no `node` on it, so a bare `node` fails to spawn
+# (ENOENT) and the MCP handshake never starts. The Host is itself Node, so its
+# own executable is the one node this process is guaranteed to have.
+#
+# The entry point is the built artifact `dist/browser-control/mcp.mjs`, which
+# self-starts when run directly. Run `pnpm build` in the Oxrail checkout if it is
+# missing; the MCP server will not start without it.
+- insert:
+    - id: oxrail-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: oxrail
+        transport: stdio
+        command: !!js process.execPath
+        args:
+          - /Volumes/US202/moved/Desktop-work/Oxrail/dist/browser-control/mcp.mjs
+        cwd: /Volumes/US202/moved/Desktop-work/Oxrail
+        toolCallTimeoutMs: 120000
+        failOnStartupError: true

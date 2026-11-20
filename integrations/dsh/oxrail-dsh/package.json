@@ -1,0 +1,30 @@
+{
+  "name": "@local/oxrail-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Oxrail Browser Control for DeepSeek Harness: opens a headless Chrome, reads a page under a character budget, and clicks by the number the read printed. Every tool is forwarded to the Oxrail MCP server over stdio.",
+  "type": "module",
+  "exports": {
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.png"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "icon.png"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-mcp-client": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

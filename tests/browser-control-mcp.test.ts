@@ -420,6 +420,10 @@ describe("MCP server", () => {
     expect(tools.map((tool) => tool.name)).toEqual(TOOL_NAMES);
     expect(tools).toHaveLength(11);
     expect(tools).toHaveLength(TOOL_DEFINITIONS.length);
+    // SEP-2549 makes a 2026-07-28 list result cacheable, and the client rejects
+    // the reply without both fields rather than defaulting them.
+    expect(typeof resultRecord(reply).ttlMs).toBe("number");
+    expect(resultRecord(reply).cacheScope).toBe("private");
     for (const tool of tools) {
       expect(typeof tool.description).toBe("string");
       expect((tool.description as string).trim().length).toBeGreaterThan(0);
@@ -427,6 +431,45 @@ describe("MCP server", () => {
       expect(schema.type).toBe("object");
     }
     await harness.end();
+  });
+
+  // Revision 2026-07-28 makes resultType mandatory on every result; the older
+  // codec deletes it before validating, so a missing discriminator passes at
+  // 2025-11-25 and is rejected only by a modern client. Guarding every envelope
+  // here keeps a modern client from rejecting the handshake for one method.
+  it("stamps resultType complete on every result envelope", async () => {
+    const cases: Array<{
+      id: number;
+      method: string;
+      params: Record<string, unknown>;
+    }> = [
+      {
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2026-07-28" },
+      },
+      { id: 2, method: "server/discover", params: {} },
+      { id: 3, method: "tools/list", params: {} },
+      { id: 4, method: "ping", params: {} },
+      {
+        id: 5,
+        method: "tools/call",
+        params: { name: "browser_state", arguments: {} },
+      },
+    ];
+    for (const testCase of cases) {
+      const harness = createHarness();
+      harness.send({
+        jsonrpc: "2.0",
+        id: testCase.id,
+        method: testCase.method,
+        params: testCase.params,
+      });
+      const reply = await harness.waitForReply(testCase.id);
+      expect(reply.error, `${testCase.method} failed`).toBeUndefined();
+      expect(resultRecord(reply).resultType, testCase.method).toBe("complete");
+      await harness.end();
+    }
   });
 
   it("renders a page read as text with url and title", async () => {
@@ -970,7 +1013,10 @@ describe("MCP server", () => {
     expect(harness.messages).toHaveLength(2);
 
     harness.send({ jsonrpc: "2.0", id: 6, method: "ping" });
-    expect(resultRecord(await harness.waitForReply(6))).toEqual({});
+    // A ping result is empty apart from the mandatory discriminator.
+    expect(resultRecord(await harness.waitForReply(6))).toEqual({
+      resultType: "complete",
+    });
     expectCleanStdout(harness);
     await harness.end();
   });

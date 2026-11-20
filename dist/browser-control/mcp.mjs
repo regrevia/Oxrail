@@ -3140,6 +3140,9 @@ var MODERN_VERSION = "2026-07-28";
 var LEGACY_VERSION = "2025-11-25";
 var SUPPORTED_VERSIONS = [MODERN_VERSION];
 var LEGACY_VERSIONS = [MODERN_VERSION, LEGACY_VERSION];
+var RESULT_TYPE = "complete";
+var TOOLS_TTL_MS = 0;
+var TOOLS_CACHE_SCOPE = "private";
 var PROTOCOL_META_KEY = "io.modelcontextprotocol/protocolVersion";
 var SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo";
 var PARSE_ERROR = -32700;
@@ -3232,14 +3235,19 @@ function serveMcp(options) {
         write({
           jsonrpc: "2.0",
           id,
-          result: { tools: TOOL_DEFINITIONS }
+          result: {
+            resultType: RESULT_TYPE,
+            ttlMs: TOOLS_TTL_MS,
+            cacheScope: TOOLS_CACHE_SCOPE,
+            tools: TOOL_DEFINITIONS
+          }
         });
         return;
       case "tools/call":
         startToolCall(id, params);
         return;
       case "ping":
-        write({ jsonrpc: "2.0", id, result: {} });
+        write({ jsonrpc: "2.0", id, result: { resultType: RESULT_TYPE } });
         return;
       default:
         sendError(id, METHOD_NOT_FOUND, `method not found: ${method}`);
@@ -3268,6 +3276,7 @@ function serveMcp(options) {
       return;
     }
     const result = {
+      resultType: RESULT_TYPE,
       supportedVersions: [...SUPPORTED_VERSIONS],
       capabilities: { tools: {} },
       _meta: {
@@ -3284,6 +3293,7 @@ function serveMcp(options) {
       jsonrpc: "2.0",
       id,
       result: {
+        resultType: RESULT_TYPE,
         protocolVersion,
         capabilities: { tools: {} },
         serverInfo: { name: SERVER_NAME, version }
@@ -3399,7 +3409,10 @@ function toCallResult(result) {
   const content = result.content.map(
     (block) => block.type === "text" ? { type: "text", text: block.text } : { type: "image", data: block.data, mimeType: block.mimeType }
   );
-  const payload = { content };
+  const payload = {
+    resultType: RESULT_TYPE,
+    content
+  };
   if (result.isError === true) payload.isError = true;
   return payload;
 }

@@ -30,6 +30,17 @@ const MODERN_VERSION = "2026-07-28";
 const LEGACY_VERSION = "2025-11-25";
 const SUPPORTED_VERSIONS: readonly string[] = [MODERN_VERSION];
 const LEGACY_VERSIONS: readonly string[] = [MODERN_VERSION, LEGACY_VERSION];
+/** Every result carries this discriminator: revision 2026-07-28 requires it on
+ *  each result, and the older codec strips it before validating, so one shape
+ *  serves both revisions. */
+const RESULT_TYPE = "complete";
+// Revision 2026-07-28 also makes list results cacheable (SEP-2549), so
+// tools/list carries an explicit lifetime instead of leaving a client to guess.
+// The surface is per-session and never shared, hence the private scope; the
+// lifetime is zero because a new server generation may expose different tools
+// and nothing in the reply identifies that generation.
+const TOOLS_TTL_MS = 0;
+const TOOLS_CACHE_SCOPE = "private";
 const PROTOCOL_META_KEY = "io.modelcontextprotocol/protocolVersion";
 const SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo";
 
@@ -142,14 +153,19 @@ export function serveMcp(options: ServeOptions): McpServer {
         write({
           jsonrpc: "2.0",
           id,
-          result: { tools: TOOL_DEFINITIONS },
+          result: {
+            resultType: RESULT_TYPE,
+            ttlMs: TOOLS_TTL_MS,
+            cacheScope: TOOLS_CACHE_SCOPE,
+            tools: TOOL_DEFINITIONS,
+          },
         });
         return;
       case "tools/call":
         startToolCall(id, params);
         return;
       case "ping":
-        write({ jsonrpc: "2.0", id, result: {} });
+        write({ jsonrpc: "2.0", id, result: { resultType: RESULT_TYPE } });
         return;
       default:
         sendError(id, METHOD_NOT_FOUND, `method not found: ${method}`);
@@ -181,6 +197,7 @@ export function serveMcp(options: ServeOptions): McpServer {
       return;
     }
     const result: Record<string, unknown> = {
+      resultType: RESULT_TYPE,
       supportedVersions: [...SUPPORTED_VERSIONS],
       capabilities: { tools: {} },
       _meta: {
@@ -201,6 +218,7 @@ export function serveMcp(options: ServeOptions): McpServer {
       jsonrpc: "2.0",
       id,
       result: {
+        resultType: RESULT_TYPE,
         protocolVersion,
         capabilities: { tools: {} },
         serverInfo: { name: SERVER_NAME, version },
@@ -332,7 +350,10 @@ function toCallResult(result: ToolResult): Record<string, unknown> {
       ? { type: "text", text: block.text }
       : { type: "image", data: block.data, mimeType: block.mimeType },
   );
-  const payload: Record<string, unknown> = { content };
+  const payload: Record<string, unknown> = {
+    resultType: RESULT_TYPE,
+    content,
+  };
   if (result.isError === true) payload.isError = true;
   return payload;
 }

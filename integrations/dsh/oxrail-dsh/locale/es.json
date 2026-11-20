@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Control de navegador Oxrail",
+    "description": "Abre un Chrome sin ventana, lee una página dentro de un presupuesto de caracteres para que un DOM enorme no inunde el contexto, y hace clic por el número que imprimió la lectura.",
+    "detail": "docs/DETAIL.md"
+  }
+}
