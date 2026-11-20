@@ -23,6 +23,31 @@ import type {
   ShotOptions,
   Snapshot,
   ToolResult,
+  AskOptions,
+  ModeOptions,
+  ReviewOptions,
+  ReviewVerdictOptions,
+  CheckOptions,
+  ClipboardOptions,
+  CookieOptions,
+  DialogOptions,
+  DragOptions,
+  EvalOptions,
+  ExtractOptions,
+  FindOptions,
+  GrabOptions,
+  HoverOptions,
+  LogOptions,
+  LookOptions,
+  MediaOptions,
+  NetworkOptions,
+  PrepareOptions,
+  ScrollOptions,
+  SelectOptions,
+  Step,
+  TabsOptions,
+  UploadOptions,
+  WaitOptions,
 } from "../packages/browser-control/src/types.js";
 
 const TEST_VERSION = "0.1.0-alpha.8";
@@ -38,6 +63,35 @@ const TOOL_NAMES = [
   "browser_shot",
   "browser_state",
   "browser_login",
+  "browser_find",
+  "browser_extract",
+  "browser_look",
+  "browser_wait",
+  "browser_scroll",
+  "browser_hover",
+  "browser_check",
+  "browser_select",
+  "browser_drag",
+  "browser_upload",
+  "browser_grab",
+  "browser_eval",
+  "browser_do",
+  "browser_dialog",
+  "browser_cookie",
+  "browser_clipboard",
+  "browser_console",
+  "browser_network",
+  "browser_failed",
+  "browser_tabs",
+  "browser_downloads",
+  "browser_media",
+  "browser_pdf",
+  "browser_prepare",
+  "browser_mode",
+  "browser_ask",
+  "browser_review",
+  "browser_review_verdict",
+  "browser_resume",
   "browser_close",
 ];
 
@@ -100,7 +154,7 @@ class FakeRoute implements BrowserRoute {
     profile: "default",
     url: "https://example.test/login",
     title: "Example login",
-    headless: true,
+    headless: false,
     idleMs: 0,
     closesInMs: null,
   };
@@ -174,6 +228,106 @@ class FakeRoute implements BrowserRoute {
   async close(): Promise<RouteState> {
     this.closeCalls += 1;
     return { ...this.stateValue, running: false };
+  }
+
+  /* The tools beyond the first eleven. Each records that it was reached and
+     what it was handed, so a test can assert the tool handed the route the
+     arguments it parsed instead of a plausible-looking default. */
+  reached: string[] = [];
+  handedTo: Record<string, unknown> = {};
+
+  #reached(name: string, options: unknown): ToolResult {
+    this.reached.push(name);
+    this.handedTo[name] = options;
+    return ok(`${name} ok`);
+  }
+
+  async find(options: FindOptions): Promise<ToolResult> {
+    return this.#reached("find", options);
+  }
+  async extract(options: ExtractOptions): Promise<ToolResult> {
+    return this.#reached("extract", options);
+  }
+  async look(options: LookOptions): Promise<ToolResult> {
+    return this.#reached("look", options);
+  }
+  async wait(options: WaitOptions): Promise<ToolResult> {
+    return this.#reached("wait", options);
+  }
+  async scroll(options: ScrollOptions): Promise<ToolResult> {
+    return this.#reached("scroll", options);
+  }
+  async hover(options: HoverOptions): Promise<ToolResult> {
+    return this.#reached("hover", options);
+  }
+  async check(options: CheckOptions): Promise<ToolResult> {
+    return this.#reached("check", options);
+  }
+  async select(options: SelectOptions): Promise<ToolResult> {
+    return this.#reached("select", options);
+  }
+  async drag(options: DragOptions): Promise<ToolResult> {
+    return this.#reached("drag", options);
+  }
+  async upload(options: UploadOptions): Promise<ToolResult> {
+    return this.#reached("upload", options);
+  }
+  async grab(options: GrabOptions): Promise<ToolResult> {
+    return this.#reached("grab", options);
+  }
+  async evaluatePage(options: EvalOptions): Promise<ToolResult> {
+    return this.#reached("evaluatePage", options);
+  }
+  async run(steps: readonly Step[]): Promise<ToolResult> {
+    return this.#reached("run", steps);
+  }
+  async dialog(options: DialogOptions): Promise<ToolResult> {
+    return this.#reached("dialog", options);
+  }
+  async cookie(options: CookieOptions): Promise<ToolResult> {
+    return this.#reached("cookie", options);
+  }
+  async clipboard(options: ClipboardOptions): Promise<ToolResult> {
+    return this.#reached("clipboard", options);
+  }
+  async console(options: LogOptions): Promise<ToolResult> {
+    return this.#reached("console", options);
+  }
+  async network(options: NetworkOptions): Promise<ToolResult> {
+    return this.#reached("network", options);
+  }
+  async failed(options: LogOptions): Promise<ToolResult> {
+    return this.#reached("failed", options);
+  }
+  async tabs(options: TabsOptions): Promise<ToolResult> {
+    return this.#reached("tabs", options);
+  }
+  async downloads(): Promise<ToolResult> {
+    return this.#reached("downloads", {});
+  }
+  async media(options: MediaOptions): Promise<ToolResult> {
+    return this.#reached("media", options);
+  }
+  async pdf(): Promise<ToolResult> {
+    return this.#reached("pdf", {});
+  }
+  async prepare(options: PrepareOptions): Promise<ToolResult> {
+    return this.#reached("prepare", options);
+  }
+  async mode(options?: ModeOptions): Promise<ToolResult> {
+    return this.#reached("mode", options);
+  }
+  async ask(options: AskOptions): Promise<ToolResult> {
+    return this.#reached("ask", options);
+  }
+  async review(options?: ReviewOptions): Promise<ToolResult> {
+    return this.#reached("review", options);
+  }
+  async reviewVerdict(options?: ReviewVerdictOptions): Promise<ToolResult> {
+    return this.#reached("reviewVerdict", options);
+  }
+  async resume(): Promise<ToolResult> {
+    return this.#reached("resume", {});
   }
 }
 
@@ -412,13 +566,219 @@ describe("MCP server", () => {
     await harness.end();
   });
 
-  it("lists the eleven tools in order with object schemas", async () => {
+  /* Every tool past the first eleven has to arrive at the route with its
+   * arguments translated, not merely be listed. A spec whose validator drops a
+   * field, or whose `run` forgets a spread, still lists and still answers, so
+   * listing alone proves nothing: each case below names the route method that
+   * must be reached and the arguments it must receive. */
+  it("carries every later tool through to the route with its arguments", async () => {
+    const cases: Array<{
+      tool: string;
+      args: Record<string, unknown>;
+      reaches: string;
+      expect: Record<string, unknown>;
+    }> = [
+      {
+        tool: "browser_find",
+        args: { query: "pricing", regex: true, limit: 5 },
+        reaches: "find",
+        expect: { query: "pricing", regex: true, limit: 5 },
+      },
+      {
+        tool: "browser_extract",
+        args: { select: "h1", ref: 2, limit: 3 },
+        reaches: "extract",
+        expect: { select: "h1", ref: 2, limit: 3 },
+      },
+      {
+        tool: "browser_look",
+        args: { cols: 8, diff: false },
+        reaches: "look",
+        expect: { cols: 8, diff: false },
+      },
+      {
+        tool: "browser_wait",
+        args: { gone: "Loading", timeoutMs: 250 },
+        reaches: "wait",
+        expect: { gone: "Loading", timeoutMs: 250 },
+      },
+      {
+        tool: "browser_scroll",
+        args: { dy: 400, read: true },
+        reaches: "scroll",
+        expect: { dy: 400, read: true },
+      },
+      {
+        tool: "browser_hover",
+        args: { text: "Menu", read: false },
+        reaches: "hover",
+        expect: { text: "Menu", read: false },
+      },
+      {
+        tool: "browser_check",
+        args: { ref: 4, checked: true },
+        reaches: "check",
+        expect: { ref: 4, checked: true },
+      },
+      {
+        tool: "browser_select",
+        args: { field: "country", value: "JP" },
+        reaches: "select",
+        expect: { field: "country", value: "JP" },
+      },
+      {
+        tool: "browser_drag",
+        args: { fromPoint: "10,20", toPoint: "30,40" },
+        reaches: "drag",
+        expect: { fromPoint: "10,20", toPoint: "30,40" },
+      },
+      {
+        tool: "browser_upload",
+        args: { ref: 7, files: ["/tmp/a.txt"] },
+        reaches: "upload",
+        expect: { ref: 7, files: ["/tmp/a.txt"] },
+      },
+      {
+        tool: "browser_grab",
+        args: { name: "logo", count: 2 },
+        reaches: "grab",
+        expect: { name: "logo", count: 2 },
+      },
+      {
+        tool: "browser_eval",
+        args: { code: "1 + 1", awaitPromise: false },
+        reaches: "evaluatePage",
+        expect: { code: "1 + 1", awaitPromise: false },
+      },
+      {
+        tool: "browser_dialog",
+        args: { accept: false, text: "no" },
+        reaches: "dialog",
+        expect: { accept: false, text: "no" },
+      },
+      {
+        tool: "browser_cookie",
+        args: { domain: "example.com", clear: true },
+        reaches: "cookie",
+        expect: { domain: "example.com", clear: true },
+      },
+      {
+        tool: "browser_clipboard",
+        args: { set: "hello" },
+        reaches: "clipboard",
+        expect: { set: "hello" },
+      },
+      {
+        tool: "browser_console",
+        args: { limit: 5 },
+        reaches: "console",
+        expect: { limit: 5 },
+      },
+      {
+        tool: "browser_network",
+        args: { filter: "api", limit: 4 },
+        reaches: "network",
+        expect: { filter: "api", limit: 4 },
+      },
+      { tool: "browser_failed", args: {}, reaches: "failed", expect: {} },
+      {
+        tool: "browser_tabs",
+        args: { action: "switch", index: 1 },
+        reaches: "tabs",
+        expect: { action: "switch", index: 1 },
+      },
+      { tool: "browser_downloads", args: {}, reaches: "downloads", expect: {} },
+      {
+        tool: "browser_media",
+        args: { all: true, save: "/tmp/x.mp4" },
+        reaches: "media",
+        expect: { all: true, save: "/tmp/x.mp4" },
+      },
+      { tool: "browser_pdf", args: {}, reaches: "pdf", expect: {} },
+      {
+        tool: "browser_prepare",
+        args: { seconds: 3, focus: false },
+        reaches: "prepare",
+        expect: { seconds: 3, focus: false },
+      },
+      { tool: "browser_mode", args: {}, reaches: "mode", expect: {} },
+      {
+        tool: "browser_mode",
+        args: { display: "headless" },
+        reaches: "mode",
+        expect: { display: "headless" },
+      },
+      {
+        tool: "browser_ask",
+        args: { text: "Message", said: "hello", submit: false, timeoutMs: 900 },
+        reaches: "ask",
+        expect: {
+          text: "Message",
+          said: "hello",
+          submit: false,
+          timeoutMs: 900,
+        },
+      },
+      {
+        tool: "browser_review",
+        args: { ref: 3, timeoutMs: 700 },
+        reaches: "review",
+        expect: { ref: 3, timeoutMs: 700 },
+      },
+      {
+        tool: "browser_review_verdict",
+        args: { marks: [{ point: 2, verdict: "fixed" }] },
+        reaches: "reviewVerdict",
+        expect: { marks: [{ point: 2, verdict: "fixed" }] },
+      },
+      { tool: "browser_resume", args: {}, reaches: "resume", expect: {} },
+    ];
+    for (const [index, testCase] of cases.entries()) {
+      const harness = createHarness();
+      harness.send({
+        jsonrpc: "2.0",
+        id: index + 1,
+        method: "tools/call",
+        params: { name: testCase.tool, arguments: testCase.args },
+      });
+      const reply = await harness.waitForReply(index + 1);
+      expect(
+        resultRecord(reply).isError,
+        `${testCase.tool} answered with an error: ${JSON.stringify(resultRecord(reply).content)}`,
+      ).toBeUndefined();
+      expect(
+        harness.route.reached,
+        `${testCase.tool} did not reach ${testCase.reaches}`,
+      ).toContain(testCase.reaches);
+      expect(
+        harness.route.handedTo[testCase.reaches],
+        `${testCase.tool} handed the wrong arguments to ${testCase.reaches}`,
+      ).toEqual(testCase.expect);
+      await harness.end();
+    }
+  });
+
+  it("rejects a display value the mode tool cannot honour", async () => {
+    const harness = createHarness();
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_mode", arguments: { display: "hidden" } },
+    });
+    const reply = await harness.waitForReply(1);
+    expect(resultRecord(reply).isError).toBe(true);
+    expect(harness.route.reached).not.toContain("mode");
+    await harness.end();
+  });
+
+  it("lists every tool in order with object schemas", async () => {
     const harness = createHarness();
     harness.send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
     const reply = await harness.waitForReply(1);
     const tools = resultRecord(reply).tools as Array<Record<string, unknown>>;
     expect(tools.map((tool) => tool.name)).toEqual(TOOL_NAMES);
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(TOOL_NAMES.length);
     expect(tools).toHaveLength(TOOL_DEFINITIONS.length);
     // SEP-2549 makes a 2026-07-28 list result cacheable, and the client rejects
     // the reply without both fields rather than defaulting them.

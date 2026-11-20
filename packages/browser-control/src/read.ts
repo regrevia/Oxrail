@@ -19,7 +19,7 @@
  * to this package's types and naming. See `docs/adr/ADR-BROWSERCTL-002.md`.
  */
 
-import type { Control } from "./types.js";
+import type { Control, Snapshot } from "./types.js";
 
 /** A paragraph, list item, table row or quote as the reader sees it. */
 export interface Block {
@@ -757,4 +757,50 @@ export function deltaOf(
     .split("\n")
     .filter((line) => line.trim() !== "" && !seen.has(line.trim()));
   return { text: lines.join("\n"), controls };
+}
+
+/* A URL is page-controlled text like any other, and a `data:` URL carries a
+   whole document in its own address. The snapshot keeps the URL exact because a
+   `changed` read compares it against the previous one; what the caller is handed
+   does not need more than the part that identifies the page. */
+export function squashUrl(url: string): string {
+  return url.length <= 2048
+    ? url
+    : `${url.slice(0, 2048)}… (${url.length - 2048} more characters)`;
+}
+
+export function formatSnapshot(snapshot: Snapshot): string {
+  const lines: string[] = [];
+  if (snapshot.text !== "") lines.push(snapshot.text);
+  /* One line per control, except a run of near-identical ones — a list of
+     buttons is one fact, and printing it one line at a time spends the budget
+     on the list instead of the answer. Refs and names are unchanged. */
+  for (const line of controlLines(snapshot.controls)) lines.push(line);
+  if (lines.length === 0) lines.push("(blank page)");
+  if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
+  if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
+  /* What the read cost and what it left behind, so a caller can tell a short
+     page from a page it is only seeing part of. */
+  if (snapshot.chars !== undefined) lines.push(`chars: ${snapshot.chars}`);
+  if (snapshot.words !== undefined) lines.push(`words: ${snapshot.words}`);
+  if (snapshot.matched !== undefined && snapshot.total !== undefined)
+    lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  /* A reading that left controls out has to say so, or a caller cannot tell a
+     page with three buttons from a page whose other 157 were not printed. */
+  if ((snapshot.omitted ?? 0) > 0) {
+    lines.push(
+      `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`,
+    );
+  }
+  if ((snapshot.blindFrames ?? 0) > 0) {
+    lines.push(
+      `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`,
+    );
+  }
+  if (snapshot.truncated) {
+    lines.push(`controls: ${snapshot.controls.length}`);
+    if (snapshot.limit !== undefined) lines.push(`limit: ${snapshot.limit}`);
+    lines.push("truncated: true");
+  }
+  return lines.join("\n");
 }

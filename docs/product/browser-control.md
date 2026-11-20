@@ -51,10 +51,10 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 | -------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
 | `OXRAIL_CHROME`            | discovered                  | Chrome or Chromium binary to launch                                          |
 | `OXRAIL_BROWSER_STATE_DIR` | `~/.oxrail/browser-control` | Where profiles and screenshots are written                                   |
-| `OXRAIL_BROWSER_HEADLESS`  | `1`                         | `0` shows a window; anything else runs headless                              |
+| `OXRAIL_BROWSER_HEADLESS`  | unset                       | `1` hides the window; unset or any other value shows it                      |
 | `OXRAIL_BROWSER_PROFILE`   | `default`                   | Profile name under the state directory, so sign-ins outlive one process      |
 | `OXRAIL_BROWSER_IDLE_MS`   | `300000`                    | How long an idle browser is kept, bounded to between one and fifteen minutes |
-| `OXRAIL_BROWSER_VIEW`      | `1280x900`                  | Window size while headless, written as `<width>x<height>`                    |
+| `OXRAIL_BROWSER_VIEW`      | `1280x900`                  | Window size, written as `<width>x<height>`                                   |
 
 ## Tools
 
@@ -107,7 +107,7 @@ Where the ratio does move is a page whose length is not prose. A single button w
 
 Both columns are the call's cost: the text it returns, and the numbered controls that let a following write name what to act on. `article` and `changed` return no controls, so for them one column is the whole call. `map` and `query` do return the page's controls, and on a link-heavy page that is most of what they cost — the answer to the question is 423 characters and the 61 controls that came with it are the other 1403.
 
-Reproduce this rather than trusting it: `node benchmarks/harness/measure-reading.mjs` measures `packages/browser-control/src/route.ts` against `benchmarks/fixtures/long-page/index.html` in a headless Chrome on this machine.
+Reproduce this rather than trusting it: `node benchmarks/harness/measure-reading.mjs` measures `packages/browser-control/src/route.ts` against `benchmarks/fixtures/long-page/index.html` in the route's own Chrome on this machine.
 
 The same five calls on the opposite page shape — 758 words of prose, three links, no long control list — is `node benchmarks/harness/measure-reading.mjs --fixture article-page`:
 
