@@ -18,19 +18,19 @@ that range still works.
 
 ## Tools
 
-| Tool | Does |
-| --- | --- |
-| `browser_open` | Starts Chrome on a URL. `headless` defaults to true. |
-| `browser_view` | Reads the page; `mode` narrows to `links` or `forms`. |
-| `browser_read` | Reads only what is needed: `article`, `map`, `query`, or `changed`. |
-| `browser_click` | Clicks a control by `ref` or by its `text`. |
-| `browser_type` | Types into the focused field, optionally submitting. |
-| `browser_key` | Presses a key. |
-| `browser_nav` | Opens, goes back, goes forward, or reloads. |
-| `browser_shot` | Saves a screenshot and returns its path. |
+| Tool            | Does                                                                   |
+| --------------- | ---------------------------------------------------------------------- |
+| `browser_open`  | Starts Chrome on a URL. `headless` defaults to true.                   |
+| `browser_view`  | Reads the page; `mode` narrows to `links` or `forms`.                  |
+| `browser_read`  | Reads only what is needed: `article`, `map`, `query`, or `changed`.    |
+| `browser_click` | Clicks a control by `ref` or by its `text`.                            |
+| `browser_type`  | Types into the focused field, optionally submitting.                   |
+| `browser_key`   | Presses a key.                                                         |
+| `browser_nav`   | Opens, goes back, goes forward, or reloads.                            |
+| `browser_shot`  | Saves a screenshot and returns its path.                               |
 | `browser_state` | Reports whether Chrome runs, on which profile, and how soon it closes. |
-| `browser_login` | Saves and switches sign-ins per site and profile. |
-| `browser_close` | Closes the browser. |
+| `browser_login` | Saves and switches sign-ins per site and profile.                      |
+| `browser_close` | Closes the browser.                                                    |
 
 ## Settings
 
