@@ -70,7 +70,14 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 | `browser_shot`  | Take a PNG of the viewport or the full page, and return it with its path                      |
 | `browser_state` | Report whether a browser is running, how long it has been idle, and what it will close in     |
 | `browser_login` | Report whether the route's own profile holds saved sign-ins                                   |
+| `browser_mode`  | Switch a running browser between shown and headless, keeping its page                         |
 | `browser_close` | Stop the route's Chrome and return the final state                                            |
+
+### A shown window by default, and what a report describes
+
+The window is shown unless the caller asks otherwise: a browser nobody can see makes a wrong page look like a wrong reading. `OXRAIL_BROWSER_HEADLESS=1` hides it for a whole process — the comparison is strict, so a typo in that value shows a window rather than silently hiding one. `browser_open` also takes `headless` and `profile`, and both are **one-shot**: they decide this launch only and do not write the route's standing choice, so a caller that opened a hidden window has not made hidden the default. `browser_mode` switches a running browser without losing the page it was on, and costs a restart: it closes the window and opens the same URL again in the other mode.
+
+`browser_state` (and every tool that returns a state) describes **the window that exists**, not the settings that produced it. When nothing is running it reports the standing choice, because there is no window to describe.
 
 `browser_view` renders each control as a line such as `[12] button "Sign in"`. The `12` is the `ref` that `browser_click` and `browser_type` accept. It stays valid while the control is still on the page, including across a re-read that returns it again; a number that no read produced, or one whose control the last read did not return, fails with a message telling the model to read the page again.
 
