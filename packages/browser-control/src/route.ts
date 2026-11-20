@@ -16,7 +16,13 @@
  *     watching a page the route just showed them.
  */
 
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { CdpConnection } from "./cdp.js";
 import {
@@ -26,6 +32,7 @@ import {
   stateDir,
   type ChromeBinary,
 } from "./chrome.js";
+import { decodePng, toGrid } from "./png.js";
 import {
   RouteClosedError,
   StaleRefError,
@@ -36,10 +43,36 @@ import {
   type OpenOptions,
   type ReadOptions,
   type RouteState,
+  type CheckOptions,
+  type ClipboardOptions,
+  type CookieOptions,
+  type DialogOptions,
+  type DragOptions,
+  type EvalOptions,
+  type ExtractOptions,
+  type FindOptions,
+  type GrabOptions,
+  type HoverOptions,
+  type LogOptions,
+  type LookOptions,
+  type MediaOptions,
+  type NetworkOptions,
+  type PrepareOptions,
+  type ScrollOptions,
+  type SelectOptions,
   type Shot,
   type ShotOptions,
+  type Step,
+  type TabsOptions,
+  type UploadOptions,
+  type WaitOptions,
   type Snapshot,
   type ToolResult,
+  type AskOptions,
+  type ReviewOptions,
+  type ReviewVerdictOptions,
+  type ModeOptions,
+  type Verdict,
 } from "./types.js";
 import {
   articleExpression,
@@ -48,6 +81,8 @@ import {
   evidence,
   passagesToText,
   relevant,
+  formatSnapshot,
+  squashUrl,
   type Block,
 } from "./read.js";
 
@@ -65,6 +100,55 @@ const LOAD_TIMEOUT_MS = 20_000;
  * A click by text is only allowed to reach a name a read said out loud, so the
  * comparison here has to be the one the read's caller would recognise, not a
  * second opinion about spacing or case. */
+/** A "x,y" string from a caller as a point, refusing anything else.
+ *
+ * A drag or a click by coordinate is the one place a caller hands over numbers
+ * instead of a ref, so the parse has to fail loudly rather than round a typo
+ * into a click somewhere on the page.
+ *
+ * @param value - what the caller wrote.
+ * @returns the point in CSS pixels.
+ */
+function pointFrom(value: string): { x: number; y: number } {
+  const parts = value.split(",");
+  if (parts.length !== 2)
+    throw new Error(
+      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`,
+    );
+  const x = Number(parts[0]);
+  const y = Number(parts[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y))
+    throw new Error(
+      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`,
+    );
+  return { x, y };
+}
+
+const MARKS: readonly Verdict[] = ["fixed", "verified", "invalid", "open"];
+
+/** The text a route method produced, for the one place that has to read it back. */
+function saidOf(result: ToolResult): string {
+  const first = result.content[0];
+  return first === undefined || first.type !== "text" ? "" : first.text;
+}
+
+/** The numbered points a review came back with, as the numbers it printed. */
+function pointList(text: string): number[] {
+  const found = new Set<number>();
+  for (const line of text.split("\n")) {
+    const match = /^\s*(\d{1,3})[.):]\s+\S/.exec(line);
+    if (match !== null) found.add(Number(match[1]));
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/** What a state reads as, for a method that answers with a state and words. */
+function stateText(state: RouteState): string {
+  return state.running
+    ? `${state.url === "" ? "no page yet" : state.url} — ${state.title === "" ? "untitled" : state.title}`
+    : "the browser is not running";
+}
+
 function normalizeName(value: string): string {
   return value.replace(/\s+/gu, " ").trim().toLowerCase();
 }
@@ -75,8 +159,13 @@ export function idleMs(env: NodeJS.ProcessEnv = process.env): number {
   return Math.min(MAX_IDLE_MS, Math.max(MIN_IDLE_MS, Math.floor(raw)));
 }
 
+/* Display mode is a switch with a visible default, because a person watching the
+   route work is the ordinary case: a browser nobody can see makes a wrong page
+   look like a wrong reading. `0` forces a window, `1` hides it, and anything
+   else — including unset — shows one. `1` is the off switch rather than a truthy
+   parse so that a typo cannot silently hide the window. */
 export function headlessFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.OXRAIL_BROWSER_HEADLESS !== "0";
+  return env.OXRAIL_BROWSER_HEADLESS === "1";
 }
 
 /** What a page reports about the space a screenshot and a click share. */
@@ -452,7 +541,7 @@ export class CdpBrowserRoute implements BrowserRoute {
   private lastUse = 0;
   private restTimer: NodeJS.Timeout | null = null;
   private readonly profile: string;
-  private readonly headless: boolean;
+  private headless: boolean;
   private readonly size: { width: number; height: number };
   private queue: Promise<unknown> = Promise.resolve();
   private closed = false;
@@ -479,6 +568,38 @@ export class CdpBrowserRoute implements BrowserRoute {
     refs: ReadonlySet<number>;
     names: readonly string[];
   } | null = null;
+
+  /* What the page told us since it opened, kept here rather than in the page so
+     a console line that scrolls away is still answerable. Bounded: a page that
+     logs in a loop must not grow this process. */
+  private consoleLines: string[] = [];
+  private failedRequests: Array<{
+    url: string;
+    method: string;
+    status: number;
+    type: string;
+    error: string;
+  }> = [];
+  private responses: Array<{
+    url: string;
+    method: string;
+    status: number;
+    type: string;
+  }> = [];
+  private played: Array<{ url: string; kind: string; bytes: number }> = [];
+  private dialogOpen: {
+    type: string;
+    message: string;
+    defaultValue: string;
+  } | null = null;
+  private watching = false;
+  /* A review round is a conversation that repeats, so what was already
+     settled has to survive the round: otherwise the next round raises the
+     same points again and the transcript grows without settling anything. */
+  private reviewRounds = 0;
+  private settled = new Map<number, Verdict>();
+  private handoffAt = 0;
+  private lastGrid: { key: string; rows: string[][] } | null = null;
 
   constructor(options?: { env?: NodeJS.ProcessEnv }) {
     const env = options?.env ?? process.env;
@@ -1463,6 +1584,216 @@ export class CdpBrowserRoute implements BrowserRoute {
     }
   }
 
+  /* --- the display switch -------------------------------------------
+   *
+   * Whether the window is drawn cannot be changed on a browser that is
+   * already running: the flag is read once, when it is launched. So a
+   * change is carried out by putting the browser down and bringing it back
+   * up in the other mode, on the page it was showing. Reporting the new
+   * mode without doing that would leave the words and the screen
+   * disagreeing, which is worse than the wait.
+   */
+
+  async mode(options: ModeOptions = {}): Promise<ToolResult> {
+    const wanted = options.display;
+    if (wanted === undefined) {
+      const shown = !this.headless;
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `the window is ${shown ? "shown" : "hidden"} (${this.headless ? "headless" : "visible"})` +
+              `${this.chrome === null ? ", and no browser is running" : ""}\nchange it with display: "visible" or "headless"`,
+          },
+        ],
+      };
+    }
+    const next = wanted === "headless";
+    const changed = next !== this.headless;
+    this.headless = next;
+    let where = "";
+    if (changed && this.chrome !== null) {
+      try {
+        where = await this.evaluate<string>("location.href");
+      } catch {
+        where = "";
+      }
+      await this.close();
+      if (where !== "" && where !== "about:blank") {
+        await this.open({ url: where });
+        where = ` on ${where}`;
+      } else {
+        where = "";
+      }
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: next
+            ? `the window is hidden now${where}`
+            : `the window is shown now${where}` +
+              (changed ? "" : " (it already was)"),
+        },
+      ],
+    };
+  }
+
+  /* --- the conversation tools ---------------------------------------
+   *
+   * A chat that is open in the page keeps the answer behind a "send" that
+   * is a click and a wait, and the wait has no fixed length: the reply
+   * grows while it is produced. These two do that sequence here so the
+   * caller does not have to guess how long to wait between steps.
+   */
+
+  async ask(options: AskOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (options.text === undefined && options.ref === undefined) {
+        throw new Error("browser_ask needs a ref or the name of the box");
+      }
+      const said = options.said ?? "";
+      /* type() is what focuses the box, clears it and submits it, and it
+         already knows both ways of naming a control. */
+      if (options.ref === undefined) {
+        await this.click({ text: options.text as string });
+      } else {
+        await this.focus(options.ref);
+      }
+      await this.type({
+        text: said,
+        clear: true,
+        ...(options.submit === false ? {} : { submit: true }),
+      });
+      const limit = options.timeoutMs ?? 45_000;
+      const started = Date.now();
+      let previous = "";
+      let steadyFor = 0;
+      let answer = "";
+      while (Date.now() - started < limit) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        answer = await this.evaluate<string>(
+          "document.body ? document.body.innerText : ''",
+        );
+        if (answer === previous) {
+          steadyFor += 400;
+          /* A reply is finished when it stops growing, not when it stops
+             changing: a blinking cursor still changes the text. */
+          if (steadyFor >= 1_600 && answer.trim() !== "") break;
+        } else {
+          steadyFor = 0;
+        }
+        previous = answer;
+      }
+      const waited = Date.now() - started;
+      const body = answer.trim();
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${body === "" ? "the page stayed empty" : body}\n\n(reply settled after ${waited} ms; ${limit - waited > 0 ? "it stopped growing" : "it was still growing when the wait ran out"})`,
+          },
+        ],
+      };
+    });
+  }
+
+  /* A review round is the same send-and-wait, with the shapes of a review
+     on top: the message is built from the repository, and what was said is
+     kept so the next round can leave settled points out. */
+
+  async review(options: ReviewOptions = {}): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const round = this.reviewRounds + 1;
+      const open = this.settled;
+      const body =
+        `Review this repository. Round ${round}.` +
+        (open.size === 0
+          ? " Nothing has been settled yet, so raise every point you see."
+          : ` Points already settled and to be left out: ${[...open.keys()].sort((a, b) => a - b).join(", ")}.`);
+      const answer = await this.ask({
+        ...(options.ref === undefined ? {} : { ref: options.ref }),
+        ...(options.text === undefined ? {} : { text: options.text }),
+        said: options.said ?? body,
+        submit: true,
+        ...(options.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: options.timeoutMs }),
+      });
+      this.reviewRounds = round;
+      const said = saidOf(answer);
+      const points = pointList(said);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `round ${round}: ${points.length === 0 ? "no numbered points came back" : points.map((point) => `${point}.`).join(" ")}` +
+              `\n\n${said}`,
+          },
+        ],
+      };
+    });
+  }
+
+  reviewVerdict(options: ReviewVerdictOptions = {}): Promise<ToolResult> {
+    const marks = options.marks ?? [];
+    if (marks.length === 0) {
+      const known = [...this.settled.entries()].sort((a, b) => a[0] - b[0]);
+      return Promise.resolve({
+        content: [
+          {
+            type: "text" as const,
+            text:
+              known.length === 0
+                ? "no point has been settled yet"
+                : known.map(([point, mark]) => `${point}: ${mark}`).join("\n"),
+          },
+        ],
+      });
+    }
+    for (const mark of marks) {
+      if (!MARKS.includes(mark.verdict)) {
+        throw new Error(
+          `mark ${mark.point}: "${mark.verdict}" is not one of ${MARKS.join(", ")}`,
+        );
+      }
+      this.settled.set(mark.point, mark.verdict);
+    }
+    return Promise.resolve({
+      content: [
+        {
+          type: "text" as const,
+          text:
+            marks.map((mark) => `${mark.point}: ${mark.verdict}`).join("\n") +
+            `\n\n${this.settled.size} point${this.settled.size === 1 ? "" : "s"} settled, and left out of the next round`,
+        },
+      ],
+    });
+  }
+
+  async resume(): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      /* The hold is a wait that keeps the next action back; clearing it is
+         what makes the next call go out at once instead of after it. */
+      const held = this.handoffAt;
+      this.handoffAt = 0;
+      const state = await this.state();
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${held === 0 ? "nothing was holding the page" : "the page is back in hand"}\n${stateText(state)}`,
+          },
+        ],
+      };
+    });
+  }
+
   async login(): Promise<LoginState> {
     const dir = profileDir(this.profile);
     const cookies = join(dir, "Default", "Cookies");
@@ -1477,6 +1808,1520 @@ export class CdpBrowserRoute implements BrowserRoute {
       saved,
       text: `profile ${this.profile}: ${saved ? "saved sign-ins present" : "no saved sign-ins yet"} (${dir})`,
     };
+  }
+
+  /* ---------------------------------------------------------------------
+   * The tools beyond the first eleven.
+   *
+   * Each one exists because a page cannot answer the question through the
+   * numbered controls alone: a grid for what draws itself, a wait instead of a
+   * read loop, the console for a click that seemed to do nothing. None of them
+   * invents a coordinate — a point still has to come from a read, and the
+   * screenshot tools are the only place pixels are interpreted.
+   * ------------------------------------------------------------------- */
+
+  /** Watch for the things that are not on the page any more once it redraws. */
+  private async startWatching(): Promise<void> {
+    if (this.watching || this.cdp === null) return;
+    this.watching = true;
+    const cdp = this.cdp;
+    const { page } = await this.ensure();
+    cdp.on("Runtime.consoleAPICalled", (params) => {
+      const typed = params as {
+        type?: string;
+        args?: Array<{ value?: unknown; description?: string }>;
+      };
+      const text = (typed.args ?? [])
+        .map((arg) =>
+          arg.value !== undefined
+            ? typeof arg.value === "string"
+              ? arg.value
+              : JSON.stringify(arg.value)
+            : (arg.description ?? ""),
+        )
+        .join(" ");
+      this.remember(`[${typed.type ?? "log"}] ${text}`);
+    });
+    cdp.on("Runtime.exceptionThrown", (params) => {
+      const typed = params as {
+        exceptionDetails?: {
+          text?: string;
+          exception?: { description?: string };
+        };
+      };
+      const detail = typed.exceptionDetails;
+      this.remember(
+        `[error] ${detail?.exception?.description ?? detail?.text ?? "exception"}`,
+      );
+    });
+    cdp.on("Network.responseReceived", (params) => {
+      const typed = params as {
+        type?: string;
+        response?: { url?: string; status?: number; mimeType?: string };
+        requestId?: string;
+      };
+      const url = typed.response?.url ?? "";
+      const kind = typed.type ?? "";
+      const status = typed.response?.status ?? 0;
+      const method = "GET";
+      if (url !== "")
+        this.responses.unshift({ url, method, status, type: kind });
+      if (this.responses.length > 400) this.responses.length = 400;
+      if (
+        (kind === "Media" || kind === "XHR" || kind === "Fetch") &&
+        url !== ""
+      ) {
+        const played = this.played.find((item) => item.url === url);
+        if (played === undefined) this.played.unshift({ url, kind, bytes: 0 });
+        if (this.played.length > 200) this.played.length = 200;
+      }
+    });
+    cdp.on("Network.loadingFailed", (params) => {
+      const typed = params as {
+        errorText?: string;
+        type?: string;
+        requestId?: string;
+        blockedReason?: string;
+      };
+      const known = this.responses.find(
+        (item) => item.type === (typed.type ?? ""),
+      );
+      this.failedRequests.unshift({
+        url: known?.url ?? "",
+        method: "GET",
+        status: 0,
+        type: typed.type ?? "",
+        error: typed.blockedReason ?? typed.errorText ?? "failed",
+      });
+      if (this.failedRequests.length > 200) this.failedRequests.length = 200;
+    });
+    cdp.on("Page.javascriptDialogOpening", (params) => {
+      const typed = params as {
+        type?: string;
+        message?: string;
+        defaultPrompt?: string;
+      };
+      this.dialogOpen = {
+        type: typed.type ?? "alert",
+        message: typed.message ?? "",
+        defaultValue: typed.defaultPrompt ?? "",
+      };
+    });
+    cdp.on("Page.javascriptDialogClosed", () => {
+      this.dialogOpen = null;
+    });
+    cdp.on("Page.downloadWillBegin", (params) => {
+      const typed = params as { suggestedFilename?: string; url?: string };
+      this.remember(
+        `downloaded ${typed.suggestedFilename ?? typed.url ?? "a file"}`,
+      );
+    });
+    await cdp.send("Network.enable", {}, page.sessionId);
+    await cdp.send("Page.enable", {}, page.sessionId);
+  }
+
+  private remember(line: string): void {
+    this.consoleLines.push(line);
+    if (this.consoleLines.length > 400)
+      this.consoleLines.splice(0, this.consoleLines.length - 400);
+  }
+
+  async find(options: FindOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const asked = options.query.trim();
+      if (asked === "")
+        throw new Error("browser_find needs a query: what should it look for?");
+      const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
+      const raw = await this.evaluate<string>(`(() => {
+  const pattern = ${options.regex === true ? "true" : "false"}
+    ? new RegExp(${JSON.stringify(asked)}, "i")
+    : null;
+  const needle = ${JSON.stringify(asked)}.toLowerCase();
+  const hits = (text) => pattern ? pattern.test(text) : text.toLowerCase().includes(needle);
+  const controls = [];
+  const seen = new Set();
+  for (const el of document.querySelectorAll("a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=tab],[role=checkbox]")) {
+    const box = el.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) continue;
+    const label = (el.innerText || el.value || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\\s+/g, " ");
+    if (label === "" || !hits(label)) continue;
+    const ref = Number(el.getAttribute("data-oxrail-ref"));
+    if (!Number.isFinite(ref)) continue;
+    const onScreen = box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth;
+    controls.push({ ref, role: el.getAttribute("role") || el.tagName.toLowerCase(), name: label.slice(0, 160), onScreen });
+    if (controls.length >= ${limit}) break;
+  }
+  const lines = [];
+  const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node && lines.length < ${limit}; node = walker.nextNode()) {
+    const text = (node.nodeValue || "").trim().replace(/\\s+/g, " ");
+    if (text.length < 3 || !hits(text)) continue;
+    const holder = node.parentElement;
+    if (!holder) continue;
+    const box = holder.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) continue;
+    const key = Math.round(box.left) + ":" + Math.round(box.top);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push({
+      text: text.slice(0, 200),
+      x: Math.round(box.left + box.width / 2),
+      y: Math.round(box.top + box.height / 2),
+      onScreen: box.bottom > 0 && box.top < innerHeight,
+    });
+  }
+  return JSON.stringify({ controls, lines });
+})()`);
+      const found = JSON.parse(raw) as {
+        controls: Array<{
+          ref: number;
+          role: string;
+          name: string;
+          onScreen: boolean;
+        }>;
+        lines: Array<{
+          text: string;
+          x: number;
+          y: number;
+          onScreen: boolean;
+        }>;
+      };
+      this.touch();
+      const rows: string[] = [];
+      for (const control of found.controls)
+        rows.push(
+          `[${control.ref}] ${control.role} ${JSON.stringify(control.name)}${control.onScreen ? "" : " (off screen)"}`,
+        );
+      for (const line of found.lines)
+        rows.push(
+          `${JSON.stringify(line.text)} at ${line.x},${line.y}${line.onScreen ? "" : " (off screen)"}`,
+        );
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              rows.length === 0
+                ? `(nothing on this page matches ${JSON.stringify(asked)})`
+                : rows.join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async extract(options: ExtractOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const select = options.select.trim();
+      if (select === "")
+        throw new Error(
+          "browser_extract needs a selector: what should each row be?",
+        );
+      const limit = Math.max(1, Math.min(options.limit ?? 60, 400));
+      const raw = await this.evaluate<string>(`(() => {
+  const scope = ${options.ref === undefined ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  let nodes;
+  try { nodes = Array.from(scope.querySelectorAll(${JSON.stringify(select)})); }
+  catch (error) { return JSON.stringify({ error: String(error && error.message ? error.message : error) }); }
+  const rows = [];
+  for (const node of nodes.slice(0, ${limit})) {
+    const text = (node.innerText || node.textContent || "").trim().replace(/\\s+/g, " ");
+    const link = node.querySelector ? node.querySelector("a[href]") : null;
+    const own = node.tagName === "A" && node.getAttribute("href") ? node.href : null;
+    rows.push({ text: text.slice(0, 300), href: (link ? link.href : own) || null });
+  }
+  return JSON.stringify({ rows, total: nodes.length });
+})()`);
+      const page = JSON.parse(raw) as {
+        rows?: Array<{ text: string; href: string | null }>;
+        total?: number;
+        error?: string;
+      };
+      this.touch();
+      if (page.error !== undefined)
+        throw new Error(`that selector is not valid: ${page.error}`);
+      const rows = page.rows ?? [];
+      const total = page.total ?? 0;
+      const body =
+        rows.length === 0
+          ? `(nothing on this page matches ${JSON.stringify(select)})`
+          : rows
+              .map((row) =>
+                row.href === null || row.href === ""
+                  ? row.text
+                  : `${row.text} -> ${row.href}`,
+              )
+              .join("\n");
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              rows.length < total
+                ? `${body}\n… ${total - rows.length} more not shown`
+                : body,
+          },
+        ],
+      };
+    });
+  }
+
+  async look(options: LookOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const { cdp, page } = await this.ensure();
+      const view = await this.evaluate<{ width: number; height: number }>(
+        "({ width: innerWidth, height: innerHeight })",
+      );
+      let clip = { x: 0, y: 0, width: view.width, height: view.height };
+      const region = (options.region ?? "").trim();
+      if (region !== "") {
+        const parts = region.split(",").map((part) => Number(part.trim()));
+        if (
+          parts.length !== 4 ||
+          parts.some((value) => !Number.isFinite(value))
+        )
+          throw new Error(
+            `region must be "x,y,width,height" in pixels; got ${JSON.stringify(region)}`,
+          );
+        const [x, y, width, height] = parts as [number, number, number, number];
+        clip = { x, y, width, height };
+      }
+      const cols = Math.max(2, Math.min(options.cols ?? 12, 64));
+      const rows = Math.max(2, Math.min(options.cols ?? 12, 64));
+      const shot = await cdp.send<{ data: string }>(
+        "Page.captureScreenshot",
+        { format: "png", clip, captureBeyondViewport: false },
+        page.sessionId,
+      );
+      this.touch();
+      const bitmap = decodePng(Buffer.from(shot.data, "base64"));
+      const grid = toGrid(bitmap, cols, rows);
+      /* A grid of letters is only useful in comparison: the same letter for the
+         same colour proves the screen changed where the letters differ. */
+      const key = `${clip.x},${clip.y},${clip.width},${clip.height}`;
+      const previous = this.lastGrid?.key === key ? this.lastGrid : null;
+      this.lastGrid = { key, rows: grid };
+      if (options.diff === false || previous === null) {
+        const glyphs = grid.map((row) => row.join("")).join("\n");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `grid ${cols}x${rows} of ${clip.width}x${clip.height} at ${clip.x},${clip.y}\n${glyphs}`,
+            },
+          ],
+        };
+      }
+      const changed: string[] = [];
+      for (let row = 0; row < grid.length; row += 1) {
+        const now = grid[row] ?? [];
+        const before = previous.rows[row] ?? [];
+        for (let column = 0; column < now.length; column += 1)
+          if (now[column] !== before[column])
+            changed.push(
+              `${row},${column}: ${before[column] ?? "."} -> ${now[column] ?? "."}`,
+            );
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              changed.length === 0
+                ? "no change since the last look"
+                : `${changed.length} cells changed\n${changed.join("\n")}`,
+          },
+        ],
+      };
+    });
+  }
+
+  async wait(options: WaitOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const budget = Math.max(
+        50,
+        Math.min(options.timeoutMs ?? 8_000, 120_000),
+      );
+      const started = Date.now();
+      const expression = `(() => {
+  const text = document.body ? document.body.innerText : "";
+  return { text, url: location.href };
+})()`;
+      const wanted = (options.text ?? "").trim();
+      const gone = (options.gone ?? "").trim();
+      const url = (options.url ?? "").trim();
+      if (wanted === "" && gone === "" && url === "" && options.quiet !== true)
+        throw new Error(
+          "browser_wait needs something to wait for: text, gone, url, or quiet",
+        );
+      let last = "";
+      while (Date.now() - started < budget) {
+        const now = await this.evaluate<{ text: string; url: string }>(
+          expression,
+        );
+        const hitText =
+          wanted === ""
+            ? true
+            : now.text.toLowerCase().includes(wanted.toLowerCase());
+        const hitGone =
+          gone === ""
+            ? true
+            : !now.text.toLowerCase().includes(gone.toLowerCase());
+        const hitUrl = url === "" ? true : now.url.includes(url);
+        if (hitText && hitGone && hitUrl) {
+          this.touch();
+          const waited = Date.now() - started;
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  options.quiet === true &&
+                  wanted === "" &&
+                  gone === "" &&
+                  url === ""
+                    ? `the page is quiet (${waited} ms)`
+                    : `reached after ${waited} ms`,
+              },
+            ],
+          };
+        }
+        if (
+          options.quiet === true &&
+          now.text === last &&
+          Date.now() - started > 500
+        ) {
+          const still = await this.evaluate<{ text: string; url: string }>(
+            expression,
+          );
+          if (still.text === now.text) {
+            this.touch();
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `the page stopped changing after ${Date.now() - started} ms`,
+                },
+              ],
+            };
+          }
+        }
+        last = now.text;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      const current = await this.evaluate<{ text: string; url: string }>(
+        expression,
+      );
+      const said =
+        wanted !== ""
+          ? `${JSON.stringify(wanted)} had not appeared`
+          : gone !== ""
+            ? `${JSON.stringify(gone)} was still showing`
+            : url !== ""
+              ? `the address did not reach ${url}`
+              : "the page did not go quiet";
+      throw new Error(
+        `waited ${budget} ms and ${said}; the page is at ${current.url} and says ${JSON.stringify(current.text.slice(0, 200))}`,
+      );
+    });
+  }
+
+  async scroll(options: ScrollOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const dy = options.dy ?? 0;
+      const dx = options.dx ?? 0;
+      if (dy === 0 && dx === 0)
+        throw new Error("browser_scroll needs a dy (negative goes up)");
+      const { cdp, page } = await this.ensure();
+      const view = await this.evaluate<{ x: number; y: number }>(
+        "({ x: innerWidth / 2, y: innerHeight / 2 })",
+      );
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mouseWheel",
+          x: Math.round(view.x),
+          y: Math.round(view.y),
+          deltaX: dx,
+          deltaY: dy,
+          button: "none",
+          modifiers: 0,
+        },
+        page.sessionId,
+      );
+      this.touch();
+      await this.waitIdle();
+      if (options.read === false)
+        return {
+          content: [
+            {
+              type: "text",
+              text: `scrolled ${dy === 0 ? "" : `${dy > 0 ? "down" : "up"} ${Math.abs(dy)}`}${dx === 0 ? "" : `${dx > 0 ? " right" : " left"} ${Math.abs(dx)}`}`.trim(),
+            },
+          ],
+        };
+      const snapshot = await this.read({ maxChars: 2_000 });
+      return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+    });
+  }
+
+  async hover(options: HoverOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (options.ref !== undefined) this.addressable(options.ref);
+      const point = await this.locate({
+        ...(options.ref !== undefined ? { ref: options.ref } : {}),
+        ...(options.text !== undefined ? { text: options.text } : {}),
+      });
+      const { cdp, page } = await this.ensure();
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mouseMoved",
+          x: Math.round(point.x),
+          y: Math.round(point.y),
+          buttons: 0,
+          modifiers: 0,
+        },
+        page.sessionId,
+      );
+      this.touch();
+      await this.waitIdle();
+      if (options.read === false)
+        return {
+          content: [
+            {
+              type: "text",
+              text: `pointed at ${point.label === "" ? `${point.x},${point.y}` : JSON.stringify(point.label)}`,
+            },
+          ],
+        };
+      const snapshot = await this.read({ maxChars: 2_000 });
+      return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+    });
+  }
+
+  async check(options: CheckOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      this.addressable(options.ref);
+      const state = await this.evaluate<{
+        found: boolean;
+        checked: boolean;
+        kind: string;
+      }>(`(() => {
+  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  if (!el) return { found: false, checked: false, kind: "gone" };
+  const kind = el.tagName === "INPUT" ? (el.type || "checkbox") : (el.getAttribute("role") || el.tagName.toLowerCase());
+  return { found: true, checked: el.checked === true || el.getAttribute("aria-checked") === "true", kind };
+})()`);
+      if (!state.found)
+        throw new StaleRefError(
+          `the page changed; control ${options.ref} is gone — call browser_view again`,
+        );
+      if (options.checked === undefined) {
+        this.touch();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `control ${options.ref} (${state.kind}) is ${state.checked ? "checked" : "not checked"}`,
+            },
+          ],
+        };
+      }
+      /* Looking first is the whole point: clicking blindly flips a control that
+         was already right, and the caller never learns it did. */
+      if (state.checked !== options.checked) {
+        const point = await this.locate({ ref: options.ref });
+        await this.mouseClick(point.x, point.y);
+      }
+      const after = await this.evaluate<{ checked: boolean }>(`(() => {
+  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  return { checked: el ? el.checked === true || el.getAttribute("aria-checked") === "true" : false };
+})()`);
+      this.touch();
+      await this.waitIdle();
+      const took = after.checked === options.checked;
+      /* The result objects are handed out as frozen-by-type shapes, so the read
+         is appended by building the answer once rather than by mutating it. */
+      const said = took
+        ? `control ${options.ref} is now ${options.checked ? "checked" : "not checked"}`
+        : `control ${options.ref} did not take the change: it is ${after.checked ? "checked" : "not checked"}`;
+      if (options.read === false)
+        return {
+          content: [{ type: "text", text: said }],
+          ...(took ? {} : { isError: true }),
+        };
+      const snapshot = await this.read({ maxChars: 1_500 });
+      return {
+        content: [
+          { type: "text", text: said },
+          { type: "text", text: formatSnapshot(snapshot) },
+        ],
+        ...(took ? {} : { isError: true }),
+      };
+    });
+  }
+
+  async select(options: SelectOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (options.ref !== undefined) this.addressable(options.ref);
+      const value = options.value;
+      const outcome = await this.evaluate<string>(`(() => {
+  let el = null;
+  if (${options.ref === undefined ? "false" : "true"}) el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  if (!el && ${JSON.stringify(options.field ?? "")} !== "") {
+    const needle = ${JSON.stringify(options.field ?? "")}.toLowerCase();
+    for (const node of document.querySelectorAll("select,[role=combobox],[role=listbox]")) {
+      const label = (node.getAttribute("aria-label") || node.name || node.id || "").toLowerCase();
+      if (label.includes(needle)) { el = node; break; }
+    }
+  }
+  if (!el) return JSON.stringify({ error: "no dropdown matched" });
+  if (el.tagName === "SELECT") {
+    const wanted = ${JSON.stringify(value)};
+    const option = Array.from(el.options).find((o) => o.value === wanted || (o.textContent || "").trim() === wanted);
+    if (!option) return JSON.stringify({ error: "no option matched", options: Array.from(el.options).map((o) => (o.textContent || "").trim()).slice(0, 20) });
+    el.value = option.value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return JSON.stringify({ ok: true, value: option.value });
+  }
+  el.setAttribute("data-oxrail-select", "1");
+  return JSON.stringify({ ok: true, custom: true });
+})()`);
+      const parsed = JSON.parse(outcome) as {
+        ok?: boolean;
+        custom?: boolean;
+        value?: string;
+        error?: string;
+        options?: string[];
+      };
+      this.touch();
+      if (parsed.error !== undefined) {
+        const known =
+          parsed.options === undefined || parsed.options.length === 0
+            ? ""
+            : `; it offers ${parsed.options.map((item) => JSON.stringify(item)).join(", ")}`;
+        throw new Error(`${parsed.error}${known}`);
+      }
+      if (parsed.custom === true) {
+        /* A listbox the page draws itself has to be opened the way a person
+           would, then the option picked by its own words. */
+        const point = await this.locate({
+          ...(options.ref !== undefined ? { ref: options.ref } : {}),
+          ...(options.field !== undefined ? { text: options.field } : {}),
+        });
+        await this.mouseClick(point.x, point.y);
+        await this.waitIdle();
+        const picked = await this.locate({ text: value });
+        await this.mouseClick(picked.x, picked.y);
+        this.touch();
+        await this.waitIdle();
+      } else await this.waitIdle();
+      if (options.read === false)
+        return {
+          content: [
+            {
+              type: "text",
+              text: `chose ${JSON.stringify(value)}${parsed.value === undefined ? "" : ` (value ${JSON.stringify(parsed.value)})`}`,
+            },
+          ],
+        };
+      const snapshot = await this.read({ maxChars: 1_500 });
+      return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+    });
+  }
+
+  async drag(options: DragOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (options.fromRef !== undefined) this.addressable(options.fromRef);
+      if (options.toRef !== undefined) this.addressable(options.toRef);
+      const from = await this.locate({
+        ...(options.fromRef !== undefined ? { ref: options.fromRef } : {}),
+        ...(options.fromPoint !== undefined ? { text: "" } : {}),
+      });
+      const start =
+        options.fromPoint !== undefined
+          ? pointFrom(options.fromPoint)
+          : { x: from.x, y: from.y };
+      let end: { x: number; y: number };
+      if (options.toPoint !== undefined) end = pointFrom(options.toPoint);
+      else {
+        const to = await this.locate({
+          ...(options.toRef !== undefined ? { ref: options.toRef } : {}),
+        });
+        end = { x: to.x, y: to.y };
+      }
+      const { cdp, page } = await this.ensure();
+      const base = { button: "left", clickCount: 1, modifiers: 0 };
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mouseMoved",
+          x: Math.round(start.x),
+          y: Math.round(start.y),
+          buttons: 0,
+          modifiers: 0,
+        },
+        page.sessionId,
+      );
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mousePressed",
+          x: Math.round(start.x),
+          y: Math.round(start.y),
+          ...base,
+          buttons: 1,
+        },
+        page.sessionId,
+      );
+      /* Real steps, not a jump: a slider is reading the moves between the ends,
+         and a drag-and-drop list needs a hover long enough to arm itself. */
+      const steps = 12;
+      for (let step = 1; step <= steps; step += 1) {
+        const x = start.x + ((end.x - start.x) * step) / steps;
+        const y = start.y + ((end.y - start.y) * step) / steps;
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          {
+            type: "mouseMoved",
+            x: Math.round(x),
+            y: Math.round(y),
+            ...base,
+            buttons: 1,
+          },
+          page.sessionId,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mouseReleased",
+          x: Math.round(end.x),
+          y: Math.round(end.y),
+          ...base,
+          buttons: 0,
+        },
+        page.sessionId,
+      );
+      this.touch();
+      await this.waitIdle();
+      if (options.read === false)
+        return {
+          content: [
+            {
+              type: "text",
+              text: `dragged ${Math.round(start.x)},${Math.round(start.y)} to ${Math.round(end.x)},${Math.round(end.y)}`,
+            },
+          ],
+        };
+      const snapshot = await this.read({ maxChars: 1_500 });
+      return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+    });
+  }
+
+  async upload(options: UploadOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (options.ref !== undefined) this.addressable(options.ref);
+      if (options.files.length === 0)
+        throw new Error("browser_upload needs at least one absolute file path");
+      for (const file of options.files)
+        if (!file.startsWith("/"))
+          throw new Error(
+            `browser_upload takes absolute paths; ${JSON.stringify(file)} is not one`,
+          );
+      const { cdp, page } = await this.ensure();
+      let nodeId: number | null = null;
+      if (options.ref !== undefined) {
+        const handle = await cdp.send<{
+          object: { objectId: string };
+        }>(
+          "Runtime.evaluate",
+          {
+            expression: `document.querySelector('[data-oxrail-ref="${options.ref}"]')`,
+          },
+          page.sessionId,
+        );
+        const described = await cdp.send<{ node: { backendNodeId: number } }>(
+          "DOM.describeNode",
+          { objectId: handle.object.objectId },
+          page.sessionId,
+        );
+        nodeId = described.node.backendNodeId;
+      }
+      if (nodeId === null) {
+        const doc = await cdp.send<{ root: { nodeId: number } }>(
+          "DOM.getDocument",
+          { depth: -1 },
+          page.sessionId,
+        );
+        const queried = await cdp.send<{ nodeId: number }>(
+          "DOM.querySelector",
+          { nodeId: doc.root.nodeId, selector: 'input[type="file"]' },
+          page.sessionId,
+        );
+        if (queried.nodeId === 0)
+          throw new Error(
+            "this page has no file input; pass a ref if the input is inside a frame",
+          );
+        nodeId = queried.nodeId;
+      }
+      await cdp.send(
+        "DOM.setFileInputFiles",
+        {
+          files: [...options.files],
+          ...(nodeId === null ? {} : { backendNodeId: nodeId }),
+        },
+        page.sessionId,
+      );
+      this.touch();
+      await this.waitIdle();
+      if (options.read === false)
+        return {
+          content: [
+            {
+              type: "text",
+              text: `put ${options.files.length} file${options.files.length === 1 ? "" : "s"} into the input`,
+            },
+          ],
+        };
+      const snapshot = await this.read({ maxChars: 1_500 });
+      return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+    });
+  }
+
+  async grab(options: GrabOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const found = await this.evaluate<string>(`(() => {
+  const scope = ${options.ref === undefined ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  const images = [];
+  for (const node of scope.querySelectorAll("img,canvas,svg,video")) {
+    const box = node.getBoundingClientRect();
+    if (box.width < 8 || box.height < 8) continue;
+    const src = node.currentSrc || node.src || (node.tagName === "CANVAS" ? "canvas" : "");
+    images.push({ tag: node.tagName.toLowerCase(), src: src || "", width: Math.round(box.width), height: Math.round(box.height), area: Math.round(box.width * box.height) });
+  }
+  if (images.length === 0 && scope !== document) {
+    const box = scope.getBoundingClientRect();
+    images.push({ tag: "element", src: "", width: Math.round(box.width), height: Math.round(box.height), area: Math.round(box.width * box.height) });
+  }
+  images.sort((a, b) => b.area - a.area);
+  return JSON.stringify(images.slice(0, Math.max(1, ${Math.max(1, Math.min(options.count ?? 1, 20))})));
+})()`);
+      const candidates = JSON.parse(found) as Array<{
+        tag: string;
+        src: string;
+        width: number;
+        height: number;
+        area: number;
+      }>;
+      this.touch();
+      if (candidates.length === 0)
+        throw new Error("this page is not showing a picture to save");
+      const dir = join(stateDir(), "images");
+      mkdirSync(dir, { recursive: true });
+      const saved: string[] = [];
+      let index = 0;
+      for (const candidate of candidates) {
+        index += 1;
+        const stamp = `${options.name ?? "image"}-${Date.now()}-${index}`;
+        if (candidate.src === "" || candidate.src === "canvas") {
+          /* A drawing surface has no address: the pixels only exist on screen. */
+          const { cdp, page } = await this.ensure();
+          const shot = await cdp.send<{ data: string }>(
+            "Page.captureScreenshot",
+            { format: "png", captureBeyondViewport: false },
+            page.sessionId,
+          );
+          const path = join(dir, `${stamp}.png`);
+          writeFileSync(path, Buffer.from(shot.data, "base64"));
+          saved.push(
+            `${path} (from the screen, ${candidate.width}x${candidate.height})`,
+          );
+          continue;
+        }
+        if (candidate.src.startsWith("data:")) {
+          const comma = candidate.src.indexOf(",");
+          const header = candidate.src.slice(5, comma);
+          const body: string = candidate.src.slice(comma + 1);
+          const binary = header.includes("base64")
+            ? body
+            : Buffer.from(decodeURIComponent(body)).toString("base64");
+          const path = join(dir, `${stamp}.png`);
+          writeFileSync(path, Buffer.from(binary, "base64"));
+          saved.push(
+            `${path} (inline, ${candidate.width}x${candidate.height})`,
+          );
+          continue;
+        }
+        const fetched = await this.evaluate<string>(`(async () => {
+  try {
+    const reply = await fetch(${JSON.stringify(candidate.src)});
+    const buffer = await reply.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+    return btoa(binary);
+  } catch (error) { return "ERROR " + String(error && error.message ? error.message : error); }
+})()`);
+        if (fetched.startsWith("ERROR ")) {
+          saved.push(
+            `${candidate.src} — could not be read: ${fetched.slice(6)}`,
+          );
+          continue;
+        }
+        const path = join(dir, `${stamp}.png`);
+        writeFileSync(path, Buffer.from(fetched, "base64"));
+        saved.push(`${path} (${candidate.width}x${candidate.height})`);
+      }
+      return { content: [{ type: "text", text: saved.join("\n") }] };
+    });
+  }
+
+  async evaluatePage(options: EvalOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const code = options.code.trim();
+      if (code === "") throw new Error("browser_eval needs code to run");
+      const { cdp, page } = await this.ensure();
+      /* Sent as an expression, not run through eval inside another expression,
+         so a syntax error comes back as a page error rather than as this
+         process's own mistake. */
+      const reply = await cdp.send<{
+        result?: { value?: unknown; description?: string; type?: string };
+        exceptionDetails?: {
+          text?: string;
+          exception?: { description?: string };
+        };
+      }>(
+        "Runtime.evaluate",
+        {
+          expression:
+            options.awaitPromise === false ? code : `(async () => (${code}))()`,
+          returnByValue: true,
+          awaitPromise: options.awaitPromise !== false,
+          userGesture: true,
+        },
+        page.sessionId,
+      );
+      this.touch();
+      if (reply.exceptionDetails !== undefined) {
+        const detail = reply.exceptionDetails;
+        throw new Error(
+          detail.exception?.description ?? detail.text ?? "the page threw",
+        );
+      }
+      const value = reply.result?.value;
+      const text =
+        value === undefined
+          ? (reply.result?.description ?? "undefined")
+          : typeof value === "string"
+            ? value
+            : JSON.stringify(value, null, 2);
+      return { content: [{ type: "text", text }] };
+    });
+  }
+
+  async run(steps: readonly Step[]): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (steps.length === 0)
+        throw new Error("browser_do needs at least one step");
+      const done: string[] = [];
+      for (let index = 0; index < steps.length; index += 1) {
+        const step = steps[index] as Step;
+        const at = `step ${index + 1}`;
+        try {
+          if (step.waitText !== undefined) {
+            await this.awaitText(step.waitText, true);
+            done.push(`${at}: saw ${JSON.stringify(step.waitText)}`);
+            continue;
+          }
+          if (step.waitGone !== undefined) {
+            await this.awaitText(step.waitGone, false);
+            done.push(`${at}: ${JSON.stringify(step.waitGone)} went away`);
+            continue;
+          }
+          if (step.waitUrl !== undefined) {
+            await this.awaitUrl(step.waitUrl);
+            done.push(`${at}: reached ${step.waitUrl}`);
+            continue;
+          }
+          if (step.scroll !== undefined) {
+            await this.scroll({ dy: step.scroll, read: false });
+            done.push(`${at}: scrolled ${step.scroll}`);
+            continue;
+          }
+          if (step.key !== undefined) {
+            await this.key(step.key);
+            done.push(`${at}: pressed ${step.key}`);
+            continue;
+          }
+          if (step.field !== undefined && step.text !== undefined) {
+            const point = await this.locate({ text: step.field });
+            await this.mouseClick(point.x, point.y);
+            /* The click put the caret in the control the name addressed, and
+               `type` without a number only types into a control the last read
+               numbered — which a click by name has already established. */
+            await this.type({
+              text: step.text,
+              clear: true,
+              ...(step.submit === true ? { submit: true } : {}),
+            });
+            done.push(`${at}: typed into ${JSON.stringify(step.field)}`);
+            continue;
+          }
+          if (step.tap !== undefined) {
+            const split = step.tap.split(",");
+            if (
+              split.length === 2 &&
+              split.every((part) => Number.isFinite(Number(part)))
+            ) {
+              await this.mouseClick(Number(split[0]), Number(split[1]));
+              done.push(`${at}: tapped ${step.tap}`);
+            } else {
+              const point = await this.locate({ text: step.tap });
+              await this.mouseClick(point.x, point.y);
+              done.push(`${at}: tapped ${JSON.stringify(step.tap)}`);
+            }
+            continue;
+          }
+          if (step.ref !== undefined) {
+            this.addressable(step.ref);
+            const point = await this.locate({ ref: step.ref });
+            await this.mouseClick(point.x, point.y);
+            done.push(`${at}: tapped control ${step.ref}`);
+            continue;
+          }
+          if (step.text !== undefined) {
+            await this.type({
+              text: step.text,
+              ...(step.submit === true ? { submit: true } : {}),
+            });
+            done.push(`${at}: typed ${step.text.length} characters`);
+            continue;
+          }
+          throw new Error(
+            "a step needs one of: ref, tap, field+text, text, key, scroll, wait_text, wait_gone, wait_url",
+          );
+        } catch (error) {
+          /* Stop at the first step that cannot proceed, and say which one: a
+             batch that reports "failed" without the step is unactionable. */
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `${at} could not proceed: ${reason}${done.length === 0 ? "" : ` (after ${done.join("; ")})`}`,
+          );
+        }
+      }
+      this.touch();
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${done.length} step${done.length === 1 ? "" : "s"} done\n${done.join("\n")}`,
+          },
+        ],
+      };
+    });
+  }
+
+  private async awaitText(needle: string, present: boolean): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8_000) {
+      const text = await this.evaluate<string>(
+        "document.body ? document.body.innerText : ''",
+      );
+      const there = text.toLowerCase().includes(needle.toLowerCase());
+      if (there === present) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error(
+      `${JSON.stringify(needle)} ${present ? "never appeared" : "never went away"} within 8000 ms`,
+    );
+  }
+
+  private async awaitUrl(part: string): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8_000) {
+      const url = await this.evaluate<string>("location.href");
+      if (url.includes(part)) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error(`the address never reached ${part} within 8000 ms`);
+  }
+
+  async dialog(options: DialogOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const open = this.dialogOpen;
+      if (open === null) {
+        this.touch();
+        return {
+          content: [{ type: "text", text: "no dialog is open" }],
+        };
+      }
+      if (options.accept === undefined && options.text === undefined) {
+        this.touch();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${open.type}: ${JSON.stringify(open.message)}${open.defaultValue === "" ? "" : ` (default ${JSON.stringify(open.defaultValue)})`}`,
+            },
+          ],
+        };
+      }
+      const { cdp, page } = await this.ensure();
+      await cdp.send(
+        "Page.handleJavaScriptDialog",
+        {
+          accept: options.accept !== false,
+          ...(options.text === undefined ? {} : { promptText: options.text }),
+        },
+        page.sessionId,
+      );
+      this.dialogOpen = null;
+      this.touch();
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              options.accept === false
+                ? "dismissed the dialog"
+                : "accepted the dialog",
+          },
+        ],
+      };
+    });
+  }
+
+  async cookie(options: CookieOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const { cdp, page } = await this.ensure();
+      if (options.clear === true) {
+        await cdp.send("Network.clearBrowserCookies", {}, page.sessionId);
+        this.touch();
+        return {
+          content: [{ type: "text", text: "cleared the browser's cookies" }],
+        };
+      }
+      if (options.set !== undefined && options.set !== "") {
+        const url =
+          options.url ?? (await this.evaluate<string>("location.href"));
+        for (const pair of options.set.split(";")) {
+          const cut = pair.indexOf("=");
+          if (cut <= 0) continue;
+          const name = pair.slice(0, cut).trim();
+          const value = pair.slice(cut + 1).trim();
+          if (name === "") continue;
+          const sent = await cdp.send<{ success?: boolean }>(
+            "Network.setCookie",
+            {
+              name,
+              value,
+              ...(options.domain === undefined
+                ? { url }
+                : { domain: options.domain }),
+            },
+            page.sessionId,
+          );
+          if (sent.success === false)
+            throw new Error(`the browser refused the cookie ${name}`);
+        }
+        this.touch();
+        return {
+          content: [{ type: "text", text: `set ${options.set}` }],
+        };
+      }
+      const url = options.url;
+      const listed = await cdp.send<{
+        cookies: Array<{
+          name: string;
+          value: string;
+          domain: string;
+          path: string;
+          expires: number;
+          httpOnly: boolean;
+          secure: boolean;
+        }>;
+      }>(
+        "Network.getCookies",
+        url === undefined || url === "" ? {} : { urls: [url] },
+        page.sessionId,
+      );
+      this.touch();
+      if (listed.cookies.length === 0)
+        return {
+          content: {
+            type: "text",
+            text: "(this browser is keeping no cookies for that address)",
+          } as never,
+        };
+      const rows = listed.cookies.map(
+        (item) =>
+          `${item.name}=${item.value} — ${item.domain}${item.path}${item.httpOnly ? " httpOnly" : ""}${item.secure ? " secure" : ""}${item.expires > 0 ? ` until ${new Date(item.expires * 1000).toISOString()}` : ""}`,
+      );
+      return { content: [{ type: "text", text: rows.join("\n") }] };
+    });
+  }
+
+  async clipboard(options: ClipboardOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      if (options.set !== undefined) {
+        const wrote = await this.evaluate<boolean>(`(async () => {
+  try { await navigator.clipboard.writeText(${JSON.stringify(options.set)}); return true; }
+  catch (error) { return false; }
+})()`);
+        this.touch();
+        if (!wrote) throw new Error("the page refused the clipboard write");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `put ${options.set.length} characters on the clipboard; send a key to paste`,
+            },
+          ],
+        };
+      }
+      const read = await this.evaluate<string>(`(async () => {
+  try { return await navigator.clipboard.readText(); }
+  catch (error) { return "ERROR " + String(error && error.message ? error.message : error); }
+})()`);
+      this.touch();
+      if (read.startsWith("ERROR "))
+        throw new Error(
+          `the page would not hand over the clipboard: ${read.slice(6)}`,
+        );
+      return { content: [{ type: "text", text: read }] };
+    });
+  }
+
+  async console(options: LogOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const limit = Math.max(1, Math.min(options.limit ?? 50, 400));
+      this.touch();
+      const lines = this.consoleLines.slice(-limit);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              lines.length === 0
+                ? "(this page has produced no console output since it opened)"
+                : lines.join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async network(options: NetworkOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
+      const filter = (options.filter ?? "").toLowerCase();
+      this.touch();
+      const rows = this.responses
+        .filter(
+          (item) => filter === "" || item.url.toLowerCase().includes(filter),
+        )
+        .slice(0, limit);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              rows.length === 0
+                ? filter === ""
+                  ? "(this page has received no responses since it opened)"
+                  : `(no response matches ${JSON.stringify(filter)})`
+                : rows
+                    .map(
+                      (item) =>
+                        `${item.method} ${item.status === 0 ? "—" : String(item.status)} ${item.type} ${squashUrl(item.url)}`,
+                    )
+                    .join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async failed(options: LogOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
+      this.touch();
+      const rows = this.failedRequests.slice(0, limit);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              rows.length === 0
+                ? "(nothing this page asked for has failed since it opened)"
+                : rows
+                    .map(
+                      (item) =>
+                        `${item.type} ${item.error} ${item.url === "" ? "(address unknown)" : squashUrl(item.url)}`,
+                    )
+                    .join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async tabs(options: TabsOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const { cdp, page } = await this.ensure();
+      const listed = await cdp.send<{
+        targetInfos: Array<{
+          targetId: string;
+          type: string;
+          url: string;
+          title: string;
+        }>;
+      }>("Target.getTargets");
+      const pages = listed.targetInfos.filter((info) => info.type === "page");
+      const action = options.action ?? "list";
+      if (action === "switch" || action === "close") {
+        const index = options.index ?? 0;
+        const target = pages[index];
+        if (target === undefined)
+          throw new Error(
+            `there ${pages.length === 1 ? "is" : "are"} ${pages.length} page${pages.length === 1 ? "" : "s"}; ${index} is not one of them`,
+          );
+        if (action === "close") {
+          await cdp.send("Target.closeTarget", { targetId: target.targetId });
+          this.touch();
+          return {
+            content: [
+              { type: "text", text: `closed ${target.title || target.url}` },
+            ],
+          };
+        }
+        const attached = await cdp.send<{ sessionId: string }>(
+          "Target.attachToTarget",
+          { targetId: target.targetId, flatten: true },
+          undefined,
+        );
+        this.page = {
+          sessionId: attached.sessionId,
+          targetId: target.targetId,
+        };
+        await cdp.send("Page.enable", {}, attached.sessionId);
+        await cdp.send("Runtime.enable", {}, attached.sessionId);
+        this.watching = false;
+        await this.startWatching();
+        this.touch();
+        return {
+          content: [
+            { type: "text", text: `switched to ${target.title || target.url}` },
+          ],
+        };
+      }
+      this.touch();
+      const rows = pages.map(
+        (info, index) =>
+          `${index === 0 ? "" : " "}[${index}] ${info.title === "" ? "(untitled)" : info.title} — ${squashUrl(info.url)}${info.targetId === page.targetId ? " (this one)" : ""}`,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: rows.length === 0 ? "(no pages are open)" : rows.join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async downloads(): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const dir = profileDir(this.profile);
+      const rows: string[] = [];
+      const candidates = [
+        join(dir, "Downloads"),
+        join(stateDir(), "downloads"),
+      ];
+      for (const where of candidates) {
+        if (!existsSync(where)) continue;
+        for (const entry of readdirSync(where)) {
+          const path = join(where, entry);
+          const stat = statSync(path);
+          if (!stat.isFile()) continue;
+          rows.push(
+            `${entry} — ${stat.size} bytes, ${new Date(stat.mtimeMs).toISOString()}`,
+          );
+        }
+      }
+      this.touch();
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              rows.length === 0
+                ? "(this profile has downloaded nothing)"
+                : rows.join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async media(options: MediaOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const items = this.played.filter(
+        (item) => options.all === true || item.kind === "Media",
+      );
+      this.touch();
+      if (options.save !== undefined && options.save !== "") {
+        const wanted = options.save;
+        const picked =
+          wanted === "main"
+            ? items[0]
+            : /^\d+$/.test(wanted)
+              ? items[Number(wanted)]
+              : items.find((item) => item.url.includes(wanted));
+        if (picked === undefined)
+          throw new Error(
+            `nothing this page played matches ${JSON.stringify(wanted)}`,
+          );
+        const dir = join(stateDir(), "media");
+        mkdirSync(dir, { recursive: true });
+        const name = picked.url.split("/").pop() ?? "media";
+        const path = join(
+          dir,
+          `${Date.now()}-${name.replace(/[^\w.-]/g, "_")}`,
+        );
+        const fetched = await this.evaluate<string>(`(async () => {
+  const reply = await fetch(${JSON.stringify(picked.url)});
+  const buffer = await reply.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  return btoa(binary);
+})()`);
+        writeFileSync(path, Buffer.from(fetched, "base64"));
+        return {
+          content: [{ type: "text", text: `${path} (${picked.url})` }],
+        };
+      }
+      const rows = items.map(
+        (item, index) => `${index}. ${item.kind} ${squashUrl(item.url)}`,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              rows.length === 0
+                ? "(this page has not asked for any media since it opened)"
+                : rows.join("\n"),
+          },
+        ],
+      };
+    });
+  }
+
+  async pdf(): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      const { cdp, page } = await this.ensure();
+      const printed = await cdp.send<{ data: string }>(
+        "Page.printToPDF",
+        { printBackground: true },
+        page.sessionId,
+      );
+      const dir = join(stateDir(), "pdf");
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, `page-${Date.now()}.pdf`);
+      writeFileSync(path, Buffer.from(printed.data, "base64"));
+      this.touch();
+      return { content: [{ type: "text", text: path }] };
+    });
+  }
+
+  async prepare(options: PrepareOptions): Promise<ToolResult> {
+    return this.serial(async () => {
+      await this.ensure();
+      await this.startWatching();
+      const seconds = Math.max(1, Math.min(options.seconds ?? 2, 30));
+      if (options.focus !== false) {
+        /* A game only reads keys once its surface has focus, and the surface is
+           rarely something a read numbered. */
+        await this.evaluate(`(() => {
+  const el = document.querySelector("canvas,video,embed,object,[tabindex]") || document.body;
+  if (el && typeof el.focus === "function") el.focus();
+  if (el) el.click && el.click();
+  return true;
+})()`);
+      }
+      const frames = await this.evaluate<number>(`(async () => {
+  let count = 0;
+  const until = performance.now() + ${seconds * 1000};
+  await new Promise((resolve) => {
+    const tick = () => { count += 1; if (performance.now() >= until) resolve(null); else requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    setTimeout(resolve, ${seconds * 1000 + 500});
+  });
+  return count;
+})()`);
+      const surface = await this.evaluate<string>(`(() => {
+  const found = [];
+  for (const node of document.querySelectorAll("canvas,embed,object,video,[tabindex]")) {
+    const box = node.getBoundingClientRect();
+    if (box.width < 40 || box.height < 40) continue;
+    found.push({ tag: node.tagName.toLowerCase(), width: Math.round(box.width), height: Math.round(box.height) });
+  }
+  const flash = document.querySelector("object[type*='flash'],embed[type*='flash']");
+  return JSON.stringify({ surfaces: found.slice(0, 6), flash: flash !== null });
+})()`);
+      const state = JSON.parse(surface) as {
+        surfaces: Array<{ tag: string; width: number; height: number }>;
+        flash: boolean;
+      };
+      const fps = Math.round((frames / seconds) * 10) / 10;
+      this.touch();
+      const lines = [
+        `frame rate ${fps}/s over ${seconds}s`,
+        state.surfaces.length === 0
+          ? "no input surface larger than 40px was found"
+          : `input surfaces: ${state.surfaces.map((item) => `${item.tag} ${item.width}x${item.height}`).join(", ")}`,
+        state.flash
+          ? "this page embeds a Flash player, which this browser cannot render"
+          : "no Flash player is embedded",
+      ];
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    });
   }
 
   async close(): Promise<RouteState> {

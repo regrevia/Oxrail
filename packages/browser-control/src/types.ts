@@ -149,6 +149,60 @@ export interface BrowserRoute {
   state(): Promise<RouteState>;
   login(): Promise<LoginState>;
   close(): Promise<RouteState>;
+
+  /** Locate what the page says without reading all of it. */
+  find(options: FindOptions): Promise<ToolResult>;
+  /** Read the rows a selector matches, one line each. */
+  extract(options: ExtractOptions): Promise<ToolResult>;
+  /** Look at a self-drawn page as a grid of letters. */
+  look(options: LookOptions): Promise<ToolResult>;
+  /** Wait for one page condition instead of reading in a loop. */
+  wait(options: WaitOptions): Promise<ToolResult>;
+  /** Wheel-scroll from the middle of the viewport. */
+  scroll(options: ScrollOptions): Promise<ToolResult>;
+  /** Move the pointer onto a control so hover-only menus open. */
+  hover(options: HoverOptions): Promise<ToolResult>;
+  /** Put a checkable control into a known state. */
+  check(options: CheckOptions): Promise<ToolResult>;
+  /** Choose an option in a dropdown. */
+  select(options: SelectOptions): Promise<ToolResult>;
+  /** Drag with real pointer steps. */
+  drag(options: DragOptions): Promise<ToolResult>;
+  /** Put files into a file input without opening a chooser. */
+  upload(options: UploadOptions): Promise<ToolResult>;
+  /** Save the picture the page is showing. */
+  grab(options: GrabOptions): Promise<ToolResult>;
+  /** Run JavaScript in the page. */
+  evaluatePage(options: EvalOptions): Promise<ToolResult>;
+  /** Run several steps in one call. */
+  run(steps: readonly Step[]): Promise<ToolResult>;
+  /** Answer the dialog the page is showing. */
+  dialog(options: DialogOptions): Promise<ToolResult>;
+  /** Read or change the browser's cookies. */
+  cookie(options: CookieOptions): Promise<ToolResult>;
+  /** Read or write the browser's clipboard. */
+  clipboard(options: ClipboardOptions): Promise<ToolResult>;
+  /** Console lines and errors the page produced. */
+  console(options: LogOptions): Promise<ToolResult>;
+  /** Responses the page received. */
+  network(options: NetworkOptions): Promise<ToolResult>;
+  /** Requests the page tried and that failed. */
+  failed(options: LogOptions): Promise<ToolResult>;
+  /** Pages open in the browser. */
+  tabs(options: TabsOptions): Promise<ToolResult>;
+  /** Files this browser downloaded. */
+  downloads(): Promise<ToolResult>;
+  /** What this page played. */
+  media(options: MediaOptions): Promise<ToolResult>;
+  /** Print the page to a PDF. */
+  pdf(): Promise<ToolResult>;
+  /** Get a self-drawn page ready in one call. */
+  prepare(options: PrepareOptions): Promise<ToolResult>;
+  mode(options?: ModeOptions): Promise<ToolResult>;
+  ask(options: AskOptions): Promise<ToolResult>;
+  review(options?: ReviewOptions): Promise<ToolResult>;
+  reviewVerdict(options?: ReviewVerdictOptions): Promise<ToolResult>;
+  resume(): Promise<ToolResult>;
 }
 
 /** Raised when the route is asked to do something before it was opened. */
@@ -159,4 +213,173 @@ export class RouteClosedError extends Error {
 /** Raised when a call names a control the last read did not number. */
 export class StaleRefError extends Error {
   override readonly name = "StaleRefError";
+}
+
+/** Options for the tools added alongside the first eleven. */
+export interface FindOptions {
+  readonly query: string;
+  readonly regex?: boolean;
+  readonly limit?: number;
+}
+
+export interface ExtractOptions {
+  readonly select: string;
+  readonly ref?: number;
+  readonly limit?: number;
+}
+
+export interface LookOptions {
+  readonly cols?: number;
+  readonly region?: string;
+  readonly items?: number;
+  readonly diff?: boolean;
+}
+
+export interface WaitOptions {
+  readonly text?: string;
+  readonly gone?: string;
+  readonly url?: string;
+  readonly quiet?: boolean;
+  readonly timeoutMs?: number;
+}
+
+export interface ScrollOptions {
+  readonly dy?: number;
+  readonly dx?: number;
+  readonly read?: boolean;
+}
+
+export interface HoverOptions {
+  readonly ref?: number;
+  readonly text?: string;
+  readonly read?: boolean;
+}
+
+export interface CheckOptions {
+  readonly ref: number;
+  readonly checked?: boolean;
+  readonly read?: boolean;
+}
+
+export interface SelectOptions {
+  readonly ref?: number;
+  readonly field?: string;
+  readonly value: string;
+  readonly read?: boolean;
+}
+
+export interface DragOptions {
+  readonly fromRef?: number;
+  readonly fromPoint?: string;
+  readonly toRef?: number;
+  readonly toPoint?: string;
+  readonly read?: boolean;
+}
+
+export interface UploadOptions {
+  readonly ref?: number;
+  readonly files: readonly string[];
+  readonly read?: boolean;
+}
+
+export interface GrabOptions {
+  readonly ref?: number;
+  readonly name?: string;
+  readonly count?: number;
+}
+
+export interface EvalOptions {
+  readonly code: string;
+  readonly awaitPromise?: boolean;
+}
+
+export interface DialogOptions {
+  readonly accept?: boolean;
+  readonly text?: string;
+}
+
+export interface CookieOptions {
+  readonly url?: string;
+  readonly set?: string;
+  readonly domain?: string;
+  readonly clear?: boolean;
+}
+
+export interface ClipboardOptions {
+  readonly set?: string;
+}
+
+export interface LogOptions {
+  readonly limit?: number;
+}
+
+export interface NetworkOptions {
+  readonly filter?: string;
+  readonly limit?: number;
+}
+
+export interface TabsOptions {
+  readonly action?: "list" | "switch" | "close";
+  readonly index?: number;
+}
+
+export interface MediaOptions {
+  readonly all?: boolean;
+  readonly save?: string;
+  readonly watch?: boolean;
+}
+
+export interface PrepareOptions {
+  readonly seconds?: number;
+  readonly focus?: boolean;
+}
+
+/** One step of a batched call. */
+/** Whether the browser draws a window the person can see. */
+export type Display = "visible" | "headless";
+
+export interface ModeOptions {
+  /** Leave it out to ask which mode is in force right now. */
+  readonly display?: Display;
+}
+
+export interface AskOptions {
+  /** The name of the box to type into, when a ref does not name it. */
+  readonly text?: string;
+  readonly ref?: number;
+  /** What to say. Separate from `text` so a named box can hold a long message. */
+  readonly said?: string;
+  readonly submit?: boolean;
+  readonly timeoutMs?: number;
+}
+
+export interface ReviewOptions {
+  readonly text?: string;
+  readonly ref?: number;
+  readonly said?: string;
+  readonly timeoutMs?: number;
+}
+
+export type Verdict = "fixed" | "verified" | "invalid" | "open";
+
+export interface VerdictMark {
+  readonly point: number;
+  readonly verdict: Verdict;
+}
+
+export interface ReviewVerdictOptions {
+  readonly marks?: readonly VerdictMark[];
+}
+
+export interface Step {
+  readonly ref?: number;
+  readonly tap?: string;
+  readonly text?: string;
+  readonly field?: string;
+  readonly key?: string;
+  readonly scroll?: number;
+  readonly submit?: boolean;
+  readonly waitText?: string;
+  readonly waitGone?: string;
+  readonly waitUrl?: string;
 }

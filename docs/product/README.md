@@ -50,7 +50,7 @@ remain `BLOCKED`.
 ## Browser Control (opt-in)
 
 This preview also ships `dist/browser-control/mcp.mjs`, a stdio MCP server that
-drives one headless Chrome process through its own profile under
+drives one Chrome process, visible by default, through its own profile under
 `~/.oxrail/browser-control/`. It starts nothing until a host launches it, and it
 does not replace Native Computer Use: the route is not Hook-visible, not
 Guard-mediated, and its observations do not advance the passive Chrome-route

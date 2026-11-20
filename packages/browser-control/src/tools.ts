@@ -14,10 +14,13 @@ import type {
   RouteState,
   ShotOptions,
   Snapshot,
+  Step,
   ToolResult,
+  Verdict,
+  VerdictMark,
 } from "./types.js";
 import { RouteClosedError, StaleRefError } from "./types.js";
-import { controlLines } from "./read.js";
+import { formatSnapshot } from "./read.js";
 
 export interface ToolDefinition {
   name: string;
@@ -26,7 +29,14 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
-type ArgumentKind = "string" | "boolean" | "integer" | "enum";
+type ArgumentKind =
+  | "string"
+  | "boolean"
+  | "integer"
+  | "enum"
+  | "strings"
+  | "steps"
+  | "marks";
 
 interface PropertyDefinition {
   readonly kind: ArgumentKind;
@@ -64,8 +74,9 @@ const TOOLS: readonly ToolSpec[] = [
       },
       headless: {
         kind: "boolean",
-        description: "Run without a visible window. Defaults to true.",
-        extras: { default: true },
+        description:
+          "Hide the window. Defaults to false: the browser is visible unless this call says otherwise.",
+        extras: { default: false },
       },
       profile: {
         kind: "string",
@@ -333,6 +344,836 @@ const TOOLS: readonly ToolSpec[] = [
     },
   },
   {
+    name: "browser_find",
+    title: "Search the page",
+    description:
+      'Search the controls and the words on the page and get back only the hits, each with the number a click takes. Use it when the page is too long to read: browser_view answers "what is here", this answers "where is this". Matches a lowercased substring unless regex is true; limit caps the rows.',
+    properties: {
+      query: {
+        kind: "string",
+        description: "What to look for, in a control name or in the page text.",
+      },
+      regex: {
+        kind: "boolean",
+        description: "Treat query as a regular expression.",
+        extras: { default: false },
+      },
+      limit: {
+        kind: "integer",
+        description: "Stop after this many hits. Defaults to 40.",
+        extras: { minimum: 1, maximum: 200 },
+      },
+    },
+    required: ["query"],
+    async run(route, args) {
+      const query = stringValue(args, "query");
+      if (query === undefined)
+        throw new ArgumentError('browser_find: "query" is required.');
+      const regex = booleanValue(args, "regex");
+      const limit = integerValue(args, "limit");
+      return route.find({
+        query,
+        ...(regex === undefined ? {} : { regex }),
+        ...(limit === undefined ? {} : { limit }),
+      });
+    },
+  },
+  {
+    name: "browser_extract",
+    title: "Extract by selector",
+    description:
+      "Pull the rows that one CSS selector describes — every link in a list, every price in a grid — without reading the rest of the page. Scope it to one control with ref, which is the number browser_view printed; any element on the page is only reachable that way.",
+    properties: {
+      select: { kind: "string", description: "CSS selector to read." },
+      ref: {
+        kind: "integer",
+        description:
+          "Read only inside this control, by the number browser_view printed.",
+      },
+      limit: {
+        kind: "integer",
+        description: "Stop after this many rows. Defaults to 50.",
+        extras: { minimum: 1, maximum: 500 },
+      },
+    },
+    required: ["select"],
+    async run(route, args) {
+      const select = stringValue(args, "select");
+      if (select === undefined)
+        throw new ArgumentError('browser_extract: "select" is required.');
+      const ref = integerValue(args, "ref");
+      const limit = integerValue(args, "limit");
+      return route.extract({
+        select,
+        ...(ref === undefined ? {} : { ref }),
+        ...(limit === undefined ? {} : { limit }),
+      });
+    },
+  },
+  {
+    name: "browser_look",
+    title: "Look at the page as a grid",
+    description:
+      'See the page without image tokens: it comes back as a grid of letters, one letter per cell, so a colour or a layout can be read as text. Use it for a canvas, a chart, a game or a page that draws itself, where there are no words to read. region crops to "x,y,width,height"; items adds more cells; diff reports only the cells that changed since the last look.',
+    properties: {
+      cols: {
+        kind: "integer",
+        description: "Cells across. Defaults to 12.",
+        extras: { minimum: 2, maximum: 64 },
+      },
+      region: {
+        kind: "string",
+        description: 'Crop to this box in pixels: "x,y,width,height".',
+      },
+      items: {
+        kind: "integer",
+        description: "Cells down. Defaults to the height the grid implies.",
+        extras: { minimum: 2, maximum: 96 },
+      },
+      diff: {
+        kind: "boolean",
+        description: "Report only the cells that changed since the last look.",
+        extras: { default: true },
+      },
+    },
+    async run(route, args) {
+      const cols = integerValue(args, "cols");
+      const region = stringValue(args, "region");
+      const items = integerValue(args, "items");
+      const diff = booleanValue(args, "diff");
+      return route.look({
+        ...(cols === undefined ? {} : { cols }),
+        ...(region === undefined ? {} : { region }),
+        ...(items === undefined ? {} : { items }),
+        ...(diff === undefined ? {} : { diff }),
+      });
+    },
+  },
+  {
+    name: "browser_wait",
+    title: "Wait for the page",
+    description:
+      "Block until the page settles instead of reading it over and over: wait for text to appear, for text to go away, for the address to reach something, or for the page to stop changing. Returns as soon as the condition holds, and says what the page looks like when it does not. Every wait is bounded, so a page that never gets there reports that rather than hanging.",
+    properties: {
+      text: {
+        kind: "string",
+        description: "Wait until this text is on the page.",
+      },
+      gone: {
+        kind: "string",
+        description: "Wait until this text is off the page.",
+      },
+      url: {
+        kind: "string",
+        description: "Wait until the address contains this.",
+      },
+      quiet: {
+        kind: "boolean",
+        description: "Wait until the page stops changing.",
+        extras: { default: false },
+      },
+      timeoutMs: {
+        kind: "integer",
+        description: "Give up after this many milliseconds. Defaults to 8000.",
+        extras: { minimum: 50, maximum: 120000 },
+      },
+    },
+    async run(route, args) {
+      const timeoutMs = integerValue(args, "timeoutMs");
+      const text = stringValue(args, "text");
+      const gone = stringValue(args, "gone");
+      const url = stringValue(args, "url");
+      const quiet = booleanValue(args, "quiet");
+      return route.wait({
+        ...(text === undefined ? {} : { text }),
+        ...(gone === undefined ? {} : { gone }),
+        ...(url === undefined ? {} : { url }),
+        ...(quiet === undefined ? {} : { quiet }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
+    },
+  },
+  {
+    name: "browser_scroll",
+    title: "Scroll",
+    description:
+      "Scroll the page by a number of pixels. Negative goes up. This is what brings a lazy-loaded list into being; read after scrolling rather than reading the whole page first.",
+    properties: {
+      dy: {
+        kind: "integer",
+        description: "Pixels down. Negative goes up.",
+      },
+      dx: {
+        kind: "integer",
+        description: "Pixels right. Negative goes left.",
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page after scrolling. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    async run(route, args) {
+      const dy = integerValue(args, "dy");
+      const dx = integerValue(args, "dx");
+      const read = booleanValue(args, "read");
+      return route.scroll({
+        ...(dy === undefined ? {} : { dy }),
+        ...(dx === undefined ? {} : { dx }),
+        ...(read === undefined ? {} : { read }),
+      });
+    },
+  },
+  {
+    name: "browser_hover",
+    title: "Hover",
+    description:
+      "Move the mouse onto a control and hold it there, which is how a menu that only opens on hover opens. Address it by ref, or by its name. Read after hovering when the menu is what you came for.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "Control to hover, by the number browser_view printed.",
+      },
+      text: { kind: "string", description: "Control to hover, by its name." },
+      read: {
+        kind: "boolean",
+        description: "Read the page after hovering. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    async run(route, args) {
+      const ref = integerValue(args, "ref");
+      const text = stringValue(args, "text");
+      const read = booleanValue(args, "read");
+      return route.hover({
+        ...(ref === undefined ? {} : { ref }),
+        ...(text === undefined ? {} : { text }),
+        ...(read === undefined ? {} : { read }),
+      });
+    },
+  },
+  {
+    name: "browser_check",
+    title: "Check or uncheck",
+    description:
+      "Clicking blindly flips a control that is already right. This one reads the control first: checked true asks for checked and false asks for unchecked, and a call with neither only reports what it is. It says so when the box did not take the change.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "The box or switch, by the number browser_view printed.",
+      },
+      checked: {
+        kind: "boolean",
+        description: "The state wanted. Leave it out to only report.",
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    required: ["ref"],
+    async run(route, args) {
+      const ref = integerValue(args, "ref");
+      if (ref === undefined)
+        throw new ArgumentError('browser_check: "ref" is required.');
+      const checked = booleanValue(args, "checked");
+      const read = booleanValue(args, "read");
+      return route.check({
+        ref,
+        ...(checked === undefined ? {} : { checked }),
+        ...(read === undefined ? {} : { read }),
+      });
+    },
+  },
+  {
+    name: "browser_select",
+    title: "Pick from a dropdown",
+    description:
+      "Choose an option in a dropdown by its value or by the words it shows. A native select is set directly; a custom listbox is opened and the option picked, which is why a plain click on the closed control was not enough.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "The dropdown, by the number browser_view printed.",
+      },
+      field: {
+        kind: "string",
+        description: "The dropdown, by the label or name next to it.",
+      },
+      value: {
+        kind: "string",
+        description: "Option to choose, by value or by its visible text.",
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    required: ["value"],
+    async run(route, args) {
+      const value = stringValue(args, "value");
+      if (value === undefined)
+        throw new ArgumentError('browser_select: "value" is required.');
+      const ref = integerValue(args, "ref");
+      const field = stringValue(args, "field");
+      const read = booleanValue(args, "read");
+      return route.select({
+        value,
+        ...(ref === undefined ? {} : { ref }),
+        ...(field === undefined ? {} : { field }),
+        ...(read === undefined ? {} : { read }),
+      });
+    },
+  },
+  {
+    name: "browser_drag",
+    title: "Drag",
+    description:
+      "Drag one thing onto another: a slider handle, a card into a column, a file onto a drop zone. Give each end by ref or by a point that came from a read, and the move is sent as a real press, a series of moves and a release, which is what the page listens for.",
+    properties: {
+      fromRef: {
+        kind: "integer",
+        description: "Where the drag starts, by number.",
+      },
+      fromPoint: {
+        kind: "string",
+        description: 'Where the drag starts, as "x,y" in pixels.',
+      },
+      toRef: {
+        kind: "integer",
+        description: "Where the drag ends, by number.",
+      },
+      toPoint: {
+        kind: "string",
+        description: 'Where the drag ends, as "x,y" in pixels.',
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    async run(route, args) {
+      const fromRef = integerValue(args, "fromRef");
+      const fromPoint = stringValue(args, "fromPoint");
+      const toRef = integerValue(args, "toRef");
+      const toPoint = stringValue(args, "toPoint");
+      const read = booleanValue(args, "read");
+      return route.drag({
+        ...(fromRef === undefined ? {} : { fromRef }),
+        ...(fromPoint === undefined ? {} : { fromPoint }),
+        ...(toRef === undefined ? {} : { toRef }),
+        ...(toPoint === undefined ? {} : { toPoint }),
+        ...(read === undefined ? {} : { read }),
+      });
+    },
+  },
+  {
+    name: "browser_upload",
+    title: "Upload files",
+    description:
+      "Give files to a file input. The file chooser never opens: the files are handed to the input directly, so this is the only way an upload can be driven from here. Paths must be absolute.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "The file input, by the number browser_view printed.",
+      },
+      files: { kind: "strings", description: "Absolute paths to upload." },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    required: ["files"],
+    async run(route, args) {
+      const files = coerce(
+        "browser_upload",
+        "files",
+        { kind: "strings", description: "" },
+        args.files,
+      );
+      const ref = integerValue(args, "ref");
+      const read = booleanValue(args, "read");
+      return route.upload({
+        files: files as string[],
+        ...(ref === undefined ? {} : { ref }),
+        ...(read === undefined ? {} : { read }),
+      });
+    },
+  },
+  {
+    name: "browser_grab",
+    title: "Save an image",
+    description:
+      "Save the picture on the page — the largest image, a canvas, or the one a ref names — as a file, so it can be opened rather than described. Reach for it when the thing you want is pixels.",
+    properties: {
+      ref: { kind: "integer", description: "The image or canvas, by number." },
+      name: { kind: "string", description: "File name to save it under." },
+      count: {
+        kind: "integer",
+        description: "Save this many of the largest pictures. Defaults to 1.",
+        extras: { minimum: 1, maximum: 20 },
+      },
+    },
+    async run(route, args) {
+      const ref = integerValue(args, "ref");
+      const name = stringValue(args, "name");
+      const count = integerValue(args, "count");
+      return route.grab({
+        ...(ref === undefined ? {} : { ref }),
+        ...(name === undefined ? {} : { name }),
+        ...(count === undefined ? {} : { count }),
+      });
+    },
+  },
+  {
+    name: "browser_eval",
+    title: "Run JavaScript in the page",
+    description:
+      "Run an expression in the page and get its value back, for a fact no reading exposes: a computed style, a scroll height, a property on a global. Nothing is clicked and nothing is typed, and the page is not navigated. Prefer a reading when a reading answers it.",
+    properties: {
+      code: {
+        kind: "string",
+        description: "The expression to run. Its value is returned.",
+      },
+      awaitPromise: {
+        kind: "boolean",
+        description:
+          "Wait for a promise the expression returns. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    required: ["code"],
+    async run(route, args) {
+      const code = stringValue(args, "code");
+      if (code === undefined)
+        throw new ArgumentError('browser_eval: "code" is required.');
+      const awaitPromise = booleanValue(args, "awaitPromise");
+      return route.evaluatePage({
+        code,
+        ...(awaitPromise === undefined ? {} : { awaitPromise }),
+      });
+    },
+  },
+  {
+    name: "browser_do",
+    title: "Run a batch of steps",
+    description:
+      "Do a whole sequence in one call — open a menu, type into a field, press Enter, wait for the result — instead of one round trip per action. Each step names one thing: ref, tap, field with text, text, key, scroll, wait_text, wait_gone, wait_url. The batch stops at the first step that cannot proceed and says which one, so a half-done sequence is never reported as done.",
+    properties: {
+      steps: { kind: "steps", description: "The steps, in order." },
+    },
+    required: ["steps"],
+    async run(route, args) {
+      const steps = coerce(
+        "browser_do",
+        "steps",
+        { kind: "steps", description: "" },
+        args.steps,
+      );
+      return route.run(steps as Step[]);
+    },
+  },
+  {
+    name: "browser_dialog",
+    title: "Answer a dialog",
+    description:
+      "A confirm, an alert or a prompt stops the page until it is answered. With accept it is accepted and with text a prompt is filled in; with neither it only reports what is open. Use it when a click seemed to do nothing — an unhandled dialog is the usual reason.",
+    properties: {
+      accept: {
+        kind: "boolean",
+        description: "Accept the dialog. Leave it out to only report.",
+      },
+      text: { kind: "string", description: "Text for a prompt." },
+    },
+    async run(route, args) {
+      const accept = booleanValue(args, "accept");
+      const text = stringValue(args, "text");
+      return route.dialog({
+        ...(accept === undefined ? {} : { accept }),
+        ...(text === undefined ? {} : { text }),
+      });
+    },
+  },
+  {
+    name: "browser_cookie",
+    title: "Cookies",
+    description:
+      "Read the cookies for the page, set one, or clear them all. Use it to keep a sign-in that a page stores in a cookie, or to see what the page was told to remember.",
+    properties: {
+      url: {
+        kind: "string",
+        description: "Read only the cookies this address sends.",
+      },
+      set: {
+        kind: "string",
+        description: 'Set one cookie as "name=value; path=/".',
+      },
+      domain: {
+        kind: "string",
+        description: "Domain for the cookie being set.",
+      },
+      clear: {
+        kind: "boolean",
+        description: "Clear every cookie first.",
+        extras: { default: false },
+      },
+    },
+    async run(route, args) {
+      const url = stringValue(args, "url");
+      const set = stringValue(args, "set");
+      const domain = stringValue(args, "domain");
+      const clear = booleanValue(args, "clear");
+      return route.cookie({
+        ...(url === undefined ? {} : { url }),
+        ...(set === undefined ? {} : { set }),
+        ...(domain === undefined ? {} : { domain }),
+        ...(clear === undefined ? {} : { clear }),
+      });
+    },
+  },
+  {
+    name: "browser_clipboard",
+    title: "Clipboard",
+    description:
+      "Read what the page put on the clipboard, or put text there for a page that pastes. With set it writes; with nothing it reads.",
+    properties: {
+      set: { kind: "string", description: "Text to put on the clipboard." },
+    },
+    async run(route, args) {
+      const set = stringValue(args, "set");
+      return route.clipboard({ ...(set === undefined ? {} : { set }) });
+    },
+  },
+  {
+    name: "browser_console",
+    title: "Console",
+    description:
+      "What the page logged, newest last. A click that seemed to do nothing usually left a reason here, and so does a page that half-loaded.",
+    properties: {
+      limit: {
+        kind: "integer",
+        description: "Return this many of the newest lines. Defaults to 50.",
+        extras: { minimum: 1, maximum: 400 },
+      },
+    },
+    async run(route, args) {
+      const limit = integerValue(args, "limit");
+      return route.console({ ...(limit === undefined ? {} : { limit }) });
+    },
+  },
+  {
+    name: "browser_network",
+    title: "Network",
+    description:
+      "The requests the page made, with their status. Use it when a page is empty or a submission seemed to vanish: a failed request and a request that was never made look the same on the page and different here.",
+    properties: {
+      filter: {
+        kind: "string",
+        description: "Only rows whose address contains this.",
+      },
+      limit: {
+        kind: "integer",
+        description: "Return this many of the newest rows. Defaults to 50.",
+        extras: { minimum: 1, maximum: 400 },
+      },
+    },
+    async run(route, args) {
+      const filter = stringValue(args, "filter");
+      const limit = integerValue(args, "limit");
+      return route.network({
+        ...(filter === undefined ? {} : { filter }),
+        ...(limit === undefined ? {} : { limit }),
+      });
+    },
+  },
+  {
+    name: "browser_failed",
+    title: "Failed requests",
+    description:
+      "Only the requests that never finished, with the reason. This is the short list behind a page that looks broken.",
+    properties: {
+      limit: {
+        kind: "integer",
+        description: "Return this many of the newest. Defaults to 50.",
+        extras: { minimum: 1, maximum: 200 },
+      },
+    },
+    async run(route, args) {
+      const limit = integerValue(args, "limit");
+      return route.failed({ ...(limit === undefined ? {} : { limit }) });
+    },
+  },
+  {
+    name: "browser_tabs",
+    title: "Tabs",
+    description:
+      "List the open tabs, switch to one by index, or close one. A page that opened a second window to sign in or to show a document is reachable only through here.",
+    properties: {
+      action: {
+        kind: "enum",
+        values: ["list", "switch", "close"],
+        description: "What to do. Defaults to list.",
+      },
+      index: {
+        kind: "integer",
+        description:
+          "Which tab, as the list printed it. Needed by switch and close.",
+        extras: { minimum: 0 },
+      },
+    },
+    async run(route, args) {
+      const action = stringValue(args, "action");
+      const index = integerValue(args, "index");
+      return route.tabs({
+        ...(action === undefined
+          ? {}
+          : { action: action as "list" | "switch" | "close" }),
+        ...(index === undefined ? {} : { index }),
+      });
+    },
+  },
+  {
+    name: "browser_downloads",
+    title: "Downloads",
+    description:
+      "The files this profile has downloaded, newest last, with their size and where they landed. A download that never appeared is a click that never started one.",
+    properties: {},
+    async run(route) {
+      return route.downloads();
+    },
+  },
+  {
+    name: "browser_media",
+    title: "Media",
+    description:
+      'The streams the page played, and a way to save one: save "main" takes the one the page was really playing, an index takes that row, and a piece of its address matches. Use it for a video or audio file the page will not hand over as a link.',
+    properties: {
+      all: {
+        kind: "boolean",
+        description:
+          "Include request streams, not only media. Defaults to false.",
+        extras: { default: false },
+      },
+      save: {
+        kind: "string",
+        description:
+          'Save this stream: "main", an index, or part of its address.',
+      },
+      watch: {
+        kind: "boolean",
+        description: "Only report, without saving.",
+        extras: { default: false },
+      },
+    },
+    async run(route, args) {
+      const all = booleanValue(args, "all");
+      const save = stringValue(args, "save");
+      const watch = booleanValue(args, "watch");
+      return route.media({
+        ...(all === undefined ? {} : { all }),
+        ...(save === undefined ? {} : { save }),
+        ...(watch === undefined ? {} : { watch }),
+      });
+    },
+  },
+  {
+    name: "browser_pdf",
+    title: "Print to PDF",
+    description:
+      "Print the page to a PDF file and say where it landed. Use it for a receipt, an invoice or a document the page renders but does not offer to download.",
+    properties: {},
+    async run(route) {
+      return route.pdf();
+    },
+  },
+  {
+    name: "browser_prepare",
+    title: "Prepare for animation",
+    description:
+      "Get a canvas, a game or a video ready and measure it: it takes the focus, counts the frames the page actually draws over a few seconds, and reports the input surfaces it found. Use it before reading a page that draws itself, so a still frame is not mistaken for a page that is running.",
+    properties: {
+      seconds: {
+        kind: "integer",
+        description: "How long to count frames. Defaults to 2.",
+        extras: { minimum: 1, maximum: 30 },
+      },
+      focus: {
+        kind: "boolean",
+        description: "Take the focus first. Defaults to true.",
+        extras: { default: true },
+      },
+    },
+    async run(route, args) {
+      const seconds = integerValue(args, "seconds");
+      const focus = booleanValue(args, "focus");
+      return route.prepare({
+        ...(seconds === undefined ? {} : { seconds }),
+        ...(focus === undefined ? {} : { focus }),
+      });
+    },
+  },
+  {
+    name: "browser_mode",
+    title: "Show or hide the window",
+    description:
+      "Say whether the browser draws a window you can watch, and get the mode it is in now. Visible is the default: a page nobody can see makes a wrong reading look like a right one. Changing it means the browser is put down and brought back up in the other mode on the same page, so it takes a moment. This does not change how clicks are delivered; leave the display out to ask.",
+    properties: {
+      display: {
+        kind: "enum",
+        description:
+          "visible to show the window, headless to hide it. Leave it out to ask which is in force.",
+        values: ["visible", "headless"],
+      },
+    },
+    async run(route, args) {
+      const display = args.display;
+      if (
+        display !== undefined &&
+        display !== "visible" &&
+        display !== "headless"
+      )
+        throw new ArgumentError(
+          'browser_mode: display has to be "visible" or "headless"',
+        );
+      return route.mode(display === undefined ? {} : { display });
+    },
+  },
+  {
+    name: "browser_ask",
+    title: "Ask the chat in the page",
+    description:
+      "Say something to a chat that is open in the page — a model, a support window, a search box — and read its answer back in the same call. Types into the box, presses Enter, then waits until the answer stops growing. Use it to get an answer without a read between every step.",
+    properties: {
+      text: {
+        kind: "string",
+        description: "The name of the box, when no ref names it.",
+      },
+      ref: {
+        kind: "integer",
+        description: "The number of the box, from browser_view.",
+        extras: { minimum: 0 },
+      },
+      said: {
+        kind: "string",
+        description: "What to say. Defaults to nothing sent.",
+      },
+      submit: {
+        kind: "boolean",
+        description: "Press Enter after typing. Defaults to true.",
+        extras: { default: true },
+      },
+      timeoutMs: {
+        kind: "integer",
+        description:
+          "How long to wait for the reply to settle. Defaults to 45000.",
+        extras: { minimum: 1, maximum: 600000 },
+      },
+    },
+    async run(route, args) {
+      const text = stringValue(args, "text");
+      const ref = integerValue(args, "ref");
+      const said = stringValue(args, "said");
+      const submit = booleanValue(args, "submit");
+      const timeoutMs = integerValue(args, "timeoutMs");
+      return route.ask({
+        ...(text === undefined ? {} : { text }),
+        ...(ref === undefined ? {} : { ref }),
+        ...(said === undefined ? {} : { said }),
+        ...(submit === undefined ? {} : { submit }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
+    },
+  },
+  {
+    name: "browser_review",
+    title: "Ask for a review round",
+    description:
+      "Ask the chat in the page to review a repository and take its review back as a list: builds the message, sends it, waits for the answer, and writes the round down so the next round knows what was already said. Use it for a review round, not for a one-off question (that is browser_ask).",
+    properties: {
+      text: {
+        kind: "string",
+        description: "The name of the box, when no ref names it.",
+      },
+      ref: {
+        kind: "integer",
+        description: "The number of the box, from browser_view.",
+        extras: { minimum: 0 },
+      },
+      said: {
+        kind: "string",
+        description: "What to send instead of the built message.",
+      },
+      timeoutMs: {
+        kind: "integer",
+        description:
+          "How long to wait for the reply to settle. Defaults to 45000.",
+        extras: { minimum: 1, maximum: 600000 },
+      },
+    },
+    async run(route, args) {
+      const text = stringValue(args, "text");
+      const ref = integerValue(args, "ref");
+      const said = stringValue(args, "said");
+      const timeoutMs = integerValue(args, "timeoutMs");
+      return route.review({
+        ...(text === undefined ? {} : { text }),
+        ...(ref === undefined ? {} : { ref }),
+        ...(said === undefined ? {} : { said }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
+    },
+  },
+  {
+    name: "browser_review_verdict",
+    title: "Record a review verdict",
+    description:
+      "Record what happened to each point of the last review round, so the next round leaves settled points out: point numbers are the ones browser_review printed, and each mark is fixed, verified (checked in the code and the point does not apply), invalid, or open. With no marks, lists what is settled.",
+    properties: {
+      marks: {
+        kind: "marks",
+        description:
+          "One {point, verdict} per point. verdict is fixed, verified, invalid or open.",
+      },
+    },
+    async run(route, args) {
+      const raw = args.marks;
+      const marks =
+        raw === undefined
+          ? []
+          : (raw as readonly VerdictMark[]).map((mark) => {
+              if (typeof mark !== "object" || mark === null)
+                throw new ArgumentError(
+                  "browser_review_verdict: each mark is {point, verdict}",
+                );
+              const point = (mark as { point?: unknown }).point;
+              const verdict = (mark as { verdict?: unknown }).verdict;
+              if (typeof point !== "number" || !Number.isInteger(point))
+                throw new ArgumentError(
+                  "browser_review_verdict: point has to be a whole number",
+                );
+              if (typeof verdict !== "string")
+                throw new ArgumentError(
+                  "browser_review_verdict: verdict has to be fixed, verified, invalid or open",
+                );
+              return { point, verdict: verdict as Verdict };
+            });
+      return route.reviewVerdict({ marks });
+    },
+  },
+  {
+    name: "browser_resume",
+    title: "Take the page back",
+    description:
+      "Take the page back: clears the hold so the next action is sent at once instead of waiting it out, and ends a takeover. Reports the page it is now holding.",
+    properties: {},
+    async run(route) {
+      return route.resume();
+    },
+  },
+  {
     name: "browser_close",
     title: "Close the browser",
     description:
@@ -439,7 +1280,99 @@ function coerce(
       }
       return value;
     }
+    case "strings": {
+      if (!Array.isArray(value)) {
+        throw new ArgumentError(`${tool}: "${key}" must be a list of strings.`);
+      }
+      const out: string[] = [];
+      for (const item of value) {
+        if (typeof item !== "string") {
+          throw new ArgumentError(
+            `${tool}: "${key}" must be a list of strings.`,
+          );
+        }
+        out.push(item);
+      }
+      return out;
+    }
+    case "marks": {
+      if (!Array.isArray(value)) {
+        throw new ArgumentError(`${tool}: "${key}" must be a list of marks.`);
+      }
+      return value;
+    }
+    case "steps": {
+      if (!Array.isArray(value)) {
+        throw new ArgumentError(`${tool}: "${key}" must be a list of steps.`);
+      }
+      return value.map((item) => stepOf(tool, key, item));
+    }
   }
+}
+
+/** One step, with the caller's snake_case keys turned into the route's names.
+ *
+ * A step is refused before anything is clicked, so a typo in step 4 cannot
+ * leave the browser four actions into a batch that never had a chance.
+ */
+function stepOf(tool: string, key: string, value: unknown): Step {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ArgumentError(`${tool}: every "${key}" entry must be an object.`);
+  }
+  const from = value as Record<string, unknown>;
+  const take = <T>(
+    name: string,
+    check: (input: unknown) => T | undefined,
+  ): T | undefined => {
+    const raw = from[name];
+    if (raw === undefined) return undefined;
+    const done = check(raw);
+    if (done === undefined) {
+      throw new ArgumentError(`${tool}: step "${name}" has the wrong type.`);
+    }
+    return done;
+  };
+  const asText = (input: unknown): string | undefined =>
+    typeof input === "string" ? input : undefined;
+  const asInt = (input: unknown): number | undefined =>
+    typeof input === "number" && Number.isSafeInteger(input)
+      ? input
+      : undefined;
+  const asBool = (input: unknown): boolean | undefined =>
+    typeof input === "boolean" ? input : undefined;
+  const step: Step = {
+    ...(take("ref", asInt) === undefined
+      ? {}
+      : { ref: take("ref", asInt) as number }),
+    ...(take("tap", asText) === undefined
+      ? {}
+      : { tap: take("tap", asText) as string }),
+    ...(take("text", asText) === undefined
+      ? {}
+      : { text: take("text", asText) as string }),
+    ...(take("field", asText) === undefined
+      ? {}
+      : { field: take("field", asText) as string }),
+    ...(take("key", asText) === undefined
+      ? {}
+      : { key: take("key", asText) as string }),
+    ...(take("scroll", asInt) === undefined
+      ? {}
+      : { scroll: take("scroll", asInt) as number }),
+    ...(take("submit", asBool) === undefined
+      ? {}
+      : { submit: take("submit", asBool) as boolean }),
+    ...(take("wait_text", asText) === undefined
+      ? {}
+      : { waitText: take("wait_text", asText) as string }),
+    ...(take("wait_gone", asText) === undefined
+      ? {}
+      : { waitGone: take("wait_gone", asText) as string }),
+    ...(take("wait_url", asText) === undefined
+      ? {}
+      : { waitUrl: take("wait_url", asText) as string }),
+  };
+  return step;
 }
 
 function describeError(error: unknown): string {
@@ -476,52 +1409,6 @@ function textResult(text: string): ToolResult {
 
 function failure(text: string): ToolResult {
   return { content: [{ type: "text", text }], isError: true };
-}
-
-/* A URL is page-controlled text like any other, and a `data:` URL carries a
-   whole document in its own address. The snapshot keeps the URL exact because a
-   `changed` read compares it against the previous one; what the caller is handed
-   does not need more than the part that identifies the page. */
-function squashUrl(url: string): string {
-  return url.length <= 2048
-    ? url
-    : `${url.slice(0, 2048)}… (${url.length - 2048} more characters)`;
-}
-
-function formatSnapshot(snapshot: Snapshot): string {
-  const lines: string[] = [];
-  if (snapshot.text !== "") lines.push(snapshot.text);
-  /* One line per control, except a run of near-identical ones — a list of
-     buttons is one fact, and printing it one line at a time spends the budget
-     on the list instead of the answer. Refs and names are unchanged. */
-  for (const line of controlLines(snapshot.controls)) lines.push(line);
-  if (lines.length === 0) lines.push("(blank page)");
-  if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
-  if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
-  /* What the read cost and what it left behind, so a caller can tell a short
-     page from a page it is only seeing part of. */
-  if (snapshot.chars !== undefined) lines.push(`chars: ${snapshot.chars}`);
-  if (snapshot.words !== undefined) lines.push(`words: ${snapshot.words}`);
-  if (snapshot.matched !== undefined && snapshot.total !== undefined)
-    lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
-  /* A reading that left controls out has to say so, or a caller cannot tell a
-     page with three buttons from a page whose other 157 were not printed. */
-  if ((snapshot.omitted ?? 0) > 0) {
-    lines.push(
-      `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`,
-    );
-  }
-  if ((snapshot.blindFrames ?? 0) > 0) {
-    lines.push(
-      `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`,
-    );
-  }
-  if (snapshot.truncated) {
-    lines.push(`controls: ${snapshot.controls.length}`);
-    if (snapshot.limit !== undefined) lines.push(`limit: ${snapshot.limit}`);
-    lines.push("truncated: true");
-  }
-  return lines.join("\n");
 }
 
 function formatState(state: RouteState): string {
@@ -570,10 +1457,56 @@ function toDefinition(tool: ToolSpec): ToolDefinition {
 function toPropertySchema(
   property: PropertyDefinition,
 ): Record<string, unknown> {
+  /* Two kinds are not a JSON scalar: a list of paths, and a list of steps.
+     Both are still described exactly, because a caller that cannot see the
+     shape of a step writes one the page will not accept. */
+  const type =
+    property.kind === "enum"
+      ? "string"
+      : property.kind === "strings" ||
+          property.kind === "steps" ||
+          property.kind === "marks"
+        ? "array"
+        : property.kind;
   const schema: Record<string, unknown> = {
-    type: property.kind === "enum" ? "string" : property.kind,
+    type,
     description: property.description,
   };
+  if (property.kind === "strings") {
+    schema.items = { type: "string" };
+  }
+  if (property.kind === "steps") {
+    schema.items = {
+      type: "object",
+      properties: {
+        ref: { type: "integer" },
+        tap: { type: "string" },
+        text: { type: "string" },
+        field: { type: "string" },
+        key: { type: "string" },
+        scroll: { type: "integer" },
+        submit: { type: "boolean" },
+        wait_text: { type: "string" },
+        wait_gone: { type: "string" },
+        wait_url: { type: "string" },
+      },
+      additionalProperties: false,
+    };
+  }
+  if (property.kind === "marks") {
+    schema.items = {
+      type: "object",
+      properties: {
+        point: { type: "integer" },
+        verdict: {
+          type: "string",
+          enum: ["fixed", "verified", "invalid", "open"],
+        },
+      },
+      required: ["point", "verdict"],
+      additionalProperties: false,
+    };
+  }
   if (property.values !== undefined) schema.enum = [...property.values];
   if (property.extras !== undefined) Object.assign(schema, property.extras);
   return schema;

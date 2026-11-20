@@ -488,6 +488,37 @@ function deltaOf(before, after) {
   const lines = after.text.split("\n").filter((line) => line.trim() !== "" && !seen.has(line.trim()));
   return { text: lines.join("\n"), controls };
 }
+function squashUrl(url) {
+  return url.length <= 2048 ? url : `${url.slice(0, 2048)}\u2026 (${url.length - 2048} more characters)`;
+}
+function formatSnapshot(snapshot) {
+  const lines = [];
+  if (snapshot.text !== "") lines.push(snapshot.text);
+  for (const line of controlLines(snapshot.controls)) lines.push(line);
+  if (lines.length === 0) lines.push("(blank page)");
+  if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
+  if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
+  if (snapshot.chars !== void 0) lines.push(`chars: ${snapshot.chars}`);
+  if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);
+  if (snapshot.matched !== void 0 && snapshot.total !== void 0)
+    lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  if ((snapshot.omitted ?? 0) > 0) {
+    lines.push(
+      `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`
+    );
+  }
+  if ((snapshot.blindFrames ?? 0) > 0) {
+    lines.push(
+      `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`
+    );
+  }
+  if (snapshot.truncated) {
+    lines.push(`controls: ${snapshot.controls.length}`);
+    if (snapshot.limit !== void 0) lines.push(`limit: ${snapshot.limit}`);
+    lines.push("truncated: true");
+  }
+  return lines.join("\n");
+}
 var TOKEN, SATURATION, SENTENCE_BREAK, TRAIL_CAP, RUN_FLOOR, PASSAGE_FLOOR;
 var init_read = __esm({
   "packages/browser-control/src/read.ts"() {
@@ -1418,6 +1449,158 @@ var init_chrome = __esm({
   }
 });
 
+// packages/browser-control/src/png.ts
+import { inflateSync } from "node:zlib";
+function decodePng(data) {
+  for (let index = 0; index < SIGNATURE.length; index += 1)
+    if (data[index] !== SIGNATURE[index])
+      throw new Error("not a PNG: the signature does not match");
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let depth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const parts = [];
+  while (offset + 8 <= data.length) {
+    const length = readUint32(data, offset);
+    const type = String.fromCharCode(
+      data[offset + 4] ?? 0,
+      data[offset + 5] ?? 0,
+      data[offset + 6] ?? 0,
+      data[offset + 7] ?? 0
+    );
+    const body = data.subarray(offset + 8, offset + 8 + length);
+    offset += 8 + length + 4;
+    if (type === "IHDR") {
+      width = readUint32(body, 0);
+      height = readUint32(body, 4);
+      depth = body[8] ?? 0;
+      colorType = body[9] ?? 0;
+      interlace = body[12] ?? 0;
+    } else if (type === "IDAT") parts.push(body);
+    else if (type === "IEND") break;
+  }
+  if (width <= 0 || height <= 0) throw new Error("PNG has no pixels");
+  if (depth !== 8)
+    throw new Error(`PNG bit depth ${depth} is not supported (8 only)`);
+  if (interlace !== 0) throw new Error("interlaced PNG is not supported");
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
+  if (channels === 0)
+    throw new Error(
+      `PNG colour type ${colorType} is not supported (RGB, RGBA)`
+    );
+  const joined = Buffer.concat(parts.map((part) => Buffer.from(part)));
+  const raw = inflateSync(joined);
+  const stride = width * channels;
+  const rgba = new Uint8Array(width * height * 4);
+  let previous = new Uint8Array(stride);
+  for (let row = 0; row < height; row += 1) {
+    const start = row * (stride + 1);
+    const filter = raw[start] ?? 0;
+    const line = raw.subarray(start + 1, start + 1 + stride);
+    const out = new Uint8Array(stride);
+    for (let index = 0; index < stride; index += 1) {
+      const left = index >= channels ? out[index - channels] ?? 0 : 0;
+      const up = previous[index] ?? 0;
+      const upLeft = index >= channels ? previous[index - channels] ?? 0 : 0;
+      const value = line[index] ?? 0;
+      let restored = value;
+      if (filter === 1) restored = value + left;
+      else if (filter === 2) restored = value + up;
+      else if (filter === 3) restored = value + (left + up >> 1);
+      else if (filter === 4) restored = value + paeth(left, up, upLeft);
+      out[index] = restored & 255;
+    }
+    previous = out;
+    for (let column = 0; column < width; column += 1) {
+      const source = column * channels;
+      const target = (row * width + column) * 4;
+      rgba[target] = out[source] ?? 0;
+      rgba[target + 1] = out[source + 1] ?? 0;
+      rgba[target + 2] = out[source + 2] ?? 0;
+      rgba[target + 3] = channels === 4 ? out[source + 3] ?? 255 : 255;
+    }
+  }
+  return { width, height, rgba };
+}
+function paeth(left, up, upLeft) {
+  const estimate = left + up - upLeft;
+  const toLeft = Math.abs(estimate - left);
+  const toUp = Math.abs(estimate - up);
+  const toUpLeft = Math.abs(estimate - upLeft);
+  if (toLeft <= toUp && toLeft <= toUpLeft) return left;
+  if (toUp <= toUpLeft) return up;
+  return upLeft;
+}
+function readUint32(data, at) {
+  return ((data[at] ?? 0) << 24 | (data[at + 1] ?? 0) << 16 | (data[at + 2] ?? 0) << 8 | (data[at + 3] ?? 0)) >>> 0;
+}
+function toGrid(bitmap, cols, rows) {
+  const across = Math.max(2, Math.min(64, Math.trunc(cols)));
+  const down = Math.max(2, Math.min(96, Math.trunc(rows)));
+  const out = [];
+  const cellW = bitmap.width / across;
+  const cellH = bitmap.height / down;
+  for (let row = 0; row < down; row += 1) {
+    const line = [];
+    for (let col = 0; col < across; col += 1) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      const x0 = Math.floor(col * cellW);
+      const x1 = Math.min(
+        bitmap.width,
+        Math.max(x0 + 1, Math.floor((col + 1) * cellW))
+      );
+      const y0 = Math.floor(row * cellH);
+      const y1 = Math.min(
+        bitmap.height,
+        Math.max(y0 + 1, Math.floor((row + 1) * cellH))
+      );
+      for (let y = y0; y < y1; y += 1) {
+        for (let x = x0; x < x1; x += 1) {
+          const at = (y * bitmap.width + x) * 4;
+          const alpha = (bitmap.rgba[at + 3] ?? 255) / 255;
+          r += (bitmap.rgba[at] ?? 0) * alpha + 255 * (1 - alpha);
+          g += (bitmap.rgba[at + 1] ?? 0) * alpha + 255 * (1 - alpha);
+          b += (bitmap.rgba[at + 2] ?? 0) * alpha + 255 * (1 - alpha);
+          n += 1;
+        }
+      }
+      if (n === 0) {
+        line.push(" ");
+        continue;
+      }
+      line.push(letterOf(r / n, g / n, b / n));
+    }
+    out.push(line);
+  }
+  return out;
+}
+function letterOf(r, g, b) {
+  const light = (r * 299 + g * 587 + b * 114) / 1e3;
+  if (light > 235) return " ";
+  if (light > 200) return ".";
+  const spread = Math.max(r, g, b) - Math.min(r, g, b);
+  if (spread < 28) {
+    if (light < 60) return "#";
+    if (light < 120) return "+";
+    return "-";
+  }
+  if (r >= g && r >= b) return light < 150 ? "R" : "r";
+  if (g >= r && g >= b) return light < 150 ? "G" : "g";
+  return light < 150 ? "B" : "b";
+}
+var SIGNATURE;
+var init_png = __esm({
+  "packages/browser-control/src/png.ts"() {
+    "use strict";
+    SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+  }
+});
+
 // packages/browser-control/src/route.ts
 var route_exports = {};
 __export(route_exports, {
@@ -1432,8 +1615,43 @@ __export(route_exports, {
   snapshotExpression: () => snapshotExpression,
   viewSize: () => viewSize
 });
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, statSync as statSync2, writeFileSync } from "node:fs";
+import {
+  existsSync as existsSync2,
+  mkdirSync as mkdirSync2,
+  readdirSync,
+  statSync as statSync2,
+  writeFileSync
+} from "node:fs";
 import { join } from "node:path";
+function pointFrom(value) {
+  const parts = value.split(",");
+  if (parts.length !== 2)
+    throw new Error(
+      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`
+    );
+  const x = Number(parts[0]);
+  const y = Number(parts[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y))
+    throw new Error(
+      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`
+    );
+  return { x, y };
+}
+function saidOf(result) {
+  const first = result.content[0];
+  return first === void 0 || first.type !== "text" ? "" : first.text;
+}
+function pointList(text) {
+  const found = /* @__PURE__ */ new Set();
+  for (const line of text.split("\n")) {
+    const match = /^\s*(\d{1,3})[.):]\s+\S/.exec(line);
+    if (match !== null) found.add(Number(match[1]));
+  }
+  return [...found].sort((a, b) => a - b);
+}
+function stateText(state) {
+  return state.running ? `${state.url === "" ? "no page yet" : state.url} \u2014 ${state.title === "" ? "untitled" : state.title}` : "the browser is not running";
+}
 function normalizeName(value) {
   return value.replace(/\s+/gu, " ").trim().toLowerCase();
 }
@@ -1443,7 +1661,7 @@ function idleMs(env = process.env) {
   return Math.min(MAX_IDLE_MS, Math.max(MIN_IDLE_MS, Math.floor(raw)));
 }
 function headlessFromEnv(env = process.env) {
-  return env.OXRAIL_BROWSER_HEADLESS !== "0";
+  return env.OXRAIL_BROWSER_HEADLESS === "1";
 }
 function shotClip(view, fullPage) {
   const width = Math.max(1, Math.round(view.width));
@@ -1756,12 +1974,13 @@ function inspectBinary(env = process.env) {
   }
   throw new Error("set OXRAIL_CHROME to a Chrome or Chromium binary path");
 }
-var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, FRAME_BASE, FRAME_SLOT, META_EXPRESSION, CdpBrowserRoute;
+var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, MARKS, FRAME_BASE, FRAME_SLOT, META_EXPRESSION, CdpBrowserRoute;
 var init_route = __esm({
   "packages/browser-control/src/route.ts"() {
     "use strict";
     init_cdp();
     init_chrome();
+    init_png();
     init_types();
     init_read();
     VIEW_WIDTH = 1280;
@@ -1771,6 +1990,7 @@ var init_route = __esm({
     MAX_IDLE_MS = 15 * 6e4;
     MIN_IDLE_MS = 6e4;
     LOAD_TIMEOUT_MS = 2e4;
+    MARKS = ["fixed", "verified", "invalid", "open"];
     FRAME_BASE = 9e5;
     FRAME_SLOT = 1e5;
     META_EXPRESSION = `(() => {
@@ -1806,6 +2026,22 @@ var init_route = __esm({
        * page that has since navigated, is refused instead of landing on whatever
        * now happens to answer to it. */
       handed = null;
+      /* What the page told us since it opened, kept here rather than in the page so
+         a console line that scrolls away is still answerable. Bounded: a page that
+         logs in a loop must not grow this process. */
+      consoleLines = [];
+      failedRequests = [];
+      responses = [];
+      played = [];
+      dialogOpen = null;
+      watching = false;
+      /* A review round is a conversation that repeats, so what was already
+         settled has to survive the round: otherwise the next round raises the
+         same points again and the transcript grows without settling anything. */
+      reviewRounds = 0;
+      settled = /* @__PURE__ */ new Map();
+      handoffAt = 0;
+      lastGrid = null;
       constructor(options) {
         const env = options?.env ?? process.env;
         this.idleWindow = idleMs(env);
@@ -2637,6 +2873,192 @@ var init_route = __esm({
           return base;
         }
       }
+      /* --- the display switch -------------------------------------------
+       *
+       * Whether the window is drawn cannot be changed on a browser that is
+       * already running: the flag is read once, when it is launched. So a
+       * change is carried out by putting the browser down and bringing it back
+       * up in the other mode, on the page it was showing. Reporting the new
+       * mode without doing that would leave the words and the screen
+       * disagreeing, which is worse than the wait.
+       */
+      async mode(options = {}) {
+        const wanted = options.display;
+        if (wanted === void 0) {
+          const shown = !this.headless;
+          return {
+            content: [
+              {
+                type: "text",
+                text: `the window is ${shown ? "shown" : "hidden"} (${this.headless ? "headless" : "visible"})${this.chrome === null ? ", and no browser is running" : ""}
+change it with display: "visible" or "headless"`
+              }
+            ]
+          };
+        }
+        const next = wanted === "headless";
+        const changed = next !== this.headless;
+        this.headless = next;
+        let where = "";
+        if (changed && this.chrome !== null) {
+          try {
+            where = await this.evaluate("location.href");
+          } catch {
+            where = "";
+          }
+          await this.close();
+          if (where !== "" && where !== "about:blank") {
+            await this.open({ url: where });
+            where = ` on ${where}`;
+          } else {
+            where = "";
+          }
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: next ? `the window is hidden now${where}` : `the window is shown now${where}` + (changed ? "" : " (it already was)")
+            }
+          ]
+        };
+      }
+      /* --- the conversation tools ---------------------------------------
+       *
+       * A chat that is open in the page keeps the answer behind a "send" that
+       * is a click and a wait, and the wait has no fixed length: the reply
+       * grows while it is produced. These two do that sequence here so the
+       * caller does not have to guess how long to wait between steps.
+       */
+      async ask(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (options.text === void 0 && options.ref === void 0) {
+            throw new Error("browser_ask needs a ref or the name of the box");
+          }
+          const said = options.said ?? "";
+          if (options.ref === void 0) {
+            await this.click({ text: options.text });
+          } else {
+            await this.focus(options.ref);
+          }
+          await this.type({
+            text: said,
+            clear: true,
+            ...options.submit === false ? {} : { submit: true }
+          });
+          const limit = options.timeoutMs ?? 45e3;
+          const started = Date.now();
+          let previous = "";
+          let steadyFor = 0;
+          let answer = "";
+          while (Date.now() - started < limit) {
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            answer = await this.evaluate(
+              "document.body ? document.body.innerText : ''"
+            );
+            if (answer === previous) {
+              steadyFor += 400;
+              if (steadyFor >= 1600 && answer.trim() !== "") break;
+            } else {
+              steadyFor = 0;
+            }
+            previous = answer;
+          }
+          const waited = Date.now() - started;
+          const body = answer.trim();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${body === "" ? "the page stayed empty" : body}
+
+(reply settled after ${waited} ms; ${limit - waited > 0 ? "it stopped growing" : "it was still growing when the wait ran out"})`
+              }
+            ]
+          };
+        });
+      }
+      /* A review round is the same send-and-wait, with the shapes of a review
+         on top: the message is built from the repository, and what was said is
+         kept so the next round can leave settled points out. */
+      async review(options = {}) {
+        return this.serial(async () => {
+          await this.ensure();
+          const round = this.reviewRounds + 1;
+          const open = this.settled;
+          const body = `Review this repository. Round ${round}.` + (open.size === 0 ? " Nothing has been settled yet, so raise every point you see." : ` Points already settled and to be left out: ${[...open.keys()].sort((a, b) => a - b).join(", ")}.`);
+          const answer = await this.ask({
+            ...options.ref === void 0 ? {} : { ref: options.ref },
+            ...options.text === void 0 ? {} : { text: options.text },
+            said: options.said ?? body,
+            submit: true,
+            ...options.timeoutMs === void 0 ? {} : { timeoutMs: options.timeoutMs }
+          });
+          this.reviewRounds = round;
+          const said = saidOf(answer);
+          const points = pointList(said);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `round ${round}: ${points.length === 0 ? "no numbered points came back" : points.map((point) => `${point}.`).join(" ")}
+
+${said}`
+              }
+            ]
+          };
+        });
+      }
+      reviewVerdict(options = {}) {
+        const marks = options.marks ?? [];
+        if (marks.length === 0) {
+          const known = [...this.settled.entries()].sort((a, b) => a[0] - b[0]);
+          return Promise.resolve({
+            content: [
+              {
+                type: "text",
+                text: known.length === 0 ? "no point has been settled yet" : known.map(([point, mark]) => `${point}: ${mark}`).join("\n")
+              }
+            ]
+          });
+        }
+        for (const mark of marks) {
+          if (!MARKS.includes(mark.verdict)) {
+            throw new Error(
+              `mark ${mark.point}: "${mark.verdict}" is not one of ${MARKS.join(", ")}`
+            );
+          }
+          this.settled.set(mark.point, mark.verdict);
+        }
+        return Promise.resolve({
+          content: [
+            {
+              type: "text",
+              text: marks.map((mark) => `${mark.point}: ${mark.verdict}`).join("\n") + `
+
+${this.settled.size} point${this.settled.size === 1 ? "" : "s"} settled, and left out of the next round`
+            }
+          ]
+        });
+      }
+      async resume() {
+        return this.serial(async () => {
+          await this.ensure();
+          const held = this.handoffAt;
+          this.handoffAt = 0;
+          const state = await this.state();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${held === 0 ? "nothing was holding the page" : "the page is back in hand"}
+${stateText(state)}`
+              }
+            ]
+          };
+        });
+      }
       async login() {
         const dir = profileDir(this.profile);
         const cookies = join(dir, "Default", "Cookies");
@@ -2651,6 +3073,1280 @@ var init_route = __esm({
           saved,
           text: `profile ${this.profile}: ${saved ? "saved sign-ins present" : "no saved sign-ins yet"} (${dir})`
         };
+      }
+      /* ---------------------------------------------------------------------
+       * The tools beyond the first eleven.
+       *
+       * Each one exists because a page cannot answer the question through the
+       * numbered controls alone: a grid for what draws itself, a wait instead of a
+       * read loop, the console for a click that seemed to do nothing. None of them
+       * invents a coordinate — a point still has to come from a read, and the
+       * screenshot tools are the only place pixels are interpreted.
+       * ------------------------------------------------------------------- */
+      /** Watch for the things that are not on the page any more once it redraws. */
+      async startWatching() {
+        if (this.watching || this.cdp === null) return;
+        this.watching = true;
+        const cdp = this.cdp;
+        const { page } = await this.ensure();
+        cdp.on("Runtime.consoleAPICalled", (params) => {
+          const typed = params;
+          const text = (typed.args ?? []).map(
+            (arg) => arg.value !== void 0 ? typeof arg.value === "string" ? arg.value : JSON.stringify(arg.value) : arg.description ?? ""
+          ).join(" ");
+          this.remember(`[${typed.type ?? "log"}] ${text}`);
+        });
+        cdp.on("Runtime.exceptionThrown", (params) => {
+          const typed = params;
+          const detail = typed.exceptionDetails;
+          this.remember(
+            `[error] ${detail?.exception?.description ?? detail?.text ?? "exception"}`
+          );
+        });
+        cdp.on("Network.responseReceived", (params) => {
+          const typed = params;
+          const url = typed.response?.url ?? "";
+          const kind = typed.type ?? "";
+          const status = typed.response?.status ?? 0;
+          const method = "GET";
+          if (url !== "")
+            this.responses.unshift({ url, method, status, type: kind });
+          if (this.responses.length > 400) this.responses.length = 400;
+          if ((kind === "Media" || kind === "XHR" || kind === "Fetch") && url !== "") {
+            const played = this.played.find((item) => item.url === url);
+            if (played === void 0) this.played.unshift({ url, kind, bytes: 0 });
+            if (this.played.length > 200) this.played.length = 200;
+          }
+        });
+        cdp.on("Network.loadingFailed", (params) => {
+          const typed = params;
+          const known = this.responses.find(
+            (item) => item.type === (typed.type ?? "")
+          );
+          this.failedRequests.unshift({
+            url: known?.url ?? "",
+            method: "GET",
+            status: 0,
+            type: typed.type ?? "",
+            error: typed.blockedReason ?? typed.errorText ?? "failed"
+          });
+          if (this.failedRequests.length > 200) this.failedRequests.length = 200;
+        });
+        cdp.on("Page.javascriptDialogOpening", (params) => {
+          const typed = params;
+          this.dialogOpen = {
+            type: typed.type ?? "alert",
+            message: typed.message ?? "",
+            defaultValue: typed.defaultPrompt ?? ""
+          };
+        });
+        cdp.on("Page.javascriptDialogClosed", () => {
+          this.dialogOpen = null;
+        });
+        cdp.on("Page.downloadWillBegin", (params) => {
+          const typed = params;
+          this.remember(
+            `downloaded ${typed.suggestedFilename ?? typed.url ?? "a file"}`
+          );
+        });
+        await cdp.send("Network.enable", {}, page.sessionId);
+        await cdp.send("Page.enable", {}, page.sessionId);
+      }
+      remember(line) {
+        this.consoleLines.push(line);
+        if (this.consoleLines.length > 400)
+          this.consoleLines.splice(0, this.consoleLines.length - 400);
+      }
+      async find(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const asked = options.query.trim();
+          if (asked === "")
+            throw new Error("browser_find needs a query: what should it look for?");
+          const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
+          const raw = await this.evaluate(`(() => {
+  const pattern = ${options.regex === true ? "true" : "false"}
+    ? new RegExp(${JSON.stringify(asked)}, "i")
+    : null;
+  const needle = ${JSON.stringify(asked)}.toLowerCase();
+  const hits = (text) => pattern ? pattern.test(text) : text.toLowerCase().includes(needle);
+  const controls = [];
+  const seen = new Set();
+  for (const el of document.querySelectorAll("a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=tab],[role=checkbox]")) {
+    const box = el.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) continue;
+    const label = (el.innerText || el.value || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\\s+/g, " ");
+    if (label === "" || !hits(label)) continue;
+    const ref = Number(el.getAttribute("data-oxrail-ref"));
+    if (!Number.isFinite(ref)) continue;
+    const onScreen = box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth;
+    controls.push({ ref, role: el.getAttribute("role") || el.tagName.toLowerCase(), name: label.slice(0, 160), onScreen });
+    if (controls.length >= ${limit}) break;
+  }
+  const lines = [];
+  const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node && lines.length < ${limit}; node = walker.nextNode()) {
+    const text = (node.nodeValue || "").trim().replace(/\\s+/g, " ");
+    if (text.length < 3 || !hits(text)) continue;
+    const holder = node.parentElement;
+    if (!holder) continue;
+    const box = holder.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) continue;
+    const key = Math.round(box.left) + ":" + Math.round(box.top);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push({
+      text: text.slice(0, 200),
+      x: Math.round(box.left + box.width / 2),
+      y: Math.round(box.top + box.height / 2),
+      onScreen: box.bottom > 0 && box.top < innerHeight,
+    });
+  }
+  return JSON.stringify({ controls, lines });
+})()`);
+          const found = JSON.parse(raw);
+          this.touch();
+          const rows = [];
+          for (const control of found.controls)
+            rows.push(
+              `[${control.ref}] ${control.role} ${JSON.stringify(control.name)}${control.onScreen ? "" : " (off screen)"}`
+            );
+          for (const line of found.lines)
+            rows.push(
+              `${JSON.stringify(line.text)} at ${line.x},${line.y}${line.onScreen ? "" : " (off screen)"}`
+            );
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length === 0 ? `(nothing on this page matches ${JSON.stringify(asked)})` : rows.join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async extract(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const select = options.select.trim();
+          if (select === "")
+            throw new Error(
+              "browser_extract needs a selector: what should each row be?"
+            );
+          const limit = Math.max(1, Math.min(options.limit ?? 60, 400));
+          const raw = await this.evaluate(`(() => {
+  const scope = ${options.ref === void 0 ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  let nodes;
+  try { nodes = Array.from(scope.querySelectorAll(${JSON.stringify(select)})); }
+  catch (error) { return JSON.stringify({ error: String(error && error.message ? error.message : error) }); }
+  const rows = [];
+  for (const node of nodes.slice(0, ${limit})) {
+    const text = (node.innerText || node.textContent || "").trim().replace(/\\s+/g, " ");
+    const link = node.querySelector ? node.querySelector("a[href]") : null;
+    const own = node.tagName === "A" && node.getAttribute("href") ? node.href : null;
+    rows.push({ text: text.slice(0, 300), href: (link ? link.href : own) || null });
+  }
+  return JSON.stringify({ rows, total: nodes.length });
+})()`);
+          const page = JSON.parse(raw);
+          this.touch();
+          if (page.error !== void 0)
+            throw new Error(`that selector is not valid: ${page.error}`);
+          const rows = page.rows ?? [];
+          const total = page.total ?? 0;
+          const body = rows.length === 0 ? `(nothing on this page matches ${JSON.stringify(select)})` : rows.map(
+            (row) => row.href === null || row.href === "" ? row.text : `${row.text} -> ${row.href}`
+          ).join("\n");
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length < total ? `${body}
+\u2026 ${total - rows.length} more not shown` : body
+              }
+            ]
+          };
+        });
+      }
+      async look(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const { cdp, page } = await this.ensure();
+          const view = await this.evaluate(
+            "({ width: innerWidth, height: innerHeight })"
+          );
+          let clip = { x: 0, y: 0, width: view.width, height: view.height };
+          const region = (options.region ?? "").trim();
+          if (region !== "") {
+            const parts = region.split(",").map((part) => Number(part.trim()));
+            if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value)))
+              throw new Error(
+                `region must be "x,y,width,height" in pixels; got ${JSON.stringify(region)}`
+              );
+            const [x, y, width, height] = parts;
+            clip = { x, y, width, height };
+          }
+          const cols = Math.max(2, Math.min(options.cols ?? 12, 64));
+          const rows = Math.max(2, Math.min(options.cols ?? 12, 64));
+          const shot = await cdp.send(
+            "Page.captureScreenshot",
+            { format: "png", clip, captureBeyondViewport: false },
+            page.sessionId
+          );
+          this.touch();
+          const bitmap = decodePng(Buffer.from(shot.data, "base64"));
+          const grid = toGrid(bitmap, cols, rows);
+          const key = `${clip.x},${clip.y},${clip.width},${clip.height}`;
+          const previous = this.lastGrid?.key === key ? this.lastGrid : null;
+          this.lastGrid = { key, rows: grid };
+          if (options.diff === false || previous === null) {
+            const glyphs = grid.map((row) => row.join("")).join("\n");
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `grid ${cols}x${rows} of ${clip.width}x${clip.height} at ${clip.x},${clip.y}
+${glyphs}`
+                }
+              ]
+            };
+          }
+          const changed = [];
+          for (let row = 0; row < grid.length; row += 1) {
+            const now = grid[row] ?? [];
+            const before = previous.rows[row] ?? [];
+            for (let column = 0; column < now.length; column += 1)
+              if (now[column] !== before[column])
+                changed.push(
+                  `${row},${column}: ${before[column] ?? "."} -> ${now[column] ?? "."}`
+                );
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: changed.length === 0 ? "no change since the last look" : `${changed.length} cells changed
+${changed.join("\n")}`
+              }
+            ]
+          };
+        });
+      }
+      async wait(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const budget = Math.max(
+            50,
+            Math.min(options.timeoutMs ?? 8e3, 12e4)
+          );
+          const started = Date.now();
+          const expression = `(() => {
+  const text = document.body ? document.body.innerText : "";
+  return { text, url: location.href };
+})()`;
+          const wanted = (options.text ?? "").trim();
+          const gone = (options.gone ?? "").trim();
+          const url = (options.url ?? "").trim();
+          if (wanted === "" && gone === "" && url === "" && options.quiet !== true)
+            throw new Error(
+              "browser_wait needs something to wait for: text, gone, url, or quiet"
+            );
+          let last = "";
+          while (Date.now() - started < budget) {
+            const now = await this.evaluate(
+              expression
+            );
+            const hitText = wanted === "" ? true : now.text.toLowerCase().includes(wanted.toLowerCase());
+            const hitGone = gone === "" ? true : !now.text.toLowerCase().includes(gone.toLowerCase());
+            const hitUrl = url === "" ? true : now.url.includes(url);
+            if (hitText && hitGone && hitUrl) {
+              this.touch();
+              const waited = Date.now() - started;
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: options.quiet === true && wanted === "" && gone === "" && url === "" ? `the page is quiet (${waited} ms)` : `reached after ${waited} ms`
+                  }
+                ]
+              };
+            }
+            if (options.quiet === true && now.text === last && Date.now() - started > 500) {
+              const still = await this.evaluate(
+                expression
+              );
+              if (still.text === now.text) {
+                this.touch();
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `the page stopped changing after ${Date.now() - started} ms`
+                    }
+                  ]
+                };
+              }
+            }
+            last = now.text;
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+          const current = await this.evaluate(
+            expression
+          );
+          const said = wanted !== "" ? `${JSON.stringify(wanted)} had not appeared` : gone !== "" ? `${JSON.stringify(gone)} was still showing` : url !== "" ? `the address did not reach ${url}` : "the page did not go quiet";
+          throw new Error(
+            `waited ${budget} ms and ${said}; the page is at ${current.url} and says ${JSON.stringify(current.text.slice(0, 200))}`
+          );
+        });
+      }
+      async scroll(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const dy = options.dy ?? 0;
+          const dx = options.dx ?? 0;
+          if (dy === 0 && dx === 0)
+            throw new Error("browser_scroll needs a dy (negative goes up)");
+          const { cdp, page } = await this.ensure();
+          const view = await this.evaluate(
+            "({ x: innerWidth / 2, y: innerHeight / 2 })"
+          );
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mouseWheel",
+              x: Math.round(view.x),
+              y: Math.round(view.y),
+              deltaX: dx,
+              deltaY: dy,
+              button: "none",
+              modifiers: 0
+            },
+            page.sessionId
+          );
+          this.touch();
+          await this.waitIdle();
+          if (options.read === false)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `scrolled ${dy === 0 ? "" : `${dy > 0 ? "down" : "up"} ${Math.abs(dy)}`}${dx === 0 ? "" : `${dx > 0 ? " right" : " left"} ${Math.abs(dx)}`}`.trim()
+                }
+              ]
+            };
+          const snapshot = await this.read({ maxChars: 2e3 });
+          return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+        });
+      }
+      async hover(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (options.ref !== void 0) this.addressable(options.ref);
+          const point = await this.locate({
+            ...options.ref !== void 0 ? { ref: options.ref } : {},
+            ...options.text !== void 0 ? { text: options.text } : {}
+          });
+          const { cdp, page } = await this.ensure();
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mouseMoved",
+              x: Math.round(point.x),
+              y: Math.round(point.y),
+              buttons: 0,
+              modifiers: 0
+            },
+            page.sessionId
+          );
+          this.touch();
+          await this.waitIdle();
+          if (options.read === false)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `pointed at ${point.label === "" ? `${point.x},${point.y}` : JSON.stringify(point.label)}`
+                }
+              ]
+            };
+          const snapshot = await this.read({ maxChars: 2e3 });
+          return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+        });
+      }
+      async check(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          this.addressable(options.ref);
+          const state = await this.evaluate(`(() => {
+  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  if (!el) return { found: false, checked: false, kind: "gone" };
+  const kind = el.tagName === "INPUT" ? (el.type || "checkbox") : (el.getAttribute("role") || el.tagName.toLowerCase());
+  return { found: true, checked: el.checked === true || el.getAttribute("aria-checked") === "true", kind };
+})()`);
+          if (!state.found)
+            throw new StaleRefError(
+              `the page changed; control ${options.ref} is gone \u2014 call browser_view again`
+            );
+          if (options.checked === void 0) {
+            this.touch();
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `control ${options.ref} (${state.kind}) is ${state.checked ? "checked" : "not checked"}`
+                }
+              ]
+            };
+          }
+          if (state.checked !== options.checked) {
+            const point = await this.locate({ ref: options.ref });
+            await this.mouseClick(point.x, point.y);
+          }
+          const after = await this.evaluate(`(() => {
+  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  return { checked: el ? el.checked === true || el.getAttribute("aria-checked") === "true" : false };
+})()`);
+          this.touch();
+          await this.waitIdle();
+          const took = after.checked === options.checked;
+          const said = took ? `control ${options.ref} is now ${options.checked ? "checked" : "not checked"}` : `control ${options.ref} did not take the change: it is ${after.checked ? "checked" : "not checked"}`;
+          if (options.read === false)
+            return {
+              content: [{ type: "text", text: said }],
+              ...took ? {} : { isError: true }
+            };
+          const snapshot = await this.read({ maxChars: 1500 });
+          return {
+            content: [
+              { type: "text", text: said },
+              { type: "text", text: formatSnapshot(snapshot) }
+            ],
+            ...took ? {} : { isError: true }
+          };
+        });
+      }
+      async select(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (options.ref !== void 0) this.addressable(options.ref);
+          const value = options.value;
+          const outcome = await this.evaluate(`(() => {
+  let el = null;
+  if (${options.ref === void 0 ? "false" : "true"}) el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  if (!el && ${JSON.stringify(options.field ?? "")} !== "") {
+    const needle = ${JSON.stringify(options.field ?? "")}.toLowerCase();
+    for (const node of document.querySelectorAll("select,[role=combobox],[role=listbox]")) {
+      const label = (node.getAttribute("aria-label") || node.name || node.id || "").toLowerCase();
+      if (label.includes(needle)) { el = node; break; }
+    }
+  }
+  if (!el) return JSON.stringify({ error: "no dropdown matched" });
+  if (el.tagName === "SELECT") {
+    const wanted = ${JSON.stringify(value)};
+    const option = Array.from(el.options).find((o) => o.value === wanted || (o.textContent || "").trim() === wanted);
+    if (!option) return JSON.stringify({ error: "no option matched", options: Array.from(el.options).map((o) => (o.textContent || "").trim()).slice(0, 20) });
+    el.value = option.value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return JSON.stringify({ ok: true, value: option.value });
+  }
+  el.setAttribute("data-oxrail-select", "1");
+  return JSON.stringify({ ok: true, custom: true });
+})()`);
+          const parsed = JSON.parse(outcome);
+          this.touch();
+          if (parsed.error !== void 0) {
+            const known = parsed.options === void 0 || parsed.options.length === 0 ? "" : `; it offers ${parsed.options.map((item) => JSON.stringify(item)).join(", ")}`;
+            throw new Error(`${parsed.error}${known}`);
+          }
+          if (parsed.custom === true) {
+            const point = await this.locate({
+              ...options.ref !== void 0 ? { ref: options.ref } : {},
+              ...options.field !== void 0 ? { text: options.field } : {}
+            });
+            await this.mouseClick(point.x, point.y);
+            await this.waitIdle();
+            const picked = await this.locate({ text: value });
+            await this.mouseClick(picked.x, picked.y);
+            this.touch();
+            await this.waitIdle();
+          } else await this.waitIdle();
+          if (options.read === false)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `chose ${JSON.stringify(value)}${parsed.value === void 0 ? "" : ` (value ${JSON.stringify(parsed.value)})`}`
+                }
+              ]
+            };
+          const snapshot = await this.read({ maxChars: 1500 });
+          return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+        });
+      }
+      async drag(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (options.fromRef !== void 0) this.addressable(options.fromRef);
+          if (options.toRef !== void 0) this.addressable(options.toRef);
+          const from = await this.locate({
+            ...options.fromRef !== void 0 ? { ref: options.fromRef } : {},
+            ...options.fromPoint !== void 0 ? { text: "" } : {}
+          });
+          const start = options.fromPoint !== void 0 ? pointFrom(options.fromPoint) : { x: from.x, y: from.y };
+          let end;
+          if (options.toPoint !== void 0) end = pointFrom(options.toPoint);
+          else {
+            const to = await this.locate({
+              ...options.toRef !== void 0 ? { ref: options.toRef } : {}
+            });
+            end = { x: to.x, y: to.y };
+          }
+          const { cdp, page } = await this.ensure();
+          const base = { button: "left", clickCount: 1, modifiers: 0 };
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mouseMoved",
+              x: Math.round(start.x),
+              y: Math.round(start.y),
+              buttons: 0,
+              modifiers: 0
+            },
+            page.sessionId
+          );
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mousePressed",
+              x: Math.round(start.x),
+              y: Math.round(start.y),
+              ...base,
+              buttons: 1
+            },
+            page.sessionId
+          );
+          const steps = 12;
+          for (let step = 1; step <= steps; step += 1) {
+            const x = start.x + (end.x - start.x) * step / steps;
+            const y = start.y + (end.y - start.y) * step / steps;
+            await cdp.send(
+              "Input.dispatchMouseEvent",
+              {
+                type: "mouseMoved",
+                x: Math.round(x),
+                y: Math.round(y),
+                ...base,
+                buttons: 1
+              },
+              page.sessionId
+            );
+            await new Promise((resolve) => setTimeout(resolve, 16));
+          }
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+              type: "mouseReleased",
+              x: Math.round(end.x),
+              y: Math.round(end.y),
+              ...base,
+              buttons: 0
+            },
+            page.sessionId
+          );
+          this.touch();
+          await this.waitIdle();
+          if (options.read === false)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `dragged ${Math.round(start.x)},${Math.round(start.y)} to ${Math.round(end.x)},${Math.round(end.y)}`
+                }
+              ]
+            };
+          const snapshot = await this.read({ maxChars: 1500 });
+          return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+        });
+      }
+      async upload(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (options.ref !== void 0) this.addressable(options.ref);
+          if (options.files.length === 0)
+            throw new Error("browser_upload needs at least one absolute file path");
+          for (const file of options.files)
+            if (!file.startsWith("/"))
+              throw new Error(
+                `browser_upload takes absolute paths; ${JSON.stringify(file)} is not one`
+              );
+          const { cdp, page } = await this.ensure();
+          let nodeId = null;
+          if (options.ref !== void 0) {
+            const handle = await cdp.send(
+              "Runtime.evaluate",
+              {
+                expression: `document.querySelector('[data-oxrail-ref="${options.ref}"]')`
+              },
+              page.sessionId
+            );
+            const described = await cdp.send(
+              "DOM.describeNode",
+              { objectId: handle.object.objectId },
+              page.sessionId
+            );
+            nodeId = described.node.backendNodeId;
+          }
+          if (nodeId === null) {
+            const doc = await cdp.send(
+              "DOM.getDocument",
+              { depth: -1 },
+              page.sessionId
+            );
+            const queried = await cdp.send(
+              "DOM.querySelector",
+              { nodeId: doc.root.nodeId, selector: 'input[type="file"]' },
+              page.sessionId
+            );
+            if (queried.nodeId === 0)
+              throw new Error(
+                "this page has no file input; pass a ref if the input is inside a frame"
+              );
+            nodeId = queried.nodeId;
+          }
+          await cdp.send(
+            "DOM.setFileInputFiles",
+            {
+              files: [...options.files],
+              ...nodeId === null ? {} : { backendNodeId: nodeId }
+            },
+            page.sessionId
+          );
+          this.touch();
+          await this.waitIdle();
+          if (options.read === false)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `put ${options.files.length} file${options.files.length === 1 ? "" : "s"} into the input`
+                }
+              ]
+            };
+          const snapshot = await this.read({ maxChars: 1500 });
+          return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
+        });
+      }
+      async grab(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const found = await this.evaluate(`(() => {
+  const scope = ${options.ref === void 0 ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  const images = [];
+  for (const node of scope.querySelectorAll("img,canvas,svg,video")) {
+    const box = node.getBoundingClientRect();
+    if (box.width < 8 || box.height < 8) continue;
+    const src = node.currentSrc || node.src || (node.tagName === "CANVAS" ? "canvas" : "");
+    images.push({ tag: node.tagName.toLowerCase(), src: src || "", width: Math.round(box.width), height: Math.round(box.height), area: Math.round(box.width * box.height) });
+  }
+  if (images.length === 0 && scope !== document) {
+    const box = scope.getBoundingClientRect();
+    images.push({ tag: "element", src: "", width: Math.round(box.width), height: Math.round(box.height), area: Math.round(box.width * box.height) });
+  }
+  images.sort((a, b) => b.area - a.area);
+  return JSON.stringify(images.slice(0, Math.max(1, ${Math.max(1, Math.min(options.count ?? 1, 20))})));
+})()`);
+          const candidates = JSON.parse(found);
+          this.touch();
+          if (candidates.length === 0)
+            throw new Error("this page is not showing a picture to save");
+          const dir = join(stateDir(), "images");
+          mkdirSync2(dir, { recursive: true });
+          const saved = [];
+          let index = 0;
+          for (const candidate of candidates) {
+            index += 1;
+            const stamp = `${options.name ?? "image"}-${Date.now()}-${index}`;
+            if (candidate.src === "" || candidate.src === "canvas") {
+              const { cdp, page } = await this.ensure();
+              const shot = await cdp.send(
+                "Page.captureScreenshot",
+                { format: "png", captureBeyondViewport: false },
+                page.sessionId
+              );
+              const path3 = join(dir, `${stamp}.png`);
+              writeFileSync(path3, Buffer.from(shot.data, "base64"));
+              saved.push(
+                `${path3} (from the screen, ${candidate.width}x${candidate.height})`
+              );
+              continue;
+            }
+            if (candidate.src.startsWith("data:")) {
+              const comma = candidate.src.indexOf(",");
+              const header = candidate.src.slice(5, comma);
+              const body = candidate.src.slice(comma + 1);
+              const binary = header.includes("base64") ? body : Buffer.from(decodeURIComponent(body)).toString("base64");
+              const path3 = join(dir, `${stamp}.png`);
+              writeFileSync(path3, Buffer.from(binary, "base64"));
+              saved.push(
+                `${path3} (inline, ${candidate.width}x${candidate.height})`
+              );
+              continue;
+            }
+            const fetched = await this.evaluate(`(async () => {
+  try {
+    const reply = await fetch(${JSON.stringify(candidate.src)});
+    const buffer = await reply.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+    return btoa(binary);
+  } catch (error) { return "ERROR " + String(error && error.message ? error.message : error); }
+})()`);
+            if (fetched.startsWith("ERROR ")) {
+              saved.push(
+                `${candidate.src} \u2014 could not be read: ${fetched.slice(6)}`
+              );
+              continue;
+            }
+            const path2 = join(dir, `${stamp}.png`);
+            writeFileSync(path2, Buffer.from(fetched, "base64"));
+            saved.push(`${path2} (${candidate.width}x${candidate.height})`);
+          }
+          return { content: [{ type: "text", text: saved.join("\n") }] };
+        });
+      }
+      async evaluatePage(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const code = options.code.trim();
+          if (code === "") throw new Error("browser_eval needs code to run");
+          const { cdp, page } = await this.ensure();
+          const reply = await cdp.send(
+            "Runtime.evaluate",
+            {
+              expression: options.awaitPromise === false ? code : `(async () => (${code}))()`,
+              returnByValue: true,
+              awaitPromise: options.awaitPromise !== false,
+              userGesture: true
+            },
+            page.sessionId
+          );
+          this.touch();
+          if (reply.exceptionDetails !== void 0) {
+            const detail = reply.exceptionDetails;
+            throw new Error(
+              detail.exception?.description ?? detail.text ?? "the page threw"
+            );
+          }
+          const value = reply.result?.value;
+          const text = value === void 0 ? reply.result?.description ?? "undefined" : typeof value === "string" ? value : JSON.stringify(value, null, 2);
+          return { content: [{ type: "text", text }] };
+        });
+      }
+      async run(steps) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (steps.length === 0)
+            throw new Error("browser_do needs at least one step");
+          const done = [];
+          for (let index = 0; index < steps.length; index += 1) {
+            const step = steps[index];
+            const at = `step ${index + 1}`;
+            try {
+              if (step.waitText !== void 0) {
+                await this.awaitText(step.waitText, true);
+                done.push(`${at}: saw ${JSON.stringify(step.waitText)}`);
+                continue;
+              }
+              if (step.waitGone !== void 0) {
+                await this.awaitText(step.waitGone, false);
+                done.push(`${at}: ${JSON.stringify(step.waitGone)} went away`);
+                continue;
+              }
+              if (step.waitUrl !== void 0) {
+                await this.awaitUrl(step.waitUrl);
+                done.push(`${at}: reached ${step.waitUrl}`);
+                continue;
+              }
+              if (step.scroll !== void 0) {
+                await this.scroll({ dy: step.scroll, read: false });
+                done.push(`${at}: scrolled ${step.scroll}`);
+                continue;
+              }
+              if (step.key !== void 0) {
+                await this.key(step.key);
+                done.push(`${at}: pressed ${step.key}`);
+                continue;
+              }
+              if (step.field !== void 0 && step.text !== void 0) {
+                const point = await this.locate({ text: step.field });
+                await this.mouseClick(point.x, point.y);
+                await this.type({
+                  text: step.text,
+                  clear: true,
+                  ...step.submit === true ? { submit: true } : {}
+                });
+                done.push(`${at}: typed into ${JSON.stringify(step.field)}`);
+                continue;
+              }
+              if (step.tap !== void 0) {
+                const split = step.tap.split(",");
+                if (split.length === 2 && split.every((part) => Number.isFinite(Number(part)))) {
+                  await this.mouseClick(Number(split[0]), Number(split[1]));
+                  done.push(`${at}: tapped ${step.tap}`);
+                } else {
+                  const point = await this.locate({ text: step.tap });
+                  await this.mouseClick(point.x, point.y);
+                  done.push(`${at}: tapped ${JSON.stringify(step.tap)}`);
+                }
+                continue;
+              }
+              if (step.ref !== void 0) {
+                this.addressable(step.ref);
+                const point = await this.locate({ ref: step.ref });
+                await this.mouseClick(point.x, point.y);
+                done.push(`${at}: tapped control ${step.ref}`);
+                continue;
+              }
+              if (step.text !== void 0) {
+                await this.type({
+                  text: step.text,
+                  ...step.submit === true ? { submit: true } : {}
+                });
+                done.push(`${at}: typed ${step.text.length} characters`);
+                continue;
+              }
+              throw new Error(
+                "a step needs one of: ref, tap, field+text, text, key, scroll, wait_text, wait_gone, wait_url"
+              );
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              throw new Error(
+                `${at} could not proceed: ${reason}${done.length === 0 ? "" : ` (after ${done.join("; ")})`}`
+              );
+            }
+          }
+          this.touch();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${done.length} step${done.length === 1 ? "" : "s"} done
+${done.join("\n")}`
+              }
+            ]
+          };
+        });
+      }
+      async awaitText(needle, present) {
+        const started = Date.now();
+        while (Date.now() - started < 8e3) {
+          const text = await this.evaluate(
+            "document.body ? document.body.innerText : ''"
+          );
+          const there = text.toLowerCase().includes(needle.toLowerCase());
+          if (there === present) return;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        throw new Error(
+          `${JSON.stringify(needle)} ${present ? "never appeared" : "never went away"} within 8000 ms`
+        );
+      }
+      async awaitUrl(part) {
+        const started = Date.now();
+        while (Date.now() - started < 8e3) {
+          const url = await this.evaluate("location.href");
+          if (url.includes(part)) return;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        throw new Error(`the address never reached ${part} within 8000 ms`);
+      }
+      async dialog(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const open = this.dialogOpen;
+          if (open === null) {
+            this.touch();
+            return {
+              content: [{ type: "text", text: "no dialog is open" }]
+            };
+          }
+          if (options.accept === void 0 && options.text === void 0) {
+            this.touch();
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `${open.type}: ${JSON.stringify(open.message)}${open.defaultValue === "" ? "" : ` (default ${JSON.stringify(open.defaultValue)})`}`
+                }
+              ]
+            };
+          }
+          const { cdp, page } = await this.ensure();
+          await cdp.send(
+            "Page.handleJavaScriptDialog",
+            {
+              accept: options.accept !== false,
+              ...options.text === void 0 ? {} : { promptText: options.text }
+            },
+            page.sessionId
+          );
+          this.dialogOpen = null;
+          this.touch();
+          return {
+            content: [
+              {
+                type: "text",
+                text: options.accept === false ? "dismissed the dialog" : "accepted the dialog"
+              }
+            ]
+          };
+        });
+      }
+      async cookie(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const { cdp, page } = await this.ensure();
+          if (options.clear === true) {
+            await cdp.send("Network.clearBrowserCookies", {}, page.sessionId);
+            this.touch();
+            return {
+              content: [{ type: "text", text: "cleared the browser's cookies" }]
+            };
+          }
+          if (options.set !== void 0 && options.set !== "") {
+            const url2 = options.url ?? await this.evaluate("location.href");
+            for (const pair of options.set.split(";")) {
+              const cut = pair.indexOf("=");
+              if (cut <= 0) continue;
+              const name = pair.slice(0, cut).trim();
+              const value = pair.slice(cut + 1).trim();
+              if (name === "") continue;
+              const sent = await cdp.send(
+                "Network.setCookie",
+                {
+                  name,
+                  value,
+                  ...options.domain === void 0 ? { url: url2 } : { domain: options.domain }
+                },
+                page.sessionId
+              );
+              if (sent.success === false)
+                throw new Error(`the browser refused the cookie ${name}`);
+            }
+            this.touch();
+            return {
+              content: [{ type: "text", text: `set ${options.set}` }]
+            };
+          }
+          const url = options.url;
+          const listed = await cdp.send(
+            "Network.getCookies",
+            url === void 0 || url === "" ? {} : { urls: [url] },
+            page.sessionId
+          );
+          this.touch();
+          if (listed.cookies.length === 0)
+            return {
+              content: {
+                type: "text",
+                text: "(this browser is keeping no cookies for that address)"
+              }
+            };
+          const rows = listed.cookies.map(
+            (item) => `${item.name}=${item.value} \u2014 ${item.domain}${item.path}${item.httpOnly ? " httpOnly" : ""}${item.secure ? " secure" : ""}${item.expires > 0 ? ` until ${new Date(item.expires * 1e3).toISOString()}` : ""}`
+          );
+          return { content: [{ type: "text", text: rows.join("\n") }] };
+        });
+      }
+      async clipboard(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          if (options.set !== void 0) {
+            const wrote = await this.evaluate(`(async () => {
+  try { await navigator.clipboard.writeText(${JSON.stringify(options.set)}); return true; }
+  catch (error) { return false; }
+})()`);
+            this.touch();
+            if (!wrote) throw new Error("the page refused the clipboard write");
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `put ${options.set.length} characters on the clipboard; send a key to paste`
+                }
+              ]
+            };
+          }
+          const read = await this.evaluate(`(async () => {
+  try { return await navigator.clipboard.readText(); }
+  catch (error) { return "ERROR " + String(error && error.message ? error.message : error); }
+})()`);
+          this.touch();
+          if (read.startsWith("ERROR "))
+            throw new Error(
+              `the page would not hand over the clipboard: ${read.slice(6)}`
+            );
+          return { content: [{ type: "text", text: read }] };
+        });
+      }
+      async console(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const limit = Math.max(1, Math.min(options.limit ?? 50, 400));
+          this.touch();
+          const lines = this.consoleLines.slice(-limit);
+          return {
+            content: [
+              {
+                type: "text",
+                text: lines.length === 0 ? "(this page has produced no console output since it opened)" : lines.join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async network(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
+          const filter = (options.filter ?? "").toLowerCase();
+          this.touch();
+          const rows = this.responses.filter(
+            (item) => filter === "" || item.url.toLowerCase().includes(filter)
+          ).slice(0, limit);
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length === 0 ? filter === "" ? "(this page has received no responses since it opened)" : `(no response matches ${JSON.stringify(filter)})` : rows.map(
+                  (item) => `${item.method} ${item.status === 0 ? "\u2014" : String(item.status)} ${item.type} ${squashUrl(item.url)}`
+                ).join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async failed(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
+          this.touch();
+          const rows = this.failedRequests.slice(0, limit);
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length === 0 ? "(nothing this page asked for has failed since it opened)" : rows.map(
+                  (item) => `${item.type} ${item.error} ${item.url === "" ? "(address unknown)" : squashUrl(item.url)}`
+                ).join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async tabs(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          const { cdp, page } = await this.ensure();
+          const listed = await cdp.send("Target.getTargets");
+          const pages = listed.targetInfos.filter((info) => info.type === "page");
+          const action = options.action ?? "list";
+          if (action === "switch" || action === "close") {
+            const index = options.index ?? 0;
+            const target = pages[index];
+            if (target === void 0)
+              throw new Error(
+                `there ${pages.length === 1 ? "is" : "are"} ${pages.length} page${pages.length === 1 ? "" : "s"}; ${index} is not one of them`
+              );
+            if (action === "close") {
+              await cdp.send("Target.closeTarget", { targetId: target.targetId });
+              this.touch();
+              return {
+                content: [
+                  { type: "text", text: `closed ${target.title || target.url}` }
+                ]
+              };
+            }
+            const attached = await cdp.send(
+              "Target.attachToTarget",
+              { targetId: target.targetId, flatten: true },
+              void 0
+            );
+            this.page = {
+              sessionId: attached.sessionId,
+              targetId: target.targetId
+            };
+            await cdp.send("Page.enable", {}, attached.sessionId);
+            await cdp.send("Runtime.enable", {}, attached.sessionId);
+            this.watching = false;
+            await this.startWatching();
+            this.touch();
+            return {
+              content: [
+                { type: "text", text: `switched to ${target.title || target.url}` }
+              ]
+            };
+          }
+          this.touch();
+          const rows = pages.map(
+            (info, index) => `${index === 0 ? "" : " "}[${index}] ${info.title === "" ? "(untitled)" : info.title} \u2014 ${squashUrl(info.url)}${info.targetId === page.targetId ? " (this one)" : ""}`
+          );
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length === 0 ? "(no pages are open)" : rows.join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async downloads() {
+        return this.serial(async () => {
+          await this.ensure();
+          const dir = profileDir(this.profile);
+          const rows = [];
+          const candidates = [
+            join(dir, "Downloads"),
+            join(stateDir(), "downloads")
+          ];
+          for (const where of candidates) {
+            if (!existsSync2(where)) continue;
+            for (const entry2 of readdirSync(where)) {
+              const path2 = join(where, entry2);
+              const stat = statSync2(path2);
+              if (!stat.isFile()) continue;
+              rows.push(
+                `${entry2} \u2014 ${stat.size} bytes, ${new Date(stat.mtimeMs).toISOString()}`
+              );
+            }
+          }
+          this.touch();
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length === 0 ? "(this profile has downloaded nothing)" : rows.join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async media(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const items = this.played.filter(
+            (item) => options.all === true || item.kind === "Media"
+          );
+          this.touch();
+          if (options.save !== void 0 && options.save !== "") {
+            const wanted = options.save;
+            const picked = wanted === "main" ? items[0] : /^\d+$/.test(wanted) ? items[Number(wanted)] : items.find((item) => item.url.includes(wanted));
+            if (picked === void 0)
+              throw new Error(
+                `nothing this page played matches ${JSON.stringify(wanted)}`
+              );
+            const dir = join(stateDir(), "media");
+            mkdirSync2(dir, { recursive: true });
+            const name = picked.url.split("/").pop() ?? "media";
+            const path2 = join(
+              dir,
+              `${Date.now()}-${name.replace(/[^\w.-]/g, "_")}`
+            );
+            const fetched = await this.evaluate(`(async () => {
+  const reply = await fetch(${JSON.stringify(picked.url)});
+  const buffer = await reply.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  return btoa(binary);
+})()`);
+            writeFileSync(path2, Buffer.from(fetched, "base64"));
+            return {
+              content: [{ type: "text", text: `${path2} (${picked.url})` }]
+            };
+          }
+          const rows = items.map(
+            (item, index) => `${index}. ${item.kind} ${squashUrl(item.url)}`
+          );
+          return {
+            content: [
+              {
+                type: "text",
+                text: rows.length === 0 ? "(this page has not asked for any media since it opened)" : rows.join("\n")
+              }
+            ]
+          };
+        });
+      }
+      async pdf() {
+        return this.serial(async () => {
+          await this.ensure();
+          const { cdp, page } = await this.ensure();
+          const printed = await cdp.send(
+            "Page.printToPDF",
+            { printBackground: true },
+            page.sessionId
+          );
+          const dir = join(stateDir(), "pdf");
+          mkdirSync2(dir, { recursive: true });
+          const path2 = join(dir, `page-${Date.now()}.pdf`);
+          writeFileSync(path2, Buffer.from(printed.data, "base64"));
+          this.touch();
+          return { content: [{ type: "text", text: path2 }] };
+        });
+      }
+      async prepare(options) {
+        return this.serial(async () => {
+          await this.ensure();
+          await this.startWatching();
+          const seconds = Math.max(1, Math.min(options.seconds ?? 2, 30));
+          if (options.focus !== false) {
+            await this.evaluate(`(() => {
+  const el = document.querySelector("canvas,video,embed,object,[tabindex]") || document.body;
+  if (el && typeof el.focus === "function") el.focus();
+  if (el) el.click && el.click();
+  return true;
+})()`);
+          }
+          const frames = await this.evaluate(`(async () => {
+  let count = 0;
+  const until = performance.now() + ${seconds * 1e3};
+  await new Promise((resolve) => {
+    const tick = () => { count += 1; if (performance.now() >= until) resolve(null); else requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    setTimeout(resolve, ${seconds * 1e3 + 500});
+  });
+  return count;
+})()`);
+          const surface = await this.evaluate(`(() => {
+  const found = [];
+  for (const node of document.querySelectorAll("canvas,embed,object,video,[tabindex]")) {
+    const box = node.getBoundingClientRect();
+    if (box.width < 40 || box.height < 40) continue;
+    found.push({ tag: node.tagName.toLowerCase(), width: Math.round(box.width), height: Math.round(box.height) });
+  }
+  const flash = document.querySelector("object[type*='flash'],embed[type*='flash']");
+  return JSON.stringify({ surfaces: found.slice(0, 6), flash: flash !== null });
+})()`);
+          const state = JSON.parse(surface);
+          const fps = Math.round(frames / seconds * 10) / 10;
+          this.touch();
+          const lines = [
+            `frame rate ${fps}/s over ${seconds}s`,
+            state.surfaces.length === 0 ? "no input surface larger than 40px was found" : `input surfaces: ${state.surfaces.map((item) => `${item.tag} ${item.width}x${item.height}`).join(", ")}`,
+            state.flash ? "this page embeds a Flash player, which this browser cannot render" : "no Flash player is embedded"
+          ];
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        });
       }
       async close() {
         if (this.restTimer !== null) clearTimeout(this.restTimer);
@@ -2691,8 +4387,8 @@ var TOOLS = [
       },
       headless: {
         kind: "boolean",
-        description: "Run without a visible window. Defaults to true.",
-        extras: { default: true }
+        description: "Hide the window. Defaults to false: the browser is visible unless this call says otherwise.",
+        extras: { default: false }
       },
       profile: {
         kind: "string",
@@ -2941,6 +4637,789 @@ var TOOLS = [
     }
   },
   {
+    name: "browser_find",
+    title: "Search the page",
+    description: 'Search the controls and the words on the page and get back only the hits, each with the number a click takes. Use it when the page is too long to read: browser_view answers "what is here", this answers "where is this". Matches a lowercased substring unless regex is true; limit caps the rows.',
+    properties: {
+      query: {
+        kind: "string",
+        description: "What to look for, in a control name or in the page text."
+      },
+      regex: {
+        kind: "boolean",
+        description: "Treat query as a regular expression.",
+        extras: { default: false }
+      },
+      limit: {
+        kind: "integer",
+        description: "Stop after this many hits. Defaults to 40.",
+        extras: { minimum: 1, maximum: 200 }
+      }
+    },
+    required: ["query"],
+    async run(route, args) {
+      const query = stringValue(args, "query");
+      if (query === void 0)
+        throw new ArgumentError('browser_find: "query" is required.');
+      const regex = booleanValue(args, "regex");
+      const limit = integerValue(args, "limit");
+      return route.find({
+        query,
+        ...regex === void 0 ? {} : { regex },
+        ...limit === void 0 ? {} : { limit }
+      });
+    }
+  },
+  {
+    name: "browser_extract",
+    title: "Extract by selector",
+    description: "Pull the rows that one CSS selector describes \u2014 every link in a list, every price in a grid \u2014 without reading the rest of the page. Scope it to one control with ref, which is the number browser_view printed; any element on the page is only reachable that way.",
+    properties: {
+      select: { kind: "string", description: "CSS selector to read." },
+      ref: {
+        kind: "integer",
+        description: "Read only inside this control, by the number browser_view printed."
+      },
+      limit: {
+        kind: "integer",
+        description: "Stop after this many rows. Defaults to 50.",
+        extras: { minimum: 1, maximum: 500 }
+      }
+    },
+    required: ["select"],
+    async run(route, args) {
+      const select = stringValue(args, "select");
+      if (select === void 0)
+        throw new ArgumentError('browser_extract: "select" is required.');
+      const ref = integerValue(args, "ref");
+      const limit = integerValue(args, "limit");
+      return route.extract({
+        select,
+        ...ref === void 0 ? {} : { ref },
+        ...limit === void 0 ? {} : { limit }
+      });
+    }
+  },
+  {
+    name: "browser_look",
+    title: "Look at the page as a grid",
+    description: 'See the page without image tokens: it comes back as a grid of letters, one letter per cell, so a colour or a layout can be read as text. Use it for a canvas, a chart, a game or a page that draws itself, where there are no words to read. region crops to "x,y,width,height"; items adds more cells; diff reports only the cells that changed since the last look.',
+    properties: {
+      cols: {
+        kind: "integer",
+        description: "Cells across. Defaults to 12.",
+        extras: { minimum: 2, maximum: 64 }
+      },
+      region: {
+        kind: "string",
+        description: 'Crop to this box in pixels: "x,y,width,height".'
+      },
+      items: {
+        kind: "integer",
+        description: "Cells down. Defaults to the height the grid implies.",
+        extras: { minimum: 2, maximum: 96 }
+      },
+      diff: {
+        kind: "boolean",
+        description: "Report only the cells that changed since the last look.",
+        extras: { default: true }
+      }
+    },
+    async run(route, args) {
+      const cols = integerValue(args, "cols");
+      const region = stringValue(args, "region");
+      const items = integerValue(args, "items");
+      const diff = booleanValue(args, "diff");
+      return route.look({
+        ...cols === void 0 ? {} : { cols },
+        ...region === void 0 ? {} : { region },
+        ...items === void 0 ? {} : { items },
+        ...diff === void 0 ? {} : { diff }
+      });
+    }
+  },
+  {
+    name: "browser_wait",
+    title: "Wait for the page",
+    description: "Block until the page settles instead of reading it over and over: wait for text to appear, for text to go away, for the address to reach something, or for the page to stop changing. Returns as soon as the condition holds, and says what the page looks like when it does not. Every wait is bounded, so a page that never gets there reports that rather than hanging.",
+    properties: {
+      text: {
+        kind: "string",
+        description: "Wait until this text is on the page."
+      },
+      gone: {
+        kind: "string",
+        description: "Wait until this text is off the page."
+      },
+      url: {
+        kind: "string",
+        description: "Wait until the address contains this."
+      },
+      quiet: {
+        kind: "boolean",
+        description: "Wait until the page stops changing.",
+        extras: { default: false }
+      },
+      timeoutMs: {
+        kind: "integer",
+        description: "Give up after this many milliseconds. Defaults to 8000.",
+        extras: { minimum: 50, maximum: 12e4 }
+      }
+    },
+    async run(route, args) {
+      const timeoutMs = integerValue(args, "timeoutMs");
+      const text = stringValue(args, "text");
+      const gone = stringValue(args, "gone");
+      const url = stringValue(args, "url");
+      const quiet = booleanValue(args, "quiet");
+      return route.wait({
+        ...text === void 0 ? {} : { text },
+        ...gone === void 0 ? {} : { gone },
+        ...url === void 0 ? {} : { url },
+        ...quiet === void 0 ? {} : { quiet },
+        ...timeoutMs === void 0 ? {} : { timeoutMs }
+      });
+    }
+  },
+  {
+    name: "browser_scroll",
+    title: "Scroll",
+    description: "Scroll the page by a number of pixels. Negative goes up. This is what brings a lazy-loaded list into being; read after scrolling rather than reading the whole page first.",
+    properties: {
+      dy: {
+        kind: "integer",
+        description: "Pixels down. Negative goes up."
+      },
+      dx: {
+        kind: "integer",
+        description: "Pixels right. Negative goes left."
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page after scrolling. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    async run(route, args) {
+      const dy = integerValue(args, "dy");
+      const dx = integerValue(args, "dx");
+      const read = booleanValue(args, "read");
+      return route.scroll({
+        ...dy === void 0 ? {} : { dy },
+        ...dx === void 0 ? {} : { dx },
+        ...read === void 0 ? {} : { read }
+      });
+    }
+  },
+  {
+    name: "browser_hover",
+    title: "Hover",
+    description: "Move the mouse onto a control and hold it there, which is how a menu that only opens on hover opens. Address it by ref, or by its name. Read after hovering when the menu is what you came for.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "Control to hover, by the number browser_view printed."
+      },
+      text: { kind: "string", description: "Control to hover, by its name." },
+      read: {
+        kind: "boolean",
+        description: "Read the page after hovering. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    async run(route, args) {
+      const ref = integerValue(args, "ref");
+      const text = stringValue(args, "text");
+      const read = booleanValue(args, "read");
+      return route.hover({
+        ...ref === void 0 ? {} : { ref },
+        ...text === void 0 ? {} : { text },
+        ...read === void 0 ? {} : { read }
+      });
+    }
+  },
+  {
+    name: "browser_check",
+    title: "Check or uncheck",
+    description: "Clicking blindly flips a control that is already right. This one reads the control first: checked true asks for checked and false asks for unchecked, and a call with neither only reports what it is. It says so when the box did not take the change.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "The box or switch, by the number browser_view printed."
+      },
+      checked: {
+        kind: "boolean",
+        description: "The state wanted. Leave it out to only report."
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    required: ["ref"],
+    async run(route, args) {
+      const ref = integerValue(args, "ref");
+      if (ref === void 0)
+        throw new ArgumentError('browser_check: "ref" is required.');
+      const checked = booleanValue(args, "checked");
+      const read = booleanValue(args, "read");
+      return route.check({
+        ref,
+        ...checked === void 0 ? {} : { checked },
+        ...read === void 0 ? {} : { read }
+      });
+    }
+  },
+  {
+    name: "browser_select",
+    title: "Pick from a dropdown",
+    description: "Choose an option in a dropdown by its value or by the words it shows. A native select is set directly; a custom listbox is opened and the option picked, which is why a plain click on the closed control was not enough.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "The dropdown, by the number browser_view printed."
+      },
+      field: {
+        kind: "string",
+        description: "The dropdown, by the label or name next to it."
+      },
+      value: {
+        kind: "string",
+        description: "Option to choose, by value or by its visible text."
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    required: ["value"],
+    async run(route, args) {
+      const value = stringValue(args, "value");
+      if (value === void 0)
+        throw new ArgumentError('browser_select: "value" is required.');
+      const ref = integerValue(args, "ref");
+      const field = stringValue(args, "field");
+      const read = booleanValue(args, "read");
+      return route.select({
+        value,
+        ...ref === void 0 ? {} : { ref },
+        ...field === void 0 ? {} : { field },
+        ...read === void 0 ? {} : { read }
+      });
+    }
+  },
+  {
+    name: "browser_drag",
+    title: "Drag",
+    description: "Drag one thing onto another: a slider handle, a card into a column, a file onto a drop zone. Give each end by ref or by a point that came from a read, and the move is sent as a real press, a series of moves and a release, which is what the page listens for.",
+    properties: {
+      fromRef: {
+        kind: "integer",
+        description: "Where the drag starts, by number."
+      },
+      fromPoint: {
+        kind: "string",
+        description: 'Where the drag starts, as "x,y" in pixels.'
+      },
+      toRef: {
+        kind: "integer",
+        description: "Where the drag ends, by number."
+      },
+      toPoint: {
+        kind: "string",
+        description: 'Where the drag ends, as "x,y" in pixels.'
+      },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    async run(route, args) {
+      const fromRef = integerValue(args, "fromRef");
+      const fromPoint = stringValue(args, "fromPoint");
+      const toRef = integerValue(args, "toRef");
+      const toPoint = stringValue(args, "toPoint");
+      const read = booleanValue(args, "read");
+      return route.drag({
+        ...fromRef === void 0 ? {} : { fromRef },
+        ...fromPoint === void 0 ? {} : { fromPoint },
+        ...toRef === void 0 ? {} : { toRef },
+        ...toPoint === void 0 ? {} : { toPoint },
+        ...read === void 0 ? {} : { read }
+      });
+    }
+  },
+  {
+    name: "browser_upload",
+    title: "Upload files",
+    description: "Give files to a file input. The file chooser never opens: the files are handed to the input directly, so this is the only way an upload can be driven from here. Paths must be absolute.",
+    properties: {
+      ref: {
+        kind: "integer",
+        description: "The file input, by the number browser_view printed."
+      },
+      files: { kind: "strings", description: "Absolute paths to upload." },
+      read: {
+        kind: "boolean",
+        description: "Read the page afterwards. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    required: ["files"],
+    async run(route, args) {
+      const files = coerce(
+        "browser_upload",
+        "files",
+        { kind: "strings", description: "" },
+        args.files
+      );
+      const ref = integerValue(args, "ref");
+      const read = booleanValue(args, "read");
+      return route.upload({
+        files,
+        ...ref === void 0 ? {} : { ref },
+        ...read === void 0 ? {} : { read }
+      });
+    }
+  },
+  {
+    name: "browser_grab",
+    title: "Save an image",
+    description: "Save the picture on the page \u2014 the largest image, a canvas, or the one a ref names \u2014 as a file, so it can be opened rather than described. Reach for it when the thing you want is pixels.",
+    properties: {
+      ref: { kind: "integer", description: "The image or canvas, by number." },
+      name: { kind: "string", description: "File name to save it under." },
+      count: {
+        kind: "integer",
+        description: "Save this many of the largest pictures. Defaults to 1.",
+        extras: { minimum: 1, maximum: 20 }
+      }
+    },
+    async run(route, args) {
+      const ref = integerValue(args, "ref");
+      const name = stringValue(args, "name");
+      const count = integerValue(args, "count");
+      return route.grab({
+        ...ref === void 0 ? {} : { ref },
+        ...name === void 0 ? {} : { name },
+        ...count === void 0 ? {} : { count }
+      });
+    }
+  },
+  {
+    name: "browser_eval",
+    title: "Run JavaScript in the page",
+    description: "Run an expression in the page and get its value back, for a fact no reading exposes: a computed style, a scroll height, a property on a global. Nothing is clicked and nothing is typed, and the page is not navigated. Prefer a reading when a reading answers it.",
+    properties: {
+      code: {
+        kind: "string",
+        description: "The expression to run. Its value is returned."
+      },
+      awaitPromise: {
+        kind: "boolean",
+        description: "Wait for a promise the expression returns. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    required: ["code"],
+    async run(route, args) {
+      const code = stringValue(args, "code");
+      if (code === void 0)
+        throw new ArgumentError('browser_eval: "code" is required.');
+      const awaitPromise = booleanValue(args, "awaitPromise");
+      return route.evaluatePage({
+        code,
+        ...awaitPromise === void 0 ? {} : { awaitPromise }
+      });
+    }
+  },
+  {
+    name: "browser_do",
+    title: "Run a batch of steps",
+    description: "Do a whole sequence in one call \u2014 open a menu, type into a field, press Enter, wait for the result \u2014 instead of one round trip per action. Each step names one thing: ref, tap, field with text, text, key, scroll, wait_text, wait_gone, wait_url. The batch stops at the first step that cannot proceed and says which one, so a half-done sequence is never reported as done.",
+    properties: {
+      steps: { kind: "steps", description: "The steps, in order." }
+    },
+    required: ["steps"],
+    async run(route, args) {
+      const steps = coerce(
+        "browser_do",
+        "steps",
+        { kind: "steps", description: "" },
+        args.steps
+      );
+      return route.run(steps);
+    }
+  },
+  {
+    name: "browser_dialog",
+    title: "Answer a dialog",
+    description: "A confirm, an alert or a prompt stops the page until it is answered. With accept it is accepted and with text a prompt is filled in; with neither it only reports what is open. Use it when a click seemed to do nothing \u2014 an unhandled dialog is the usual reason.",
+    properties: {
+      accept: {
+        kind: "boolean",
+        description: "Accept the dialog. Leave it out to only report."
+      },
+      text: { kind: "string", description: "Text for a prompt." }
+    },
+    async run(route, args) {
+      const accept = booleanValue(args, "accept");
+      const text = stringValue(args, "text");
+      return route.dialog({
+        ...accept === void 0 ? {} : { accept },
+        ...text === void 0 ? {} : { text }
+      });
+    }
+  },
+  {
+    name: "browser_cookie",
+    title: "Cookies",
+    description: "Read the cookies for the page, set one, or clear them all. Use it to keep a sign-in that a page stores in a cookie, or to see what the page was told to remember.",
+    properties: {
+      url: {
+        kind: "string",
+        description: "Read only the cookies this address sends."
+      },
+      set: {
+        kind: "string",
+        description: 'Set one cookie as "name=value; path=/".'
+      },
+      domain: {
+        kind: "string",
+        description: "Domain for the cookie being set."
+      },
+      clear: {
+        kind: "boolean",
+        description: "Clear every cookie first.",
+        extras: { default: false }
+      }
+    },
+    async run(route, args) {
+      const url = stringValue(args, "url");
+      const set = stringValue(args, "set");
+      const domain = stringValue(args, "domain");
+      const clear = booleanValue(args, "clear");
+      return route.cookie({
+        ...url === void 0 ? {} : { url },
+        ...set === void 0 ? {} : { set },
+        ...domain === void 0 ? {} : { domain },
+        ...clear === void 0 ? {} : { clear }
+      });
+    }
+  },
+  {
+    name: "browser_clipboard",
+    title: "Clipboard",
+    description: "Read what the page put on the clipboard, or put text there for a page that pastes. With set it writes; with nothing it reads.",
+    properties: {
+      set: { kind: "string", description: "Text to put on the clipboard." }
+    },
+    async run(route, args) {
+      const set = stringValue(args, "set");
+      return route.clipboard({ ...set === void 0 ? {} : { set } });
+    }
+  },
+  {
+    name: "browser_console",
+    title: "Console",
+    description: "What the page logged, newest last. A click that seemed to do nothing usually left a reason here, and so does a page that half-loaded.",
+    properties: {
+      limit: {
+        kind: "integer",
+        description: "Return this many of the newest lines. Defaults to 50.",
+        extras: { minimum: 1, maximum: 400 }
+      }
+    },
+    async run(route, args) {
+      const limit = integerValue(args, "limit");
+      return route.console({ ...limit === void 0 ? {} : { limit } });
+    }
+  },
+  {
+    name: "browser_network",
+    title: "Network",
+    description: "The requests the page made, with their status. Use it when a page is empty or a submission seemed to vanish: a failed request and a request that was never made look the same on the page and different here.",
+    properties: {
+      filter: {
+        kind: "string",
+        description: "Only rows whose address contains this."
+      },
+      limit: {
+        kind: "integer",
+        description: "Return this many of the newest rows. Defaults to 50.",
+        extras: { minimum: 1, maximum: 400 }
+      }
+    },
+    async run(route, args) {
+      const filter = stringValue(args, "filter");
+      const limit = integerValue(args, "limit");
+      return route.network({
+        ...filter === void 0 ? {} : { filter },
+        ...limit === void 0 ? {} : { limit }
+      });
+    }
+  },
+  {
+    name: "browser_failed",
+    title: "Failed requests",
+    description: "Only the requests that never finished, with the reason. This is the short list behind a page that looks broken.",
+    properties: {
+      limit: {
+        kind: "integer",
+        description: "Return this many of the newest. Defaults to 50.",
+        extras: { minimum: 1, maximum: 200 }
+      }
+    },
+    async run(route, args) {
+      const limit = integerValue(args, "limit");
+      return route.failed({ ...limit === void 0 ? {} : { limit } });
+    }
+  },
+  {
+    name: "browser_tabs",
+    title: "Tabs",
+    description: "List the open tabs, switch to one by index, or close one. A page that opened a second window to sign in or to show a document is reachable only through here.",
+    properties: {
+      action: {
+        kind: "enum",
+        values: ["list", "switch", "close"],
+        description: "What to do. Defaults to list."
+      },
+      index: {
+        kind: "integer",
+        description: "Which tab, as the list printed it. Needed by switch and close.",
+        extras: { minimum: 0 }
+      }
+    },
+    async run(route, args) {
+      const action = stringValue(args, "action");
+      const index = integerValue(args, "index");
+      return route.tabs({
+        ...action === void 0 ? {} : { action },
+        ...index === void 0 ? {} : { index }
+      });
+    }
+  },
+  {
+    name: "browser_downloads",
+    title: "Downloads",
+    description: "The files this profile has downloaded, newest last, with their size and where they landed. A download that never appeared is a click that never started one.",
+    properties: {},
+    async run(route) {
+      return route.downloads();
+    }
+  },
+  {
+    name: "browser_media",
+    title: "Media",
+    description: 'The streams the page played, and a way to save one: save "main" takes the one the page was really playing, an index takes that row, and a piece of its address matches. Use it for a video or audio file the page will not hand over as a link.',
+    properties: {
+      all: {
+        kind: "boolean",
+        description: "Include request streams, not only media. Defaults to false.",
+        extras: { default: false }
+      },
+      save: {
+        kind: "string",
+        description: 'Save this stream: "main", an index, or part of its address.'
+      },
+      watch: {
+        kind: "boolean",
+        description: "Only report, without saving.",
+        extras: { default: false }
+      }
+    },
+    async run(route, args) {
+      const all = booleanValue(args, "all");
+      const save = stringValue(args, "save");
+      const watch = booleanValue(args, "watch");
+      return route.media({
+        ...all === void 0 ? {} : { all },
+        ...save === void 0 ? {} : { save },
+        ...watch === void 0 ? {} : { watch }
+      });
+    }
+  },
+  {
+    name: "browser_pdf",
+    title: "Print to PDF",
+    description: "Print the page to a PDF file and say where it landed. Use it for a receipt, an invoice or a document the page renders but does not offer to download.",
+    properties: {},
+    async run(route) {
+      return route.pdf();
+    }
+  },
+  {
+    name: "browser_prepare",
+    title: "Prepare for animation",
+    description: "Get a canvas, a game or a video ready and measure it: it takes the focus, counts the frames the page actually draws over a few seconds, and reports the input surfaces it found. Use it before reading a page that draws itself, so a still frame is not mistaken for a page that is running.",
+    properties: {
+      seconds: {
+        kind: "integer",
+        description: "How long to count frames. Defaults to 2.",
+        extras: { minimum: 1, maximum: 30 }
+      },
+      focus: {
+        kind: "boolean",
+        description: "Take the focus first. Defaults to true.",
+        extras: { default: true }
+      }
+    },
+    async run(route, args) {
+      const seconds = integerValue(args, "seconds");
+      const focus = booleanValue(args, "focus");
+      return route.prepare({
+        ...seconds === void 0 ? {} : { seconds },
+        ...focus === void 0 ? {} : { focus }
+      });
+    }
+  },
+  {
+    name: "browser_mode",
+    title: "Show or hide the window",
+    description: "Say whether the browser draws a window you can watch, and get the mode it is in now. Visible is the default: a page nobody can see makes a wrong reading look like a right one. Changing it means the browser is put down and brought back up in the other mode on the same page, so it takes a moment. This does not change how clicks are delivered; leave the display out to ask.",
+    properties: {
+      display: {
+        kind: "enum",
+        description: "visible to show the window, headless to hide it. Leave it out to ask which is in force.",
+        values: ["visible", "headless"]
+      }
+    },
+    async run(route, args) {
+      const display = args.display;
+      if (display !== void 0 && display !== "visible" && display !== "headless")
+        throw new ArgumentError(
+          'browser_mode: display has to be "visible" or "headless"'
+        );
+      return route.mode(display === void 0 ? {} : { display });
+    }
+  },
+  {
+    name: "browser_ask",
+    title: "Ask the chat in the page",
+    description: "Say something to a chat that is open in the page \u2014 a model, a support window, a search box \u2014 and read its answer back in the same call. Types into the box, presses Enter, then waits until the answer stops growing. Use it to get an answer without a read between every step.",
+    properties: {
+      text: {
+        kind: "string",
+        description: "The name of the box, when no ref names it."
+      },
+      ref: {
+        kind: "integer",
+        description: "The number of the box, from browser_view.",
+        extras: { minimum: 0 }
+      },
+      said: {
+        kind: "string",
+        description: "What to say. Defaults to nothing sent."
+      },
+      submit: {
+        kind: "boolean",
+        description: "Press Enter after typing. Defaults to true.",
+        extras: { default: true }
+      },
+      timeoutMs: {
+        kind: "integer",
+        description: "How long to wait for the reply to settle. Defaults to 45000.",
+        extras: { minimum: 1, maximum: 6e5 }
+      }
+    },
+    async run(route, args) {
+      const text = stringValue(args, "text");
+      const ref = integerValue(args, "ref");
+      const said = stringValue(args, "said");
+      const submit = booleanValue(args, "submit");
+      const timeoutMs = integerValue(args, "timeoutMs");
+      return route.ask({
+        ...text === void 0 ? {} : { text },
+        ...ref === void 0 ? {} : { ref },
+        ...said === void 0 ? {} : { said },
+        ...submit === void 0 ? {} : { submit },
+        ...timeoutMs === void 0 ? {} : { timeoutMs }
+      });
+    }
+  },
+  {
+    name: "browser_review",
+    title: "Ask for a review round",
+    description: "Ask the chat in the page to review a repository and take its review back as a list: builds the message, sends it, waits for the answer, and writes the round down so the next round knows what was already said. Use it for a review round, not for a one-off question (that is browser_ask).",
+    properties: {
+      text: {
+        kind: "string",
+        description: "The name of the box, when no ref names it."
+      },
+      ref: {
+        kind: "integer",
+        description: "The number of the box, from browser_view.",
+        extras: { minimum: 0 }
+      },
+      said: {
+        kind: "string",
+        description: "What to send instead of the built message."
+      },
+      timeoutMs: {
+        kind: "integer",
+        description: "How long to wait for the reply to settle. Defaults to 45000.",
+        extras: { minimum: 1, maximum: 6e5 }
+      }
+    },
+    async run(route, args) {
+      const text = stringValue(args, "text");
+      const ref = integerValue(args, "ref");
+      const said = stringValue(args, "said");
+      const timeoutMs = integerValue(args, "timeoutMs");
+      return route.review({
+        ...text === void 0 ? {} : { text },
+        ...ref === void 0 ? {} : { ref },
+        ...said === void 0 ? {} : { said },
+        ...timeoutMs === void 0 ? {} : { timeoutMs }
+      });
+    }
+  },
+  {
+    name: "browser_review_verdict",
+    title: "Record a review verdict",
+    description: "Record what happened to each point of the last review round, so the next round leaves settled points out: point numbers are the ones browser_review printed, and each mark is fixed, verified (checked in the code and the point does not apply), invalid, or open. With no marks, lists what is settled.",
+    properties: {
+      marks: {
+        kind: "marks",
+        description: "One {point, verdict} per point. verdict is fixed, verified, invalid or open."
+      }
+    },
+    async run(route, args) {
+      const raw = args.marks;
+      const marks = raw === void 0 ? [] : raw.map((mark) => {
+        if (typeof mark !== "object" || mark === null)
+          throw new ArgumentError(
+            "browser_review_verdict: each mark is {point, verdict}"
+          );
+        const point = mark.point;
+        const verdict = mark.verdict;
+        if (typeof point !== "number" || !Number.isInteger(point))
+          throw new ArgumentError(
+            "browser_review_verdict: point has to be a whole number"
+          );
+        if (typeof verdict !== "string")
+          throw new ArgumentError(
+            "browser_review_verdict: verdict has to be fixed, verified, invalid or open"
+          );
+        return { point, verdict };
+      });
+      return route.reviewVerdict({ marks });
+    }
+  },
+  {
+    name: "browser_resume",
+    title: "Take the page back",
+    description: "Take the page back: clears the hold so the next action is sent at once instead of waiting it out, and ends a takeover. Reports the page it is now holding.",
+    properties: {},
+    async run(route) {
+      return route.resume();
+    }
+  },
+  {
     name: "browser_close",
     title: "Close the browser",
     description: "Close the browser now and release its process. Do it when the work is done; the next browser_open cold-starts Chrome again. The browser also closes by itself after the idle window.",
@@ -3021,7 +5500,65 @@ function coerce(tool, key, property, value) {
       }
       return value;
     }
+    case "strings": {
+      if (!Array.isArray(value)) {
+        throw new ArgumentError(`${tool}: "${key}" must be a list of strings.`);
+      }
+      const out = [];
+      for (const item of value) {
+        if (typeof item !== "string") {
+          throw new ArgumentError(
+            `${tool}: "${key}" must be a list of strings.`
+          );
+        }
+        out.push(item);
+      }
+      return out;
+    }
+    case "marks": {
+      if (!Array.isArray(value)) {
+        throw new ArgumentError(`${tool}: "${key}" must be a list of marks.`);
+      }
+      return value;
+    }
+    case "steps": {
+      if (!Array.isArray(value)) {
+        throw new ArgumentError(`${tool}: "${key}" must be a list of steps.`);
+      }
+      return value.map((item) => stepOf(tool, key, item));
+    }
   }
+}
+function stepOf(tool, key, value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ArgumentError(`${tool}: every "${key}" entry must be an object.`);
+  }
+  const from = value;
+  const take = (name, check) => {
+    const raw = from[name];
+    if (raw === void 0) return void 0;
+    const done = check(raw);
+    if (done === void 0) {
+      throw new ArgumentError(`${tool}: step "${name}" has the wrong type.`);
+    }
+    return done;
+  };
+  const asText = (input) => typeof input === "string" ? input : void 0;
+  const asInt = (input) => typeof input === "number" && Number.isSafeInteger(input) ? input : void 0;
+  const asBool = (input) => typeof input === "boolean" ? input : void 0;
+  const step = {
+    ...take("ref", asInt) === void 0 ? {} : { ref: take("ref", asInt) },
+    ...take("tap", asText) === void 0 ? {} : { tap: take("tap", asText) },
+    ...take("text", asText) === void 0 ? {} : { text: take("text", asText) },
+    ...take("field", asText) === void 0 ? {} : { field: take("field", asText) },
+    ...take("key", asText) === void 0 ? {} : { key: take("key", asText) },
+    ...take("scroll", asInt) === void 0 ? {} : { scroll: take("scroll", asInt) },
+    ...take("submit", asBool) === void 0 ? {} : { submit: take("submit", asBool) },
+    ...take("wait_text", asText) === void 0 ? {} : { waitText: take("wait_text", asText) },
+    ...take("wait_gone", asText) === void 0 ? {} : { waitGone: take("wait_gone", asText) },
+    ...take("wait_url", asText) === void 0 ? {} : { waitUrl: take("wait_url", asText) }
+  };
+  return step;
 }
 function describeError(error) {
   if (error instanceof RouteClosedError) {
@@ -3052,37 +5589,6 @@ function textResult(text) {
 }
 function failure(text) {
   return { content: [{ type: "text", text }], isError: true };
-}
-function squashUrl(url) {
-  return url.length <= 2048 ? url : `${url.slice(0, 2048)}\u2026 (${url.length - 2048} more characters)`;
-}
-function formatSnapshot(snapshot) {
-  const lines = [];
-  if (snapshot.text !== "") lines.push(snapshot.text);
-  for (const line of controlLines(snapshot.controls)) lines.push(line);
-  if (lines.length === 0) lines.push("(blank page)");
-  if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
-  if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
-  if (snapshot.chars !== void 0) lines.push(`chars: ${snapshot.chars}`);
-  if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);
-  if (snapshot.matched !== void 0 && snapshot.total !== void 0)
-    lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
-  if ((snapshot.omitted ?? 0) > 0) {
-    lines.push(
-      `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`
-    );
-  }
-  if ((snapshot.blindFrames ?? 0) > 0) {
-    lines.push(
-      `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`
-    );
-  }
-  if (snapshot.truncated) {
-    lines.push(`controls: ${snapshot.controls.length}`);
-    if (snapshot.limit !== void 0) lines.push(`limit: ${snapshot.limit}`);
-    lines.push("truncated: true");
-  }
-  return lines.join("\n");
 }
 function formatState(state) {
   if (!state.running) {
@@ -3125,10 +5631,46 @@ function toDefinition(tool) {
   };
 }
 function toPropertySchema(property) {
+  const type = property.kind === "enum" ? "string" : property.kind === "strings" || property.kind === "steps" || property.kind === "marks" ? "array" : property.kind;
   const schema = {
-    type: property.kind === "enum" ? "string" : property.kind,
+    type,
     description: property.description
   };
+  if (property.kind === "strings") {
+    schema.items = { type: "string" };
+  }
+  if (property.kind === "steps") {
+    schema.items = {
+      type: "object",
+      properties: {
+        ref: { type: "integer" },
+        tap: { type: "string" },
+        text: { type: "string" },
+        field: { type: "string" },
+        key: { type: "string" },
+        scroll: { type: "integer" },
+        submit: { type: "boolean" },
+        wait_text: { type: "string" },
+        wait_gone: { type: "string" },
+        wait_url: { type: "string" }
+      },
+      additionalProperties: false
+    };
+  }
+  if (property.kind === "marks") {
+    schema.items = {
+      type: "object",
+      properties: {
+        point: { type: "integer" },
+        verdict: {
+          type: "string",
+          enum: ["fixed", "verified", "invalid", "open"]
+        }
+      },
+      required: ["point", "verdict"],
+      additionalProperties: false
+    };
+  }
   if (property.values !== void 0) schema.enum = [...property.values];
   if (property.extras !== void 0) Object.assign(schema, property.extras);
   return schema;

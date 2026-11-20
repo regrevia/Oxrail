@@ -29,6 +29,7 @@ import {
   encodeFrame,
   type WsSocket,
 } from "../packages/browser-control/src/ws.js";
+import { headlessFromEnv } from "../packages/browser-control/src/route.js";
 
 const temporaryDirectories: string[] = [];
 const openServers: Server[] = [];
@@ -73,6 +74,34 @@ afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+describe("headlessFromEnv", () => {
+  // A window nobody can see makes a wrong page look like a wrong reading, so
+  // visible is the default and hiding is the switch.
+  it("shows the window unless the environment asks to hide it", () => {
+    expect(headlessFromEnv({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(
+      headlessFromEnv({ OXRAIL_BROWSER_HEADLESS: "" } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(
+      headlessFromEnv({ OXRAIL_BROWSER_HEADLESS: "0" } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(
+      headlessFromEnv({ OXRAIL_BROWSER_HEADLESS: "1" } as NodeJS.ProcessEnv),
+    ).toBe(true);
+  });
+
+  // A typo must not silently hide the window: only the exact off switch counts.
+  it("does not treat any other value as a request to hide", () => {
+    for (const value of ["true", "yes", "headless", " 1", "2"]) {
+      expect(
+        headlessFromEnv({
+          OXRAIL_BROWSER_HEADLESS: value,
+        } as NodeJS.ProcessEnv),
+      ).toBe(false);
+    }
+  });
 });
 
 describe("chromeArgs", () => {

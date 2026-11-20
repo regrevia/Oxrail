@@ -165,8 +165,8 @@ The current `0.1.0-alpha.8` public runtime adapter is passive-only, so even a ve
 
 The preview also ships a dependency-free stdio MCP server,
 `dist/browser-control/mcp.mjs`, that a host may start only when its owner
-configures it explicitly. It drives one headless Chrome process in its own
-profile, serves both MCP eras, and stays outside the Hook/Guard lifecycle — it
+configures it explicitly. It drives one Chrome process in its own profile, visible
+unless told to hide the window, serves both MCP eras, and stays outside the Hook/Guard lifecycle — it
 is not a Native Computer Use substitute and no lifecycle claim moves when it is
 running. Setup for Codex CLI and Claude Code, the tool list, and the reclaim
 policy are in [Browser Control](docs/product/browser-control.md) and
