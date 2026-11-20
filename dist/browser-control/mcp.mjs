@@ -2007,6 +2007,14 @@ var init_route = __esm({
       lastUse = 0;
       restTimer = null;
       profile;
+      /* The mode of the running window, which a single `open({ headless })` can
+         differ from the route's standing choice. Null when nothing is running, so
+         a report never describes a window that is not there. */
+      runningHeadless = null;
+      /* The same for the profile: a one-shot `open({ profile })` runs a window out
+         of another directory, and a report of "default" would send the next call
+         looking for sign-ins that window never had. */
+      runningProfile = null;
       headless;
       size;
       queue = Promise.resolve();
@@ -2096,6 +2104,8 @@ var init_route = __esm({
             windowSize: this.size
           });
           this.chrome = chrome;
+          this.runningHeadless = headless;
+          this.runningProfile = profile;
           const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
             timeoutMs: 1e4
           });
@@ -2853,10 +2863,10 @@ var init_route = __esm({
         return {
           running,
           pid: this.chrome?.pid ?? null,
-          profile: this.profile,
+          profile: running ? this.runningProfile ?? this.profile : this.profile,
           url: null,
           title: null,
-          headless: this.headless,
+          headless: running ? this.runningHeadless ?? this.headless : this.headless,
           idleMs: running ? Math.max(0, Date.now() - this.lastUse) : 0,
           closesInMs: running ? Math.max(0, this.lastUse + this.idleWindow - Date.now()) : null
         };
@@ -2884,20 +2894,21 @@ var init_route = __esm({
        */
       async mode(options = {}) {
         const wanted = options.display;
+        const now = this.runningHeadless ?? this.headless;
         if (wanted === void 0) {
-          const shown = !this.headless;
+          const shown = !now;
           return {
             content: [
               {
                 type: "text",
-                text: `the window is ${shown ? "shown" : "hidden"} (${this.headless ? "headless" : "visible"})${this.chrome === null ? ", and no browser is running" : ""}
+                text: `the window is ${shown ? "shown" : "hidden"} (${now ? "headless" : "visible"})${this.chrome === null ? ", and no browser is running" : ""}
 change it with display: "visible" or "headless"`
               }
             ]
           };
         }
         const next = wanted === "headless";
-        const changed = next !== this.headless;
+        const changed = next !== now;
         this.headless = next;
         let where = "";
         if (changed && this.chrome !== null) {
@@ -4356,6 +4367,8 @@ ${done.join("\n")}`
         this.chrome = null;
         this.cdp = null;
         this.page = null;
+        this.runningHeadless = null;
+        this.runningProfile = null;
         this.closed = true;
         if (cdp !== null) cdp.close();
         if (chrome !== null) await chrome.close().catch(() => void 0);
@@ -5401,7 +5414,7 @@ var TOOLS = [
           throw new ArgumentError(
             "browser_review_verdict: point has to be a whole number"
           );
-        if (typeof verdict !== "string")
+        if (!VERDICTS.includes(verdict))
           throw new ArgumentError(
             "browser_review_verdict: verdict has to be fixed, verified, invalid or open"
           );
@@ -5430,6 +5443,7 @@ var TOOLS = [
   }
 ];
 var TOOL_DEFINITIONS = TOOLS.map(toDefinition);
+var VERDICTS = ["fixed", "verified", "invalid", "open"];
 var TOOL_BY_NAME = new Map(
   TOOLS.map((tool) => [tool.name, tool])
 );

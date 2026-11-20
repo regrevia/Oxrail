@@ -54,6 +54,21 @@ const fixtureName =
       : null;
   })() ?? "long-page";
 const fixturePath = resolve(here, "../fixtures", fixtureName);
+
+/* A second question, so the document can quote a named one honestly. */
+function askedQueryArg() {
+  const flag = process.argv.indexOf("--query");
+  if (flag !== -1 && process.argv[flag + 1]) return process.argv[flag + 1];
+  const inline = process.argv.find((arg) => arg.startsWith("--query="));
+  return inline ? inline.slice("--query=".length) : null;
+}
+const askedQuery = askedQueryArg();
+/* Imported from source so the measurement uses the shipped serialiser.
+   Module scope, because `receiptOf` is called from the report builder. */
+const { controlLines } = await import(
+  pathToFileURL(resolve(here, "../../packages/browser-control/src/read.ts"))
+    .href
+);
 const pagePath = resolve(fixturePath, "index.html");
 
 /* The five calls the document tabulates, in the order it lists them. Each entry
@@ -118,11 +133,14 @@ async function serve() {
   };
 }
 
-/** What the caller actually receives as text: the words plus the control lines. */
+/** What the caller actually receives as text: the words plus the control lines.
+ *
+ * The lines come from `controlLines`, the same function the server uses, so a
+ * run that got folded is measured as folded. Re-serialising here -- one row per
+ * control -- would report the page this layer exists to stop sending, and every
+ * number in the document would be a size the caller never received. */
 function receiptOf(snapshot) {
-  const controls = snapshot.controls
-    .map((control) => `[${control.ref}] ${control.role} ${control.name}`)
-    .join("\n");
+  const controls = controlLines(snapshot.controls).join("\n");
   return {
     text: snapshot.text,
     controls,
@@ -160,6 +178,7 @@ async function main() {
 
   const rows = [];
   let wholeProseChars = 0;
+  let asked = null;
   try {
     await route.open({ url: origin });
     for (const call of CALLS) {
@@ -196,6 +215,26 @@ async function main() {
        forwards, this is what one actually has to read. */
     const whole = await route.digest({ mode: "article", maxChars: 1_000_000 });
     wholeProseChars = whole.text.length;
+    /* A question the caller names, not only the fixed one above. The document
+       claims what a named question does to the control list, and a claim about
+       a question is only checkable if that question can be run. Measured
+       before the session closes, and reported apart from the table because it
+       answers a different thing: how much of the list survives, not how many
+       characters the page cost. */
+    if (askedQuery !== null) {
+      const snapshot = await route.digest({
+        mode: "query",
+        query: askedQuery,
+      });
+      const controls = controlLines(snapshot.controls).join("\n");
+      asked = {
+        query: askedQuery,
+        chars: snapshot.text.length + controls.length,
+        controlChars: controls.length,
+        kept: snapshot.controls.length,
+        omitted: snapshot.omitted ?? 0,
+      };
+    }
   } finally {
     await route.close().catch(() => {});
     server.close();
@@ -242,6 +281,17 @@ async function main() {
       `${row.call.padEnd(width)}  ${String(row.textChars).padStart(10)} | ${String(row.controlChars).padStart(8)} | ${String(row.chars).padStart(5)}`,
     );
   console.log("");
+  if (asked !== null) {
+    const left =
+      asked.omitted === 0 ? "every control kept" : `${asked.omitted} left out`;
+    console.log(
+      `question "${asked.query}": ${asked.kept} control${asked.kept === 1 ? "" : "s"} kept, ${left}`,
+    );
+    console.log(
+      `  ${asked.chars} chars (${asked.controlChars} of them control lines)`,
+    );
+    console.log("");
+  }
   for (const row of rows) {
     const percent =
       row.ofView === null ? "" : ` (${(row.ofView * 100).toFixed(1)}%)`;

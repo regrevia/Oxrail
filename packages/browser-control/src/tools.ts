@@ -1154,7 +1154,10 @@ const TOOLS: readonly ToolSpec[] = [
                 throw new ArgumentError(
                   "browser_review_verdict: point has to be a whole number",
                 );
-              if (typeof verdict !== "string")
+              /* The message below names four verdicts, so the check has to be
+                 the same four: accepting any string would record a settlement
+                 nobody can read back. */
+              if (!VERDICTS.includes(verdict as Verdict))
                 throw new ArgumentError(
                   "browser_review_verdict: verdict has to be fixed, verified, invalid or open",
                 );
@@ -1188,6 +1191,9 @@ const TOOLS: readonly ToolSpec[] = [
 /** The tools as the host sees them, in the order the model should see them. */
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] =
   TOOLS.map(toDefinition);
+
+/** The verdicts a mark may carry, in the order the message names them. */
+const VERDICTS: readonly Verdict[] = ["fixed", "verified", "invalid", "open"];
 
 const TOOL_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(
   TOOLS.map((tool) => [tool.name, tool]),

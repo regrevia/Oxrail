@@ -37,6 +37,17 @@ const page = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
   <a href="data:text/html,<title>second</title><p>second page</p>">second</a>
 </body></html>`)}`;
 
+/* A tool result carries text parts and image parts; only the text answers the
+   display question, so read that rather than narrowing at each call site. */
+function textOf(result: { content: readonly { type: string }[] }): string {
+  return result.content
+    .filter(
+      (part): part is { type: "text"; text: string } => part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
 describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
   it(
     "opens a page, reads it, clicks, types, shoots and closes",
@@ -434,6 +445,73 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
         // would be a false positive that blocks a working control.
         await route.click({ ref: nestedControl.ref });
         expect((await route.state()).title).toBe("fired:,nested");
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "shows the window unless the caller asks for headless",
+    { timeout: 90_000 },
+    async () => {
+      // The default is the half that matters: a browser nobody can see makes a
+      // wrong page look like a wrong reading, so visible is the default and
+      // headless has to be asked for. Both directions run against a real
+      // window, because a unit test cannot tell a flag from a flag that works.
+      const shown = {
+        ...process.env,
+        OXRAIL_BROWSER_PROFILE: `live-shown-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      delete shown.OXRAIL_BROWSER_HEADLESS;
+      const route = new CdpBrowserRoute({ env: shown });
+      const dir = profileDir(shown.OXRAIL_BROWSER_PROFILE ?? "live", shown);
+      try {
+        const opened = await route.open({ url: page });
+        expect(opened.headless).toBe(false);
+        expect((await route.state()).headless).toBe(false);
+
+        // A one-shot override hides this window, and the report describes the
+        // window that exists rather than the setting that asked for it.
+        await route.close();
+        const hidden = await route.open({ url: page, headless: true });
+        expect(hidden.headless).toBe(true);
+        expect((await route.state()).headless).toBe(true);
+
+        // The standing choice is untouched: reopening without the override
+        // shows a window again, which is the part a one-shot must not change.
+        await route.close();
+        expect((await route.open({ url: page })).headless).toBe(false);
+
+        // The profile is a one-shot override too, and the same rule applies:
+        // a caller that opened another profile has to be told which one is
+        // running, or the next call looks for sign-ins in the wrong directory.
+        await route.close();
+        const other = await route.open({ url: page, profile: "live-other" });
+        expect(other.profile).toBe("live-other");
+        expect((await route.state()).profile).toBe("live-other");
+        await route.close();
+        expect((await route.open({ url: page })).profile).toBe(
+          shown.OXRAIL_BROWSER_PROFILE,
+        );
+
+        // Switching on a running browser keeps the page it was on.
+        await route.close();
+        await route.open({ url: page });
+        const switched = await route.mode({ display: "headless" });
+        const said = textOf(switched);
+        expect(said).toContain("hidden now");
+        const after = await route.state();
+        expect(after.headless).toBe(true);
+        expect(after.running).toBe(true);
+        expect(after.url).toContain("data:text/html");
+
+        const back = await route.mode({ display: "visible" });
+        expect(textOf(back)).toContain("shown now");
+        expect((await route.state()).headless).toBe(false);
+        expect((await route.state()).url).toContain("data:text/html");
       } finally {
         await route.close().catch(() => undefined);
         rmSync(dir, { recursive: true, force: true });

@@ -541,6 +541,14 @@ export class CdpBrowserRoute implements BrowserRoute {
   private lastUse = 0;
   private restTimer: NodeJS.Timeout | null = null;
   private readonly profile: string;
+  /* The mode of the running window, which a single `open({ headless })` can
+     differ from the route's standing choice. Null when nothing is running, so
+     a report never describes a window that is not there. */
+  private runningHeadless: boolean | null = null;
+  /* The same for the profile: a one-shot `open({ profile })` runs a window out
+     of another directory, and a report of "default" would send the next call
+     looking for sign-ins that window never had. */
+  private runningProfile: string | null = null;
   private headless: boolean;
   private readonly size: { width: number; height: number };
   private queue: Promise<unknown> = Promise.resolve();
@@ -664,6 +672,8 @@ export class CdpBrowserRoute implements BrowserRoute {
         windowSize: this.size,
       });
       this.chrome = chrome;
+      this.runningHeadless = headless;
+      this.runningProfile = profile;
       const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
         timeoutMs: 10_000,
       });
@@ -1560,10 +1570,12 @@ export class CdpBrowserRoute implements BrowserRoute {
     return {
       running,
       pid: this.chrome?.pid ?? null,
-      profile: this.profile,
+      profile: running ? (this.runningProfile ?? this.profile) : this.profile,
       url: null,
       title: null,
-      headless: this.headless,
+      headless: running
+        ? (this.runningHeadless ?? this.headless)
+        : this.headless,
       idleMs: running ? Math.max(0, Date.now() - this.lastUse) : 0,
       closesInMs: running
         ? Math.max(0, this.lastUse + this.idleWindow - Date.now())
@@ -1596,21 +1608,24 @@ export class CdpBrowserRoute implements BrowserRoute {
 
   async mode(options: ModeOptions = {}): Promise<ToolResult> {
     const wanted = options.display;
+    /* A one-shot `open({ headless })` can leave a window whose mode differs
+       from the standing choice, so describe the window that is running. */
+    const now = this.runningHeadless ?? this.headless;
     if (wanted === undefined) {
-      const shown = !this.headless;
+      const shown = !now;
       return {
         content: [
           {
             type: "text",
             text:
-              `the window is ${shown ? "shown" : "hidden"} (${this.headless ? "headless" : "visible"})` +
+              `the window is ${shown ? "shown" : "hidden"} (${now ? "headless" : "visible"})` +
               `${this.chrome === null ? ", and no browser is running" : ""}\nchange it with display: "visible" or "headless"`,
           },
         ],
       };
     }
     const next = wanted === "headless";
-    const changed = next !== this.headless;
+    const changed = next !== now;
     this.headless = next;
     let where = "";
     if (changed && this.chrome !== null) {
@@ -3332,6 +3347,8 @@ export class CdpBrowserRoute implements BrowserRoute {
     this.chrome = null;
     this.cdp = null;
     this.page = null;
+    this.runningHeadless = null;
+    this.runningProfile = null;
     this.closed = true;
     if (cdp !== null) cdp.close();
     if (chrome !== null) await chrome.close().catch(() => undefined);
