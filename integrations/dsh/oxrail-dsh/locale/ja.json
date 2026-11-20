@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Oxrail ブラウザ操作",
+    "description": "ヘッドレス Chrome を開き、文字数予算の範囲でページを読み取るため、巨大な DOM でもコンテキストがあふれません。読み取りが出した番号でクリックします。",
+    "detail": "docs/DETAIL.md"
+  }
+}

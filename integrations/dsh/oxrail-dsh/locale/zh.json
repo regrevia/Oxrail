@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Oxrail 浏览器控制",
+    "description": "开一个后台 Chrome，按字符预算读页面，巨大的 DOM 不会把上下文塞满；读出来的每个控件带编号，按编号点击。",
+    "detail": "docs/DETAIL.md"
+  }
+}

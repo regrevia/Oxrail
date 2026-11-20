@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Oxrail Browser Control",
+    "description": "Opens a headless Chrome, reads a page under a character budget so a huge DOM cannot flood the context, and clicks by the number the read printed.",
+    "detail": "docs/DETAIL.md"
+  }
+}
