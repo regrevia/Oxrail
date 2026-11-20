@@ -47,6 +47,7 @@ import {
   deltaOf,
   evidence,
   passagesToText,
+  relevant,
   type Block,
 } from "./read.js";
 
@@ -725,6 +726,12 @@ export class CdpBrowserRoute implements BrowserRoute {
         );
         this.touch();
         this.hand(page.url, page.controls);
+        /* `hand` takes the whole list, so filtering what is printed never
+           removes a landing place: a ref that was handed out stays valid even
+           when its line is left out. The question decides which names are worth
+           the characters, and a control the question did say something about
+           can still be clicked by number after reading a different mode. */
+        const shown = relevant(page.controls, asked, { maxChars });
         const text = passagesToText(found);
         return {
           url: page.url,
@@ -733,7 +740,8 @@ export class CdpBrowserRoute implements BrowserRoute {
             text === ""
               ? `(nothing on this page answers ${JSON.stringify(asked)})`
               : text,
-          controls: page.controls,
+          controls: shown.controls,
+          ...(shown.omitted === 0 ? {} : { omitted: shown.omitted }),
           truncated: found.rows.length < found.matched,
           limit: found.rows.length < found.matched ? "passages" : undefined,
           mode: "query",

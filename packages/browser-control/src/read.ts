@@ -233,6 +233,8 @@ const SENTENCE_BREAK = /(?<=[。！？；])|(?<=[.!?;])\s+/u;
  * heading at the top of every section it changes. It gets the same ceiling a
  * title does. */
 const TRAIL_CAP = 200;
+/** How many controls in a row print as one line instead of one each. */
+const RUN_FLOOR = 8;
 
 /** Below this a passage is a fragment rather than an answer, so the ceiling is
  * better spent on nothing than on four words and an ellipsis. */
@@ -612,6 +614,122 @@ export function passagesToText(passages: PassageSet): string {
     lines.push(row.text);
   }
   return lines.join("\n");
+}
+
+/**
+ * The numbered line a control is printed on, and one line for a run of them.
+ *
+ * A list of a hundred and sixty "Item N" buttons is one fact — a list of
+ * items, in order — not a hundred and sixty facts, but printing it the plain
+ * way spends more of the budget on the list than on the answer and buries the
+ * three controls that matter among them. A run therefore prints as the two ends
+ * and a count: same refs, same names, one line. Below eight in a row the plain
+ * form is kept, because two or three similar buttons are three separate
+ * decisions and a range would hide which one is which.
+ *
+ * The rule for a run is deliberately narrow: consecutive refs, the same role,
+ * and names that differ only in the number at the end, counting up by one.
+ * Anything else — different roles, a gap in the numbering, a name that changes
+ * in the middle — stays printed individually, so a range never claims a
+ * regularity the page does not have.
+ *
+ * @param controls - the controls to print, in ref order.
+ * @returns one line per control, or one line per run.
+ */
+export function controlLines(controls: readonly Control[]): string[] {
+  const plain = (control: Control): string =>
+    `[${control.ref}] ${control.role} "${control.name}"`;
+  const named = controls.filter((control) => control.name.trim() !== "");
+  const out: string[] = [];
+  const tail = /^(.*?)(\d+)$/;
+  let at = 0;
+  while (at < named.length) {
+    const first = named[at] as Control;
+    const head = tail.exec(first.name);
+    let end = at;
+    if (head !== null) {
+      const base = (head[1] ?? "").trim();
+      let last = Number(head[2]);
+      while (end + 1 < named.length) {
+        const next = named[end + 1] as Control;
+        const step = tail.exec(next.name);
+        if (step === null) break;
+        if (next.role !== first.role) break;
+        if (next.ref !== (named[end] as Control).ref + 1) break;
+        if ((step[1] ?? "").trim() !== base) break;
+        if (Number(step[2]) !== last + 1) break;
+        last = Number(step[2]);
+        end += 1;
+      }
+    }
+    const size = end - at + 1;
+    if (size >= RUN_FLOOR) {
+      const last = named[end] as Control;
+      out.push(
+        `[${first.ref}]-[${last.ref}] ${first.role} "${first.name}" .. "${last.name}" (${size} controls, one line)`,
+      );
+      at = end + 1;
+      continue;
+    }
+    for (let step = at; step <= end; step += 1)
+      out.push(plain(named[step] as Control));
+    at = end + 1;
+  }
+  return out;
+}
+
+/**
+ * The controls a question actually touches, and what leaving the rest out cost.
+ *
+ * A `query` read answers one question, so handing back every control name on a
+ * page spends the budget on words the question never asked about: on a page of
+ * 160 list buttons that was 96% of the whole answer. Matching is by folded
+ * term, not substring, so "refunds" finds "Refund timing" and "card refund"
+ * finds "Card refunds"; `name` has already folded in aria-label, title and
+ * placeholder, so a control labelled "Track parcel" is found by "parcel".
+ *
+ * Two rules matter more than the filter. When nothing matches, the whole list
+ * comes back: a read that hands back no controls cannot be clicked through, and
+ * a wrong guess about relevance is worse than a longer line. And `maxChars`
+ * trims the tail of the matched set rather than dropping a match, so a control
+ * is never lost to space alone — the count says how many were left out, and
+ * every one of them is still addressable.
+ *
+ * @param controls - every named control the page handed over.
+ * @param query - the question the read answered.
+ * @param options - `maxChars`, the same ceiling the rest of the read obeys.
+ * @returns the controls to print, and how many of the page's were not printed.
+ */
+export function relevant(
+  controls: readonly Control[],
+  query: string,
+  options: { maxChars?: number } = {},
+): { controls: Control[]; omitted: number } {
+  const named = controls.filter((control) => control.name.trim() !== "");
+  const typed = terms(query);
+  if (typed.length === 0 || named.length === 0)
+    return { controls: [...controls], omitted: 0 };
+  const asked = new Set(typed);
+  const kept = named.filter((control) =>
+    terms(control.name).some((term) => asked.has(term)),
+  );
+  if (kept.length === 0) return { controls: [...controls], omitted: 0 };
+  const ceiling = Math.max(
+    200,
+    Math.min(24_000, Number(options.maxChars ?? 4_000)),
+  );
+  let used = 0;
+  const rows: Control[] = [];
+  for (const control of kept) {
+    /* The same shape `formatSnapshot` prints, so the estimate and the cost the
+       caller pays are the same number. */
+    const cost = control.role.length + control.name.length + 8;
+    if (rows.length > 0 && used + cost > ceiling) break;
+    used += cost;
+    rows.push(control);
+  }
+  const omitted = controls.length - rows.length;
+  return { controls: omitted > 0 ? rows : [...controls], omitted };
 }
 
 /**

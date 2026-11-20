@@ -107,6 +107,76 @@ describe("a click by text must be a name a read handed out", () => {
   });
 });
 
+/* A read that answers one question still has to leave the rest of the page
+ * addressable. `hand` takes the whole list before anything is filtered, so a
+ * ref left out of the printed reading is still a valid landing place — that is
+ * the difference between a shorter read and a page whose controls are gone. */
+
+describe("a query narrows the reading, not the page", () => {
+  const page = {
+    url: "https://example.test/shop",
+    title: "Shop",
+    text: "Shop",
+    controls: [
+      { ref: 0, role: "button", name: "Add to cart" },
+      { ref: 1, role: "link", name: "Help" },
+      ...Array.from({ length: 40 }, (_, at) => ({
+        ref: at + 2,
+        role: "button",
+        name: `Unit ${at}`,
+      })),
+    ],
+    truncated: false,
+    words: 400,
+    limit: undefined,
+    blindFrames: 0,
+  };
+
+  function routeWith(blocks: unknown[]): CdpBrowserRoute {
+    const route = coldRoute();
+    const inner = route as unknown as {
+      ensure: () => Promise<unknown>;
+      evaluate: () => Promise<unknown>;
+      blocksFor: () => Promise<unknown[]>;
+    };
+    /* Nothing here opens Chrome: the two expressions the query branch asks the
+       page for are the only things it needs, and their answers are what these
+       three stand in for. */
+    inner.ensure = async () => ({ cdp: null, page: null });
+    inner.evaluate = async () => page;
+    inner.blocksFor = async () => blocks;
+    return route;
+  }
+
+  it("prints only the controls its question touched", async () => {
+    const route = routeWith([
+      { h: "Cart", p: "Cart", t: "Add to cart holds the refund policy" },
+    ]);
+    const read = await route.digest({ mode: "query", query: "cart" });
+    expect(read.controls.map((one) => one.name)).toEqual(["Add to cart"]);
+  });
+
+  it("counts what it left out instead of reporting a short page", async () => {
+    const route = routeWith([
+      { h: "Cart", p: "Cart", t: "Add to cart holds the refund policy" },
+    ]);
+    const read = await route.digest({ mode: "query", query: "cart" });
+    expect(read.omitted).toBe(41);
+    /* The count is only honest if the numbers survive, so the same route must
+       still accept a ref no line mentioned. */
+    const handed = (route as unknown as { handed: { refs: Set<number> } })
+      .handed;
+    expect(handed.refs.has(3)).toBe(true);
+  });
+
+  it("a question the page never answers keeps every control", async () => {
+    const route = routeWith([{ h: "Shop", p: "Shop", t: "nothing here" }]);
+    const read = await route.digest({ mode: "query", query: "refund" });
+    expect(read.controls).toHaveLength(42);
+    expect(read.omitted).toBeUndefined();
+  });
+});
+
 describe("typing with no number still needs a read", () => {
   it("refuses to type into the page before anything has been read", async () => {
     const route = coldRoute();
