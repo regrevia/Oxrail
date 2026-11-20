@@ -250,6 +250,45 @@ The route holds one browser for the life of the host session. When the session e
 
 Screenshots are written under `<state dir>/shots` and returned both as an image and as a path, so a host that cannot show images can still open the file.
 
+## A shorter reading, not a smaller page
+
+Long pages fail in a way a character budget cannot fix. A listing page with 173 near-identical buttons spends 3946 characters doing nothing but repeating the same sentence with a different number; an article page with 61 links spends 1345 on navigation nobody asked about. Neither is over any cap — the reading is simply made of repetition and scaffolding. Two rules shorten it without removing anything.
+
+A run of controls that differ only by a trailing number is folded onto one line:
+
+```
+[0]-[172] button "Item 1" .. "Item 173" (173 controls, one line)
+```
+
+That is 99 characters instead of 3946 on the wide page, and its run of eight or more identical roles with consecutive refs and a counter that never skips. A shorter run, or one whose numbers jump, is printed as it always was: folding is worth doing only when the controls really are one list.
+
+A question narrows the reading rather than the page. `browser_read` with `mode:"query"` ranks the passages that answer it, and now prints only the controls whose own name was touched by one of the question's words:
+
+```
+node benchmarks/harness/measure-reading.mjs --fixture wide-page
+question "status":  1 control kept, 172 left out
+question "refund":  every control kept — nothing on the page matched, so nothing is filtered
+```
+
+The count is always stated when it is not zero, on its own line after the passages:
+
+```
+controls not shown: 172 (left out of this reading; their numbers still work)
+```
+
+That last clause is the part worth being exact about, because it is the difference between a shorter reading and a broken one. The refs are handed out from the whole page before anything is filtered, so a control left out of the printed list is still a valid address: `browser_click` with `[3]` works whether or not line 3 was printed. Filtering chooses which names are worth the characters; it never removes a landing place. When nothing matched, the whole list comes back — a filter that silently emptied a page would hide the controls a caller needs to find out why.
+
+Measured on the fixtures here, with the same reading before and after:
+
+| fixture     | controls printed before | after a question | characters before | after |
+| ----------- | ----------------------- | ---------------- | ----------------- | ----- |
+| `wide-page` | 173                     | 1 (`status`)     | 3946              | 34    |
+| `wide-page` | 173                     | 95 (`item`)      | 3946              | 62    |
+| `long-page` | 61                      | 2 (`status`)     | 1345              | 50    |
+| `long-page` | 61                      | 5 (`refund`)     | 1345              | 121   |
+
+The 60000-character button name is unchanged by both rules — folding needs a run, and no question makes one control's name shorter — which is why the name ceiling and this filtering are separate mechanisms that both have to exist.
+
 ## Writes are addressed by a read
 
 There is no way to hand this route a coordinate. `browser_click` takes a `ref` or some visible text, `browser_type` takes a `ref` and the text, and neither accepts a point on screen — so a write that acts on a control has to name it with something a read returned, and that number or name is the whole address. Both kinds are held to the read: a number must be one the last read produced, and a text must appear in a name the last read said out loud, so neither can reach a control the caller has not seen. A click by text that the last read did not name is refused the same way an invented number is:

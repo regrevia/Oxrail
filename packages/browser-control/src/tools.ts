@@ -17,6 +17,7 @@ import type {
   ToolResult,
 } from "./types.js";
 import { RouteClosedError, StaleRefError } from "./types.js";
+import { controlLines } from "./read.js";
 
 export interface ToolDefinition {
   name: string;
@@ -89,7 +90,7 @@ const TOOLS: readonly ToolSpec[] = [
     name: "browser_view",
     title: "Read the page",
     description:
-      'Read the current page as text. This is the cheap way to see the words and the controls: each control sits on its own line as [12] button "Sign in", and 12 is the ref that browser_click and browser_type take. Use browser_shot only when layout or appearance matters. mode narrows the read to links or form controls; maxChars stops it early.',
+      'Read the current page as text. This is the cheap way to see the words and the controls: each control sits on its own line as [12] button "Sign in", and 12 is the ref that browser_click and browser_type take. A run of near-identical controls is folded onto one line as [0]-[39] button "Item 0" .. "Item 39" (40 controls, one line), and every number in that range still works. Use browser_shot only when layout or appearance matters. mode narrows the read to links or form controls; maxChars stops it early.',
     properties: {
       mode: {
         kind: "enum",
@@ -490,10 +491,10 @@ function squashUrl(url: string): string {
 function formatSnapshot(snapshot: Snapshot): string {
   const lines: string[] = [];
   if (snapshot.text !== "") lines.push(snapshot.text);
-  for (const control of snapshot.controls) {
-    if (control.name === "") continue;
-    lines.push(`[${control.ref}] ${control.role} "${control.name}"`);
-  }
+  /* One line per control, except a run of near-identical ones — a list of
+     buttons is one fact, and printing it one line at a time spends the budget
+     on the list instead of the answer. Refs and names are unchanged. */
+  for (const line of controlLines(snapshot.controls)) lines.push(line);
   if (lines.length === 0) lines.push("(blank page)");
   if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
   if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
@@ -503,6 +504,13 @@ function formatSnapshot(snapshot: Snapshot): string {
   if (snapshot.words !== undefined) lines.push(`words: ${snapshot.words}`);
   if (snapshot.matched !== undefined && snapshot.total !== undefined)
     lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  /* A reading that left controls out has to say so, or a caller cannot tell a
+     page with three buttons from a page whose other 157 were not printed. */
+  if ((snapshot.omitted ?? 0) > 0) {
+    lines.push(
+      `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`,
+    );
+  }
   if ((snapshot.blindFrames ?? 0) > 0) {
     lines.push(
       `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`,

@@ -14,15 +14,19 @@ import {
   articleExpression,
   blocksExpression,
   brief,
+  controlLines,
   deltaOf,
   evidence,
   passagesToText,
   rank,
+  relevant,
   sentences,
   terms,
   trailOf,
   type Block,
 } from "../packages/browser-control/src/read.js";
+
+import type { Control } from "../packages/browser-control/src/types.js";
 
 const block = (t: string, extra: Partial<Block> = {}): Block => ({
   h: "",
@@ -353,5 +357,129 @@ describe("page expressions", () => {
   it("never interpolates a raw budget", () => {
     expect(blocksExpression(Number.NaN)).toContain("const limit = 200");
     expect(articleExpression(Number.NaN)).toContain("const limit = 400");
+  });
+});
+
+/** One control, with a role and a name, and nothing else it does not need. */
+const control = (ref: number, role: string, name: string): Control => ({
+  ref,
+  role,
+  name,
+});
+
+describe("a run of controls is one line, or it is not a run", () => {
+  it("folds a long run of numbered buttons into one line", () => {
+    const rows = Array.from({ length: 20 }, (_, at) =>
+      control(at, "button", `Item ${at}`),
+    );
+    const lines = controlLines(rows);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("20 controls, one line");
+  });
+
+  it("prints a short run flat, because each one is its own decision", () => {
+    const rows = Array.from({ length: 3 }, (_, at) =>
+      control(at, "button", `Item ${at}`),
+    );
+    expect(controlLines(rows)).toEqual([
+      '[0] button "Item 0"',
+      '[1] button "Item 1"',
+      '[2] button "Item 2"',
+    ]);
+  });
+
+  it("a run whose word changes at the number is two runs, not one", () => {
+    /* The count has to carry on across the change, or the numbering rule stops
+       the run first and this says nothing about the word. */
+    const rows = [
+      ...Array.from({ length: 9 }, (_, at) =>
+        control(at, "button", `Item ${at}`),
+      ),
+      ...Array.from({ length: 9 }, (_, at) =>
+        control(at + 9, "button", `Unit ${at + 9}`),
+      ),
+    ];
+    const lines = controlLines(rows);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('"Item 0"');
+    expect(lines[0]).toContain('"Item 8"');
+    expect(lines[1]).toContain('"Unit 9"');
+    expect(lines[1]).toContain('"Unit 17"');
+  });
+
+  it("a run of numbers is one role, not two", () => {
+    const rows = Array.from({ length: 10 }, (_, at) =>
+      control(at, at % 2 === 0 ? "button" : "link", `Item ${at}`),
+    );
+    expect(controlLines(rows)).toHaveLength(10);
+  });
+
+  it("rows that count up but are not neighbours are not one line", () => {
+    const rows = Array.from({ length: 10 }, (_, at) =>
+      control(at * 2, "button", `Item ${at}`),
+    );
+    expect(controlLines(rows)).toHaveLength(10);
+  });
+
+  it("a control with no name is left out of the numbering it cannot use", () => {
+    expect(
+      controlLines([control(0, "button", "Go"), control(1, "button", "  ")]),
+    ).toEqual(['[0] button "Go"']);
+  });
+});
+
+describe("a query lists what it matched, and says what it left out", () => {
+  const shop = [
+    control(0, "button", "Add to cart"),
+    control(1, "link", "Help"),
+    ...Array.from({ length: 60 }, (_, at) =>
+      control(at + 2, "button", `Unit ${at}`),
+    ),
+  ];
+
+  it("keeps the match and drops the numbering the query never asked about", () => {
+    const picked = relevant(shop, "cart");
+    expect(picked.controls.map((one) => one.name)).toContain("Add to cart");
+    expect(picked.controls.some((one) => one.name.startsWith("Unit"))).toBe(
+      false,
+    );
+    expect(picked.omitted).toBeGreaterThan(0);
+  });
+
+  it("a query the page never answers hands back every control", () => {
+    /* A wrong guess about relevance that empties the list is worse than a long
+       read: nothing is addressable if nothing is printed. */
+    const picked = relevant(shop, "refund");
+    expect(picked.controls).toHaveLength(shop.length);
+    expect(picked.omitted).toBe(0);
+  });
+
+  it("no query is no filter", () => {
+    const picked = relevant(shop, "  ");
+    expect(picked.controls).toHaveLength(shop.length);
+    expect(picked.omitted).toBe(0);
+  });
+
+  it("a query that matches more than fits still prints within its budget", () => {
+    const rows = Array.from({ length: 200 }, (_, at) =>
+      control(at, "button", `Buy widget number ${at} at this price`),
+    );
+    const picked = relevant(rows, "buy widget", { maxChars: 600 });
+    const spent = picked.controls.reduce(
+      (sum, one) => sum + one.role.length + one.name.length + 8,
+      0,
+    );
+    expect(spent).toBeLessThanOrEqual(600);
+    expect(picked.controls.length).toBeGreaterThan(0);
+  });
+
+  it("a match is never lost to space alone, and the count says so", () => {
+    const rows = [
+      control(0, "button", "Refund it"),
+      control(1, "button", `Refund ${"x".repeat(400)}`),
+    ];
+    const picked = relevant(rows, "refund", { maxChars: 200 });
+    expect(picked.controls.length).toBeGreaterThanOrEqual(1);
+    expect(picked.omitted).toBe(rows.length - picked.controls.length);
   });
 });

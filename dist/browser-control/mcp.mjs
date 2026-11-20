@@ -22,6 +22,485 @@ var init_types = __esm({
   }
 });
 
+// packages/browser-control/src/read.ts
+function blocksExpression(budget) {
+  return `(() => {
+  const root = document.querySelector('article, main, [role="main"]') || document.body
+  if (!root) return JSON.stringify({ blocks: [] })
+  const limit = ${Math.max(200, Math.trunc(budget) || 200)}
+  const guard = limit * 6
+  const BLOCK = new Set(['P', 'LI', 'BLOCKQUOTE', 'PRE', 'FIGCAPTION', 'DD', 'DT', 'SUMMARY'])
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME', 'CANVAS', 'VIDEO', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FORM', 'BUTTON', 'SELECT', 'TEXTAREA'])
+  const out = []
+  const seen = new Set()
+  const stack = []
+  let chars = 0
+  const flatten = (text) => String(text ?? '').replace(/\\s+/g, ' ').trim()
+  const trail = () => stack.filter((one) => one !== '').join(' \\u203a ')
+  const said = () => stack.filter((one) => one !== '').pop() ?? ''
+  /* How much of a block reads like prose rather than a list of links: ends of
+     sentences per word, plus a length floor. One number, no dictionary. */
+  const written = (text) => {
+    const words = text.toLowerCase().match(/[a-z0-9]+|[\\u3400-\\u9fff]/g) ?? []
+    if (words.length === 0) return 0
+    const ends = text.match(/[.!?\\u3002\\uff01\\uff1f;\\uff1b]/g) ?? []
+    return Math.min(1, (ends.length / words.length) * 12)
+  }
+  const quality = (text, density) => Math.round((0.45 * (1 - density) + 0.35 * written(text) + 0.2 * Math.min(1, text.length / 180)) * 100) / 100
+  const push = (el) => {
+    if (chars >= guard) return
+    const text = flatten(el.innerText ?? el.textContent ?? '')
+    if (text === '' || text.length > 4000) return
+    let linkChars = 0
+    for (const link of el.querySelectorAll('a')) linkChars += flatten(link.innerText ?? '').length
+    if (el.tagName === 'A') linkChars += text.length
+    const density = Math.min(1, linkChars / text.length)
+    /* A block that is almost all link and short is a menu item, not a sentence;
+       carrying it only spends the budget. */
+    if (density >= 0.8 && text.length < 80) return
+    out.push({ h: said(), p: trail(), t: text, d: Math.round(density * 100) / 100, q: quality(text, density) })
+    chars += text.length
+  }
+  const row = (tr) => {
+    if (chars >= guard) return
+    const cells = Array.from(tr.children).filter((cell) => cell.tagName === 'TD' || cell.tagName === 'TH')
+    const words = cells.map((cell) => flatten(cell.innerText ?? ''))
+    if (words.filter((one) => one !== '').length < 2) return
+    const table = tr.closest('table')
+    const first = table === null ? null : table.querySelector('tr')
+    const head = first === null || first === tr ? [] : Array.from(first.children).map((cell) => flatten(cell.innerText ?? ''))
+    const line = words.map((one, at) => (head[at] === undefined || head[at] === '' || head[at] === one ? one : head[at] + ': ' + one)).join(' | ')
+    out.push({ h: said(), p: trail(), t: line, d: 0, q: 0.95, r: 1 })
+    chars += line.length
+  }
+  const walk = (el) => {
+    if (el === null || chars >= guard) return
+    const tag = el.tagName
+    if (SKIP.has(tag) || el.hidden === true || el.getAttribute?.('aria-hidden') === 'true') return
+    const style = getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden') return
+    if (/^H[1-6]$/.test(tag)) {
+      const level = Number(tag.slice(1))
+      stack.length = level
+      stack[level - 1] = flatten(el.innerText ?? '')
+      return
+    }
+    if (tag === 'TR') {
+      if (!seen.has(el)) { seen.add(el); row(el) }
+      return
+    }
+    if (BLOCK.has(tag)) {
+      if (!seen.has(el)) { seen.add(el); push(el) }
+      return
+    }
+    for (const child of el.children) walk(child)
+  }
+  walk(root)
+  const title = document.title
+  /* The page arrives in document order, so a menu at the top would spend the
+     whole budget before the article starts. Keep the blocks that read like
+     content, still in page order, until the budget is spent. */
+  let kept = out
+  const total = out.reduce((sum, block) => sum + block.t.length, 0)
+  if (total > limit) {
+    const byQuality = out.map((block, at) => ({ block, at })).sort((a, b) => b.block.q - a.block.q || a.at - b.at)
+    const keep = new Set()
+    let used = 0
+    for (const one of byQuality) {
+      if (used + one.block.t.length > limit) continue
+      keep.add(one.at)
+      used += one.block.t.length
+    }
+    kept = out.filter((block, at) => keep.has(at))
+  }
+  return JSON.stringify({ title, blocks: kept })
+})()`;
+}
+function articleExpression(budget) {
+  const limit = Math.max(400, Math.trunc(budget) || 400);
+  return `(() => {
+  const limit = ${limit}
+  const pick = document.querySelector('article, main, [role="main"]') || document.body
+  if (!pick) return JSON.stringify({ text: '', chars: 0, linkCount: 0, truncated: false })
+  const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME', 'CANVAS', 'VIDEO', 'HEADER', 'FOOTER', 'NAV', 'ASIDE'])
+  const lines = []
+  let length = 0
+  let truncated = false
+  let linkCount = 0
+  const walk = (node) => {
+    if (truncated || node === null || node === undefined) return
+    if (node.nodeType === 3) {
+      const text = String(node.textContent ?? '').replace(/\\s+/g, ' ').trim()
+      if (text !== '') { lines.push(text); length += text.length + 1 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (node.nodeType !== 1) return
+    const tag = node.tagName
+    if (skip.has(tag) || node.hidden === true || node.getAttribute?.('aria-hidden') === 'true') return
+    const style = getComputedStyle(node)
+    if (style.display === 'none' || style.visibility === 'hidden') return
+    if (/^H[1-6]$/.test(tag)) {
+      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
+      if (text !== '') { lines.push('#'.repeat(Number(tag.slice(1))) + ' ' + text); length += text.length + Number(tag.slice(1)) + 2 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (tag === 'A') {
+      linkCount += 1
+      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
+      const href = String(node.href ?? '')
+      if (text !== '' && /^https?:/.test(href)) {
+        const line = '[' + text.slice(0, 120) + '](' + href + ')'
+        lines.push(line); length += line.length + 1
+      } else if (text !== '') { lines.push(text); length += text.length + 1 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (tag === 'LI') {
+      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
+      if (text !== '') { lines.push('- ' + text); length += text.length + 3 }
+      if (length >= limit) truncated = true
+      return
+    }
+    if (tag === 'PRE' || tag === 'CODE') {
+      const text = String(node.innerText ?? '').slice(0, 1200)
+      if (text !== '') { lines.push('~~~'); lines.push(text); lines.push('~~~'); length += text.length + 8 }
+      if (length >= limit) truncated = true
+      return
+    }
+    for (const child of node.childNodes) walk(child)
+  }
+  walk(pick)
+  let text = lines.filter((one) => one !== '').join(String.fromCharCode(10)).trim()
+  if (text.length > limit) { text = text.slice(0, limit); truncated = true }
+  return JSON.stringify({ text, chars: text.length, linkCount: document.querySelectorAll('a[href]').length, truncated })
+})()`;
+}
+function undouble(word) {
+  return /([b-dfglmnprst])\1$/.test(word) ? word.slice(0, -1) : word;
+}
+function fold(word) {
+  if (word.length <= 3 || /[0-9]/.test(word) || /[^a-z]/.test(word))
+    return word;
+  if (word.endsWith("ies") && word.length > 4) return `${word.slice(0, -3)}y`;
+  if (word.endsWith("sses")) return word.slice(0, -2);
+  if (word.endsWith("ing") && word.length > 5)
+    return undouble(word.slice(0, -3));
+  if (word.endsWith("ed") && word.length > 4 && !word.endsWith("eed"))
+    return undouble(word.slice(0, -2));
+  if (word.endsWith("es") && word.length > 4) return word.slice(0, -2);
+  if (word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us") && !word.endsWith("is"))
+    return word.slice(0, -1);
+  return word;
+}
+function terms(text) {
+  const raw = String(text ?? "").toLowerCase().match(TOKEN);
+  return (raw ?? []).map(fold);
+}
+function sentences(text) {
+  const raw = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (raw === "") return [];
+  const out = [];
+  for (const piece of raw.split(SENTENCE_BREAK)) {
+    const one = piece.trim();
+    if (one === "") continue;
+    const continues = /^[a-z(]/.test(one) || (out[out.length - 1]?.length ?? 0) < 4;
+    if (out.length > 0 && continues)
+      out[out.length - 1] = `${out[out.length - 1] ?? ""} ${one}`;
+    else out.push(one);
+  }
+  return out;
+}
+function trailOf(block) {
+  const path2 = String(block.p ?? "");
+  const near = String(block.h ?? "");
+  if (path2 === "" || path2 === near || path2.length > 90) return near;
+  return path2;
+}
+function rank(blocks, query) {
+  const asked = terms(query);
+  if (asked.length === 0) return [];
+  const docs = blocks.map((block) => ({
+    block,
+    terms: terms(`${block.p ?? ""} ${block.h ?? ""} ${block.t}`)
+  }));
+  const average = docs.reduce((sum, one) => sum + one.terms.length, 0) / Math.max(1, docs.length);
+  const seen = /* @__PURE__ */ new Map();
+  for (const one of docs)
+    for (const term of new Set(one.terms))
+      seen.set(term, (seen.get(term) ?? 0) + 1);
+  const total = Math.max(1, docs.length);
+  const scored = [];
+  for (const one of docs) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of one.terms) counts.set(term, (counts.get(term) ?? 0) + 1);
+    let score = 0;
+    for (const term of asked) {
+      const seenIn = seen.get(term) ?? 0;
+      if (seenIn === 0) continue;
+      const idf = Math.log(1 + (total - seenIn + 0.5) / (seenIn + 0.5));
+      const tf = counts.get(term) ?? 0;
+      if (tf === 0) continue;
+      const length = one.terms.length;
+      score += idf * (tf * (SATURATION + 1) / (tf + SATURATION * (1 - 0.75 + 0.75 * length / average)));
+    }
+    score *= 1 - 0.8 * Number(one.block.d ?? 0);
+    score *= 0.85 + 0.15 * Number(one.block.q ?? 0.5);
+    if (score > 0) scored.push({ block: one.block, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+function evidence(blocks, query, options = {}) {
+  const typed = terms(query);
+  if (typed.length === 0) return { rows: [], total: blocks.length, matched: 0 };
+  const near = rank(blocks, query).slice(
+    0,
+    Math.max(1, Math.min(60, Number(options.blocks ?? 40)))
+  );
+  const units = [];
+  for (const row of near) {
+    const heading = trailOf(row.block);
+    const parts = sentences(String(row.block.t ?? ""));
+    for (let step = 0; step < parts.length; step += 1) {
+      const spoken = terms(parts[step] ?? "");
+      if (spoken.length === 0) continue;
+      units.push({
+        text: parts[step] ?? "",
+        terms: spoken,
+        heading,
+        at: blocks.indexOf(row.block),
+        step,
+        prior: row.score,
+        block: row.block,
+        score: 0
+      });
+    }
+  }
+  if (units.length === 0) return { rows: [], total: blocks.length, matched: 0 };
+  const total = Math.max(1, units.length);
+  const seen = /* @__PURE__ */ new Map();
+  for (const unit of units)
+    for (const term of new Set(unit.terms))
+      seen.set(term, (seen.get(term) ?? 0) + 1);
+  const average = units.reduce((sum, unit) => sum + unit.terms.length, 0) / total;
+  const weight = (term) => {
+    const inHowMany = seen.get(term) ?? 0;
+    return inHowMany === 0 ? 0 : Math.log(1 + (total - inHowMany + 0.5) / (inHowMany + 0.5));
+  };
+  const sharp = typed.filter((term) => weight(term) >= 0.5);
+  const asked = sharp.length > 0 ? sharp : typed;
+  const askedWeight = asked.reduce((sum, term) => sum + weight(term), 0);
+  for (const unit of units) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of unit.terms)
+      counts.set(term, (counts.get(term) ?? 0) + 1);
+    let score = 0;
+    let covered = 0;
+    for (const term of asked) {
+      const tf = counts.get(term) ?? 0;
+      if (tf === 0) continue;
+      covered += weight(term);
+      score += weight(term) * (tf * (SATURATION + 1) / (tf + SATURATION * (1 - 0.75 + 0.75 * unit.terms.length / average)));
+    }
+    score *= covered / Math.max(1e-6, askedWeight);
+    const headingHit = asked.filter(
+      (term) => terms(unit.heading).includes(term)
+    ).length;
+    const linkish = (1 - 0.8 * Number(unit.block.d ?? 0)) * (unit.block.r === 1 ? 1 : 0.9 + 0.1 * Number(unit.block.q ?? 0.5));
+    unit.score = score * linkish * (1 + 0.25 * headingHit) * (1 + 0.5 * (unit.prior > 0 ? 1 : 0));
+  }
+  const best = units.reduce((top, unit) => Math.max(top, unit.score), 0);
+  for (const unit of units) if (unit.score < best * 0.2) unit.score = 0;
+  const lambda = Math.max(0, Math.min(0.9, Number(options.lambda ?? 0.35)));
+  const ceiling = Math.max(
+    200,
+    Math.min(24e3, Number(options.maxChars ?? 4e3))
+  );
+  const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
+  const chosen = [];
+  let left = units.filter((unit) => unit.score > 0);
+  if (left.length === 0) {
+    const labels = [];
+    for (const row of near) {
+      const label = trailOf(row.block);
+      if (label === "" || label.length > 200) continue;
+      const said = terms(label);
+      if (!asked.some((term) => said.includes(term))) continue;
+      if (labels.some((one) => one.text === label)) continue;
+      labels.push({
+        text: label,
+        terms: said,
+        heading: "",
+        at: blocks.indexOf(row.block),
+        step: -1,
+        prior: row.score,
+        block: row.block,
+        score: row.score
+      });
+    }
+    left = labels;
+  }
+  const scored = left.length;
+  let used = 0;
+  let lastHeading = "";
+  while (left.length > 0 && chosen.length < limit) {
+    let at = -1;
+    let bestValue = -Infinity;
+    for (let i = 0; i < left.length; i += 1) {
+      const candidate = left[i];
+      const spoken = new Set(candidate.terms);
+      let overlap = 0;
+      for (const picked of chosen) {
+        const other = new Set(picked.terms);
+        let shared = 0;
+        for (const term of spoken) if (other.has(term)) shared += 1;
+        overlap = Math.max(
+          overlap,
+          shared / Math.max(1, spoken.size + other.size - shared)
+        );
+      }
+      const value = candidate.score * (1 - lambda) - lambda * overlap;
+      if (value > bestValue) {
+        bestValue = value;
+        at = i;
+      }
+    }
+    if (at < 0 || bestValue <= 0) break;
+    const pick = left.splice(at, 1)[0];
+    const trail = pick.heading.length > TRAIL_CAP ? pick.heading.slice(0, TRAIL_CAP) : pick.heading;
+    let heading = trail !== lastHeading && trail !== "" ? trail.length + 8 : 0;
+    if (used + heading + PASSAGE_FLOOR > ceiling) {
+      pick.heading = "";
+      heading = 0;
+    } else {
+      pick.heading = trail;
+    }
+    const room = ceiling - used - heading;
+    if (pick.text.length > room) {
+      if (chosen.length > 0 || room < PASSAGE_FLOOR) break;
+      pick.text = `${pick.text.slice(0, room - 1).trimEnd()}\u2026`;
+    }
+    lastHeading = pick.heading;
+    used += pick.text.length + heading;
+    chosen.push(pick);
+  }
+  chosen.sort((a, b) => a.at - b.at || a.step - b.step);
+  return {
+    rows: chosen.map((one) => ({
+      text: one.text,
+      heading: one.heading,
+      at: one.at,
+      step: one.step
+    })),
+    total: blocks.length,
+    matched: scored
+  };
+}
+function passagesToText(passages) {
+  const lines = [];
+  let heading = "";
+  for (const row of passages.rows) {
+    if (row.heading !== "" && row.heading !== heading) {
+      heading = row.heading;
+      lines.push(`## ${heading}`);
+    }
+    lines.push(row.text);
+  }
+  return lines.join("\n");
+}
+function controlLines(controls) {
+  const plain = (control) => `[${control.ref}] ${control.role} "${control.name}"`;
+  const named = controls.filter((control) => control.name.trim() !== "");
+  const out = [];
+  const tail = /^(.*?)(\d+)$/;
+  let at = 0;
+  while (at < named.length) {
+    const first = named[at];
+    const head = tail.exec(first.name);
+    let end = at;
+    if (head !== null) {
+      const base = (head[1] ?? "").trim();
+      let last = Number(head[2]);
+      while (end + 1 < named.length) {
+        const next = named[end + 1];
+        const step = tail.exec(next.name);
+        if (step === null) break;
+        if (next.role !== first.role) break;
+        if (next.ref !== named[end].ref + 1) break;
+        if ((step[1] ?? "").trim() !== base) break;
+        if (Number(step[2]) !== last + 1) break;
+        last = Number(step[2]);
+        end += 1;
+      }
+    }
+    const size = end - at + 1;
+    if (size >= RUN_FLOOR) {
+      const last = named[end];
+      out.push(
+        `[${first.ref}]-[${last.ref}] ${first.role} "${first.name}" .. "${last.name}" (${size} controls, one line)`
+      );
+      at = end + 1;
+      continue;
+    }
+    for (let step = at; step <= end; step += 1)
+      out.push(plain(named[step]));
+    at = end + 1;
+  }
+  return out;
+}
+function relevant(controls, query, options = {}) {
+  const named = controls.filter((control) => control.name.trim() !== "");
+  const typed = terms(query);
+  if (typed.length === 0 || named.length === 0)
+    return { controls: [...controls], omitted: 0 };
+  const asked = new Set(typed);
+  const kept = named.filter(
+    (control) => terms(control.name).some((term) => asked.has(term))
+  );
+  if (kept.length === 0) return { controls: [...controls], omitted: 0 };
+  const ceiling = Math.max(
+    200,
+    Math.min(24e3, Number(options.maxChars ?? 4e3))
+  );
+  let used = 0;
+  const rows = [];
+  for (const control of kept) {
+    const cost = control.role.length + control.name.length + 8;
+    if (rows.length > 0 && used + cost > ceiling) break;
+    used += cost;
+    rows.push(control);
+  }
+  const omitted = controls.length - rows.length;
+  return { controls: omitted > 0 ? rows : [...controls], omitted };
+}
+function deltaOf(before, after) {
+  const known = new Set(
+    before.controls.map((control) => `${control.ref}\0${control.name}`)
+  );
+  const controls = after.controls.filter(
+    (control) => !known.has(`${control.ref}\0${control.name}`)
+  );
+  const seen = new Set(
+    before.text.split("\n").map((line) => line.trim()).filter((line) => line !== "")
+  );
+  const lines = after.text.split("\n").filter((line) => line.trim() !== "" && !seen.has(line.trim()));
+  return { text: lines.join("\n"), controls };
+}
+var TOKEN, SATURATION, SENTENCE_BREAK, TRAIL_CAP, RUN_FLOOR, PASSAGE_FLOOR;
+var init_read = __esm({
+  "packages/browser-control/src/read.ts"() {
+    "use strict";
+    TOKEN = /[a-z0-9]+|[\u3400-\u9fff]/g;
+    SATURATION = 1.5;
+    SENTENCE_BREAK = /(?<=[。！？；])|(?<=[.!?;])\s+/u;
+    TRAIL_CAP = 200;
+    RUN_FLOOR = 8;
+    PASSAGE_FLOOR = 40;
+  }
+});
+
 // packages/browser-control/src/ws.ts
 import { createHash, randomBytes } from "node:crypto";
 import { connect } from "node:net";
@@ -939,419 +1418,6 @@ var init_chrome = __esm({
   }
 });
 
-// packages/browser-control/src/read.ts
-function blocksExpression(budget) {
-  return `(() => {
-  const root = document.querySelector('article, main, [role="main"]') || document.body
-  if (!root) return JSON.stringify({ blocks: [] })
-  const limit = ${Math.max(200, Math.trunc(budget) || 200)}
-  const guard = limit * 6
-  const BLOCK = new Set(['P', 'LI', 'BLOCKQUOTE', 'PRE', 'FIGCAPTION', 'DD', 'DT', 'SUMMARY'])
-  const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME', 'CANVAS', 'VIDEO', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FORM', 'BUTTON', 'SELECT', 'TEXTAREA'])
-  const out = []
-  const seen = new Set()
-  const stack = []
-  let chars = 0
-  const flatten = (text) => String(text ?? '').replace(/\\s+/g, ' ').trim()
-  const trail = () => stack.filter((one) => one !== '').join(' \\u203a ')
-  const said = () => stack.filter((one) => one !== '').pop() ?? ''
-  /* How much of a block reads like prose rather than a list of links: ends of
-     sentences per word, plus a length floor. One number, no dictionary. */
-  const written = (text) => {
-    const words = text.toLowerCase().match(/[a-z0-9]+|[\\u3400-\\u9fff]/g) ?? []
-    if (words.length === 0) return 0
-    const ends = text.match(/[.!?\\u3002\\uff01\\uff1f;\\uff1b]/g) ?? []
-    return Math.min(1, (ends.length / words.length) * 12)
-  }
-  const quality = (text, density) => Math.round((0.45 * (1 - density) + 0.35 * written(text) + 0.2 * Math.min(1, text.length / 180)) * 100) / 100
-  const push = (el) => {
-    if (chars >= guard) return
-    const text = flatten(el.innerText ?? el.textContent ?? '')
-    if (text === '' || text.length > 4000) return
-    let linkChars = 0
-    for (const link of el.querySelectorAll('a')) linkChars += flatten(link.innerText ?? '').length
-    if (el.tagName === 'A') linkChars += text.length
-    const density = Math.min(1, linkChars / text.length)
-    /* A block that is almost all link and short is a menu item, not a sentence;
-       carrying it only spends the budget. */
-    if (density >= 0.8 && text.length < 80) return
-    out.push({ h: said(), p: trail(), t: text, d: Math.round(density * 100) / 100, q: quality(text, density) })
-    chars += text.length
-  }
-  const row = (tr) => {
-    if (chars >= guard) return
-    const cells = Array.from(tr.children).filter((cell) => cell.tagName === 'TD' || cell.tagName === 'TH')
-    const words = cells.map((cell) => flatten(cell.innerText ?? ''))
-    if (words.filter((one) => one !== '').length < 2) return
-    const table = tr.closest('table')
-    const first = table === null ? null : table.querySelector('tr')
-    const head = first === null || first === tr ? [] : Array.from(first.children).map((cell) => flatten(cell.innerText ?? ''))
-    const line = words.map((one, at) => (head[at] === undefined || head[at] === '' || head[at] === one ? one : head[at] + ': ' + one)).join(' | ')
-    out.push({ h: said(), p: trail(), t: line, d: 0, q: 0.95, r: 1 })
-    chars += line.length
-  }
-  const walk = (el) => {
-    if (el === null || chars >= guard) return
-    const tag = el.tagName
-    if (SKIP.has(tag) || el.hidden === true || el.getAttribute?.('aria-hidden') === 'true') return
-    const style = getComputedStyle(el)
-    if (style.display === 'none' || style.visibility === 'hidden') return
-    if (/^H[1-6]$/.test(tag)) {
-      const level = Number(tag.slice(1))
-      stack.length = level
-      stack[level - 1] = flatten(el.innerText ?? '')
-      return
-    }
-    if (tag === 'TR') {
-      if (!seen.has(el)) { seen.add(el); row(el) }
-      return
-    }
-    if (BLOCK.has(tag)) {
-      if (!seen.has(el)) { seen.add(el); push(el) }
-      return
-    }
-    for (const child of el.children) walk(child)
-  }
-  walk(root)
-  const title = document.title
-  /* The page arrives in document order, so a menu at the top would spend the
-     whole budget before the article starts. Keep the blocks that read like
-     content, still in page order, until the budget is spent. */
-  let kept = out
-  const total = out.reduce((sum, block) => sum + block.t.length, 0)
-  if (total > limit) {
-    const byQuality = out.map((block, at) => ({ block, at })).sort((a, b) => b.block.q - a.block.q || a.at - b.at)
-    const keep = new Set()
-    let used = 0
-    for (const one of byQuality) {
-      if (used + one.block.t.length > limit) continue
-      keep.add(one.at)
-      used += one.block.t.length
-    }
-    kept = out.filter((block, at) => keep.has(at))
-  }
-  return JSON.stringify({ title, blocks: kept })
-})()`;
-}
-function articleExpression(budget) {
-  const limit = Math.max(400, Math.trunc(budget) || 400);
-  return `(() => {
-  const limit = ${limit}
-  const pick = document.querySelector('article, main, [role="main"]') || document.body
-  if (!pick) return JSON.stringify({ text: '', chars: 0, linkCount: 0, truncated: false })
-  const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'IFRAME', 'CANVAS', 'VIDEO', 'HEADER', 'FOOTER', 'NAV', 'ASIDE'])
-  const lines = []
-  let length = 0
-  let truncated = false
-  let linkCount = 0
-  const walk = (node) => {
-    if (truncated || node === null || node === undefined) return
-    if (node.nodeType === 3) {
-      const text = String(node.textContent ?? '').replace(/\\s+/g, ' ').trim()
-      if (text !== '') { lines.push(text); length += text.length + 1 }
-      if (length >= limit) truncated = true
-      return
-    }
-    if (node.nodeType !== 1) return
-    const tag = node.tagName
-    if (skip.has(tag) || node.hidden === true || node.getAttribute?.('aria-hidden') === 'true') return
-    const style = getComputedStyle(node)
-    if (style.display === 'none' || style.visibility === 'hidden') return
-    if (/^H[1-6]$/.test(tag)) {
-      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
-      if (text !== '') { lines.push('#'.repeat(Number(tag.slice(1))) + ' ' + text); length += text.length + Number(tag.slice(1)) + 2 }
-      if (length >= limit) truncated = true
-      return
-    }
-    if (tag === 'A') {
-      linkCount += 1
-      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
-      const href = String(node.href ?? '')
-      if (text !== '' && /^https?:/.test(href)) {
-        const line = '[' + text.slice(0, 120) + '](' + href + ')'
-        lines.push(line); length += line.length + 1
-      } else if (text !== '') { lines.push(text); length += text.length + 1 }
-      if (length >= limit) truncated = true
-      return
-    }
-    if (tag === 'LI') {
-      const text = String(node.innerText ?? '').replace(/\\s+/g, ' ').trim()
-      if (text !== '') { lines.push('- ' + text); length += text.length + 3 }
-      if (length >= limit) truncated = true
-      return
-    }
-    if (tag === 'PRE' || tag === 'CODE') {
-      const text = String(node.innerText ?? '').slice(0, 1200)
-      if (text !== '') { lines.push('~~~'); lines.push(text); lines.push('~~~'); length += text.length + 8 }
-      if (length >= limit) truncated = true
-      return
-    }
-    for (const child of node.childNodes) walk(child)
-  }
-  walk(pick)
-  let text = lines.filter((one) => one !== '').join(String.fromCharCode(10)).trim()
-  if (text.length > limit) { text = text.slice(0, limit); truncated = true }
-  return JSON.stringify({ text, chars: text.length, linkCount: document.querySelectorAll('a[href]').length, truncated })
-})()`;
-}
-function undouble(word) {
-  return /([b-dfglmnprst])\1$/.test(word) ? word.slice(0, -1) : word;
-}
-function fold(word) {
-  if (word.length <= 3 || /[0-9]/.test(word) || /[^a-z]/.test(word))
-    return word;
-  if (word.endsWith("ies") && word.length > 4) return `${word.slice(0, -3)}y`;
-  if (word.endsWith("sses")) return word.slice(0, -2);
-  if (word.endsWith("ing") && word.length > 5)
-    return undouble(word.slice(0, -3));
-  if (word.endsWith("ed") && word.length > 4 && !word.endsWith("eed"))
-    return undouble(word.slice(0, -2));
-  if (word.endsWith("es") && word.length > 4) return word.slice(0, -2);
-  if (word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us") && !word.endsWith("is"))
-    return word.slice(0, -1);
-  return word;
-}
-function terms(text) {
-  const raw = String(text ?? "").toLowerCase().match(TOKEN);
-  return (raw ?? []).map(fold);
-}
-function sentences(text) {
-  const raw = String(text ?? "").replace(/\s+/g, " ").trim();
-  if (raw === "") return [];
-  const out = [];
-  for (const piece of raw.split(SENTENCE_BREAK)) {
-    const one = piece.trim();
-    if (one === "") continue;
-    const continues = /^[a-z(]/.test(one) || (out[out.length - 1]?.length ?? 0) < 4;
-    if (out.length > 0 && continues)
-      out[out.length - 1] = `${out[out.length - 1] ?? ""} ${one}`;
-    else out.push(one);
-  }
-  return out;
-}
-function trailOf(block) {
-  const path2 = String(block.p ?? "");
-  const near = String(block.h ?? "");
-  if (path2 === "" || path2 === near || path2.length > 90) return near;
-  return path2;
-}
-function rank(blocks, query) {
-  const asked = terms(query);
-  if (asked.length === 0) return [];
-  const docs = blocks.map((block) => ({
-    block,
-    terms: terms(`${block.p ?? ""} ${block.h ?? ""} ${block.t}`)
-  }));
-  const average = docs.reduce((sum, one) => sum + one.terms.length, 0) / Math.max(1, docs.length);
-  const seen = /* @__PURE__ */ new Map();
-  for (const one of docs)
-    for (const term of new Set(one.terms))
-      seen.set(term, (seen.get(term) ?? 0) + 1);
-  const total = Math.max(1, docs.length);
-  const scored = [];
-  for (const one of docs) {
-    const counts = /* @__PURE__ */ new Map();
-    for (const term of one.terms) counts.set(term, (counts.get(term) ?? 0) + 1);
-    let score = 0;
-    for (const term of asked) {
-      const seenIn = seen.get(term) ?? 0;
-      if (seenIn === 0) continue;
-      const idf = Math.log(1 + (total - seenIn + 0.5) / (seenIn + 0.5));
-      const tf = counts.get(term) ?? 0;
-      if (tf === 0) continue;
-      const length = one.terms.length;
-      score += idf * (tf * (SATURATION + 1) / (tf + SATURATION * (1 - 0.75 + 0.75 * length / average)));
-    }
-    score *= 1 - 0.8 * Number(one.block.d ?? 0);
-    score *= 0.85 + 0.15 * Number(one.block.q ?? 0.5);
-    if (score > 0) scored.push({ block: one.block, score });
-  }
-  scored.sort((a, b) => b.score - a.score);
-  return scored;
-}
-function evidence(blocks, query, options = {}) {
-  const typed = terms(query);
-  if (typed.length === 0) return { rows: [], total: blocks.length, matched: 0 };
-  const near = rank(blocks, query).slice(
-    0,
-    Math.max(1, Math.min(60, Number(options.blocks ?? 40)))
-  );
-  const units = [];
-  for (const row of near) {
-    const heading = trailOf(row.block);
-    const parts = sentences(String(row.block.t ?? ""));
-    for (let step = 0; step < parts.length; step += 1) {
-      const spoken = terms(parts[step] ?? "");
-      if (spoken.length === 0) continue;
-      units.push({
-        text: parts[step] ?? "",
-        terms: spoken,
-        heading,
-        at: blocks.indexOf(row.block),
-        step,
-        prior: row.score,
-        block: row.block,
-        score: 0
-      });
-    }
-  }
-  if (units.length === 0) return { rows: [], total: blocks.length, matched: 0 };
-  const total = Math.max(1, units.length);
-  const seen = /* @__PURE__ */ new Map();
-  for (const unit of units)
-    for (const term of new Set(unit.terms))
-      seen.set(term, (seen.get(term) ?? 0) + 1);
-  const average = units.reduce((sum, unit) => sum + unit.terms.length, 0) / total;
-  const weight = (term) => {
-    const inHowMany = seen.get(term) ?? 0;
-    return inHowMany === 0 ? 0 : Math.log(1 + (total - inHowMany + 0.5) / (inHowMany + 0.5));
-  };
-  const sharp = typed.filter((term) => weight(term) >= 0.5);
-  const asked = sharp.length > 0 ? sharp : typed;
-  const askedWeight = asked.reduce((sum, term) => sum + weight(term), 0);
-  for (const unit of units) {
-    const counts = /* @__PURE__ */ new Map();
-    for (const term of unit.terms)
-      counts.set(term, (counts.get(term) ?? 0) + 1);
-    let score = 0;
-    let covered = 0;
-    for (const term of asked) {
-      const tf = counts.get(term) ?? 0;
-      if (tf === 0) continue;
-      covered += weight(term);
-      score += weight(term) * (tf * (SATURATION + 1) / (tf + SATURATION * (1 - 0.75 + 0.75 * unit.terms.length / average)));
-    }
-    score *= covered / Math.max(1e-6, askedWeight);
-    const headingHit = asked.filter(
-      (term) => terms(unit.heading).includes(term)
-    ).length;
-    const linkish = (1 - 0.8 * Number(unit.block.d ?? 0)) * (unit.block.r === 1 ? 1 : 0.9 + 0.1 * Number(unit.block.q ?? 0.5));
-    unit.score = score * linkish * (1 + 0.25 * headingHit) * (1 + 0.5 * (unit.prior > 0 ? 1 : 0));
-  }
-  const best = units.reduce((top, unit) => Math.max(top, unit.score), 0);
-  for (const unit of units) if (unit.score < best * 0.2) unit.score = 0;
-  const lambda = Math.max(0, Math.min(0.9, Number(options.lambda ?? 0.35)));
-  const ceiling = Math.max(
-    200,
-    Math.min(24e3, Number(options.maxChars ?? 4e3))
-  );
-  const limit = Math.max(1, Math.min(60, Number(options.limit ?? 24)));
-  const chosen = [];
-  let left = units.filter((unit) => unit.score > 0);
-  if (left.length === 0) {
-    const labels = [];
-    for (const row of near) {
-      const label = trailOf(row.block);
-      if (label === "" || label.length > 200) continue;
-      const said = terms(label);
-      if (!asked.some((term) => said.includes(term))) continue;
-      if (labels.some((one) => one.text === label)) continue;
-      labels.push({
-        text: label,
-        terms: said,
-        heading: "",
-        at: blocks.indexOf(row.block),
-        step: -1,
-        prior: row.score,
-        block: row.block,
-        score: row.score
-      });
-    }
-    left = labels;
-  }
-  const scored = left.length;
-  let used = 0;
-  let lastHeading = "";
-  while (left.length > 0 && chosen.length < limit) {
-    let at = -1;
-    let bestValue = -Infinity;
-    for (let i = 0; i < left.length; i += 1) {
-      const candidate = left[i];
-      const spoken = new Set(candidate.terms);
-      let overlap = 0;
-      for (const picked of chosen) {
-        const other = new Set(picked.terms);
-        let shared = 0;
-        for (const term of spoken) if (other.has(term)) shared += 1;
-        overlap = Math.max(
-          overlap,
-          shared / Math.max(1, spoken.size + other.size - shared)
-        );
-      }
-      const value = candidate.score * (1 - lambda) - lambda * overlap;
-      if (value > bestValue) {
-        bestValue = value;
-        at = i;
-      }
-    }
-    if (at < 0 || bestValue <= 0) break;
-    const pick = left.splice(at, 1)[0];
-    const trail = pick.heading.length > TRAIL_CAP ? pick.heading.slice(0, TRAIL_CAP) : pick.heading;
-    let heading = trail !== lastHeading && trail !== "" ? trail.length + 8 : 0;
-    if (used + heading + PASSAGE_FLOOR > ceiling) {
-      pick.heading = "";
-      heading = 0;
-    } else {
-      pick.heading = trail;
-    }
-    const room = ceiling - used - heading;
-    if (pick.text.length > room) {
-      if (chosen.length > 0 || room < PASSAGE_FLOOR) break;
-      pick.text = `${pick.text.slice(0, room - 1).trimEnd()}\u2026`;
-    }
-    lastHeading = pick.heading;
-    used += pick.text.length + heading;
-    chosen.push(pick);
-  }
-  chosen.sort((a, b) => a.at - b.at || a.step - b.step);
-  return {
-    rows: chosen.map((one) => ({
-      text: one.text,
-      heading: one.heading,
-      at: one.at,
-      step: one.step
-    })),
-    total: blocks.length,
-    matched: scored
-  };
-}
-function passagesToText(passages) {
-  const lines = [];
-  let heading = "";
-  for (const row of passages.rows) {
-    if (row.heading !== "" && row.heading !== heading) {
-      heading = row.heading;
-      lines.push(`## ${heading}`);
-    }
-    lines.push(row.text);
-  }
-  return lines.join("\n");
-}
-function deltaOf(before, after) {
-  const known = new Set(
-    before.controls.map((control) => `${control.ref}\0${control.name}`)
-  );
-  const controls = after.controls.filter(
-    (control) => !known.has(`${control.ref}\0${control.name}`)
-  );
-  const seen = new Set(
-    before.text.split("\n").map((line) => line.trim()).filter((line) => line !== "")
-  );
-  const lines = after.text.split("\n").filter((line) => line.trim() !== "" && !seen.has(line.trim()));
-  return { text: lines.join("\n"), controls };
-}
-var TOKEN, SATURATION, SENTENCE_BREAK, TRAIL_CAP, PASSAGE_FLOOR;
-var init_read = __esm({
-  "packages/browser-control/src/read.ts"() {
-    "use strict";
-    TOKEN = /[a-z0-9]+|[\u3400-\u9fff]/g;
-    SATURATION = 1.5;
-    SENTENCE_BREAK = /(?<=[。！？；])|(?<=[.!?;])\s+/u;
-    TRAIL_CAP = 200;
-    PASSAGE_FLOOR = 40;
-  }
-});
-
 // packages/browser-control/src/route.ts
 var route_exports = {};
 __export(route_exports, {
@@ -1960,12 +2026,14 @@ var init_route = __esm({
             );
             this.touch();
             this.hand(page2.url, page2.controls);
+            const shown = relevant(page2.controls, asked, { maxChars });
             const text = passagesToText(found);
             return {
               url: page2.url,
               title: page2.title,
               text: text === "" ? `(nothing on this page answers ${JSON.stringify(asked)})` : text,
-              controls: page2.controls,
+              controls: shown.controls,
+              ...shown.omitted === 0 ? {} : { omitted: shown.omitted },
               truncated: found.rows.length < found.matched,
               limit: found.rows.length < found.matched ? "passages" : void 0,
               mode: "query",
@@ -2607,6 +2675,7 @@ import { fileURLToPath } from "node:url";
 
 // packages/browser-control/src/tools.ts
 init_types();
+init_read();
 var ArgumentError = class extends Error {
   name = "ArgumentError";
 };
@@ -2646,7 +2715,7 @@ var TOOLS = [
   {
     name: "browser_view",
     title: "Read the page",
-    description: 'Read the current page as text. This is the cheap way to see the words and the controls: each control sits on its own line as [12] button "Sign in", and 12 is the ref that browser_click and browser_type take. Use browser_shot only when layout or appearance matters. mode narrows the read to links or form controls; maxChars stops it early.',
+    description: 'Read the current page as text. This is the cheap way to see the words and the controls: each control sits on its own line as [12] button "Sign in", and 12 is the ref that browser_click and browser_type take. A run of near-identical controls is folded onto one line as [0]-[39] button "Item 0" .. "Item 39" (40 controls, one line), and every number in that range still works. Use browser_shot only when layout or appearance matters. mode narrows the read to links or form controls; maxChars stops it early.',
     properties: {
       mode: {
         kind: "enum",
@@ -2990,10 +3059,7 @@ function squashUrl(url) {
 function formatSnapshot(snapshot) {
   const lines = [];
   if (snapshot.text !== "") lines.push(snapshot.text);
-  for (const control of snapshot.controls) {
-    if (control.name === "") continue;
-    lines.push(`[${control.ref}] ${control.role} "${control.name}"`);
-  }
+  for (const line of controlLines(snapshot.controls)) lines.push(line);
   if (lines.length === 0) lines.push("(blank page)");
   if (snapshot.url !== "") lines.push(`url: ${squashUrl(snapshot.url)}`);
   if (snapshot.title !== "") lines.push(`title: ${snapshot.title}`);
@@ -3001,6 +3067,11 @@ function formatSnapshot(snapshot) {
   if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);
   if (snapshot.matched !== void 0 && snapshot.total !== void 0)
     lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  if ((snapshot.omitted ?? 0) > 0) {
+    lines.push(
+      `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`
+    );
+  }
   if ((snapshot.blindFrames ?? 0) > 0) {
     lines.push(
       `frames not read: ${snapshot.blindFrames} (cross-origin, so the page cannot be read through here)`

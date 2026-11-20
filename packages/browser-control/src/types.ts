@@ -56,6 +56,11 @@ export interface Snapshot {
   /** Passages shown, against the blocks they were chosen from. */
   readonly matched?: number;
   readonly total?: number;
+  /** Named controls the page has but this reading did not print, because the
+   * question did not touch them or the ceiling ran out first. They are still
+   * addressable — `hand` takes the whole list — so this is a count of what is
+   * not on screen, not of what is gone. */
+  readonly omitted?: number;
 }
 
 /** A cheap reading of the page: what to take, and what to look for. */

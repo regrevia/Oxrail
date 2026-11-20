@@ -585,6 +585,142 @@ describe("MCP server", () => {
     await harness.end();
   });
 
+  it("a reading that left controls out says how many, and they still work", async () => {
+    const harness = createHarness();
+    /* A page that generates its list is the normal case: answering one
+       question is worth leaving most of the numbering out, but only if the
+       reading admits it — a page with three buttons and a page whose other
+       157 were not printed look identical otherwise. */
+    harness.route.readImpl = async () => ({
+      ...harness.route.snapshot,
+      controls: [{ ref: 0, role: "button", name: "Add to cart" }],
+      omitted: 157,
+    });
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: {} },
+    });
+    const text = firstBlock(await harness.waitForReply(1)).text as string;
+    expect(text).toContain("controls not shown: 157");
+    /* The sentence has to say the numbers survive, or the count reads as a
+       warning that the rest of the page is unreachable. */
+    expect(text).toContain("their numbers still work");
+    await harness.end();
+  });
+
+  it("a reading that left nothing out says nothing about it", async () => {
+    const harness = createHarness();
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: {} },
+    });
+    const text = firstBlock(await harness.waitForReply(1)).text as string;
+    expect(text).not.toContain("controls not shown");
+    await harness.end();
+  });
+
+  it("the answer mode hands its question to the route", async () => {
+    const harness = createHarness();
+    /* The question is the whole point of the mode; a route that never sees it
+       cannot rank passages, and the failure looks like a page that is short
+       rather than a read that was never asked. */
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "browser_read",
+        arguments: { mode: "query", query: "refund policy" },
+      },
+    });
+    await harness.waitForReply(1);
+    expect(harness.route.lastDigestOptions?.query).toBe("refund policy");
+    await harness.end();
+  });
+
+  it("the description promises the folded form the read actually prints", async () => {
+    const harness = createHarness();
+    /* A caller learns the folded shape from the tool description before it
+       ever reads a page, so the example there has to be one this read really
+       produces — otherwise the first folded line looks like a different
+       control and the range is never used. */
+    harness.send({ jsonrpc: "2.0", id: 9, method: "tools/list", params: {} });
+    const listed = resultRecord(await harness.waitForReply(9)).tools as Array<
+      Record<string, unknown>
+    >;
+    const view = listed.find((one) => one.name === "browser_view");
+    const said = String(view?.description ?? "");
+    harness.route.snapshot = {
+      ...harness.route.snapshot,
+      controls: Array.from({ length: 40 }, (_, at) => ({
+        ref: at,
+        role: "button",
+        name: `Item ${at}`,
+      })),
+    };
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: {} },
+    });
+    const printed = firstBlock(await harness.waitForReply(1)).text as string;
+    for (const piece of ["[0]-[39]", "40 controls, one line", '"Item 0"'])
+      expect(said).toContain(piece);
+    expect(said).toContain("[0]-[39]");
+    expect(printed).toContain("[0]-[39]");
+    await harness.end();
+  });
+
+  it("no query is no filter", async () => {
+    const harness = createHarness();
+    harness.route.snapshot = {
+      ...harness.route.snapshot,
+      controls: [
+        { ref: 0, role: "button", name: "Add to cart" },
+        { ref: 1, role: "link", name: "Help" },
+      ],
+    };
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: {} },
+    });
+    const text = firstBlock(await harness.waitForReply(1)).text as string;
+    expect(text).toContain('[0] button "Add to cart"');
+    expect(text).toContain('[1] link "Help"');
+    expect(text).not.toContain("controls not shown");
+    await harness.end();
+  });
+
+  it("a long run of generated controls is one line, not forty", async () => {
+    const harness = createHarness();
+    harness.route.snapshot = {
+      ...harness.route.snapshot,
+      controls: Array.from({ length: 40 }, (_, at) => ({
+        ref: at,
+        role: "button",
+        name: `Item ${at}`,
+      })),
+    };
+    harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "browser_view", arguments: {} },
+    });
+    const text = firstBlock(await harness.waitForReply(1)).text as string;
+    expect(text).toContain("40 controls, one line");
+    expect(text).toContain("[0]-[39]");
+    expect(text).not.toContain('[7] button "Item 7"');
+    await harness.end();
+  });
+
   it("refuses the answer mode without a question", async () => {
     const harness = createHarness();
     harness.send({
