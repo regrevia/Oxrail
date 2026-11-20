@@ -10,7 +10,7 @@
 # missing; the MCP server will not start without it.
 - insert:
     - id: oxrail-mcp
-      name: '@deepseek-ai/dsh-mcp-client'
+      name: "@deepseek-ai/dsh-mcp-client"
       config:
         serverName: oxrail
         transport: stdio
