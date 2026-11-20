@@ -1431,6 +1431,77 @@ describe("tool dispatch", () => {
     expect(firstText(bad)).toContain("object");
   });
 
+  /* One refusal per argument kind, because a kind that silently accepts the
+     wrong shape is how a typo becomes a click on the wrong control. Each of
+     these is the shape a caller actually sends by mistake. */
+  it("refuses the wrong shape for every argument kind", async () => {
+    const route = new FakeRoute();
+    const cases: Array<{
+      tool: string;
+      args: Record<string, unknown>;
+      says: string;
+    }> = [
+      { tool: "browser_open", args: { url: 7 }, says: "must be a string" },
+      {
+        tool: "browser_open",
+        args: { headless: "yes" },
+        says: "must be a boolean",
+      },
+      {
+        tool: "browser_view",
+        args: { maxChars: 1.5 },
+        says: "must be an integer",
+      },
+      {
+        tool: "browser_read",
+        args: { mode: "everything" },
+        says: "must be one of",
+      },
+      {
+        tool: "browser_upload",
+        args: { files: "/tmp/one.png" },
+        says: "must be a list of strings",
+      },
+      {
+        tool: "browser_upload",
+        args: { files: [7] },
+        says: "must be a list of strings",
+      },
+      {
+        tool: "browser_do",
+        args: { steps: "click the button" },
+        says: "must be a list of steps",
+      },
+      {
+        tool: "browser_do",
+        args: { steps: ["click"] },
+        says: "must be an object",
+      },
+      {
+        tool: "browser_review_verdict",
+        args: { marks: "all fixed" },
+        says: "must be a list of marks",
+      },
+      {
+        tool: "browser_review_verdict",
+        args: { marks: [{ point: "3", verdict: "fixed" }] },
+        says: "point has to be a whole number",
+      },
+      {
+        tool: "browser_review_verdict",
+        args: { marks: [{ point: 3, verdict: "maybe" }] },
+        says: "verdict has to be",
+      },
+    ];
+    for (const { tool, args, says } of cases) {
+      const result = await dispatch(route, tool, args);
+      expect(result.isError, `${tool} ${JSON.stringify(args)}`).toBe(true);
+      expect(firstText(result), `${tool} ${JSON.stringify(args)}`).toContain(
+        says,
+      );
+    }
+  });
+
   it("answers an unknown tool with a short isError result", async () => {
     const route = new FakeRoute();
     const result = await dispatch(route, "browser_nope", {});
