@@ -66,10 +66,19 @@ describe("evidence release gate", () => {
     );
     const runRoot = join(repositoryRoot, "evidence/WP-RLS-010/run");
     await mkdir(runRoot, { recursive: true });
+    /* Hermetic: a developer's global hooksPath, template or commit-msg hook
+       still reaches a throwaway repo, so the fixture reads this machine's
+       policy instead of the gate it is meant to test. Repo-level config
+       below still applies, which is what the fixture actually needs. */
     const runGit = (...args: string[]) => {
       const result = spawnSync("git", args, {
         cwd: repositoryRoot,
         encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_SYSTEM: "/dev/null",
+        },
       });
       if (result.status !== 0) throw new Error(result.stderr);
       return result.stdout.trim();
