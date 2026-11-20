@@ -2011,6 +2011,10 @@ var init_route = __esm({
          differ from the route's standing choice. Null when nothing is running, so
          a report never describes a window that is not there. */
       runningHeadless = null;
+      /* The same for the profile: a one-shot `open({ profile })` runs a window out
+         of another directory, and a report of "default" would send the next call
+         looking for sign-ins that window never had. */
+      runningProfile = null;
       headless;
       size;
       queue = Promise.resolve();
@@ -2101,6 +2105,7 @@ var init_route = __esm({
           });
           this.chrome = chrome;
           this.runningHeadless = headless;
+          this.runningProfile = profile;
           const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
             timeoutMs: 1e4
           });
@@ -2858,7 +2863,7 @@ var init_route = __esm({
         return {
           running,
           pid: this.chrome?.pid ?? null,
-          profile: this.profile,
+          profile: running ? this.runningProfile ?? this.profile : this.profile,
           url: null,
           title: null,
           headless: running ? this.runningHeadless ?? this.headless : this.headless,
@@ -4363,6 +4368,7 @@ ${done.join("\n")}`
         this.cdp = null;
         this.page = null;
         this.runningHeadless = null;
+        this.runningProfile = null;
         this.closed = true;
         if (cdp !== null) cdp.close();
         if (chrome !== null) await chrome.close().catch(() => void 0);

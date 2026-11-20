@@ -485,6 +485,18 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
         await route.close();
         expect((await route.open({ url: page })).headless).toBe(false);
 
+        // The profile is a one-shot override too, and the same rule applies:
+        // a caller that opened another profile has to be told which one is
+        // running, or the next call looks for sign-ins in the wrong directory.
+        await route.close();
+        const other = await route.open({ url: page, profile: "live-other" });
+        expect(other.profile).toBe("live-other");
+        expect((await route.state()).profile).toBe("live-other");
+        await route.close();
+        expect((await route.open({ url: page })).profile).toBe(
+          shown.OXRAIL_BROWSER_PROFILE,
+        );
+
         // Switching on a running browser keeps the page it was on.
         await route.close();
         await route.open({ url: page });

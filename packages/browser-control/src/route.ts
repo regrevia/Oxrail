@@ -545,6 +545,10 @@ export class CdpBrowserRoute implements BrowserRoute {
      differ from the route's standing choice. Null when nothing is running, so
      a report never describes a window that is not there. */
   private runningHeadless: boolean | null = null;
+  /* The same for the profile: a one-shot `open({ profile })` runs a window out
+     of another directory, and a report of "default" would send the next call
+     looking for sign-ins that window never had. */
+  private runningProfile: string | null = null;
   private headless: boolean;
   private readonly size: { width: number; height: number };
   private queue: Promise<unknown> = Promise.resolve();
@@ -669,6 +673,7 @@ export class CdpBrowserRoute implements BrowserRoute {
       });
       this.chrome = chrome;
       this.runningHeadless = headless;
+      this.runningProfile = profile;
       const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
         timeoutMs: 10_000,
       });
@@ -1565,7 +1570,7 @@ export class CdpBrowserRoute implements BrowserRoute {
     return {
       running,
       pid: this.chrome?.pid ?? null,
-      profile: this.profile,
+      profile: running ? (this.runningProfile ?? this.profile) : this.profile,
       url: null,
       title: null,
       headless: running
@@ -3343,6 +3348,7 @@ export class CdpBrowserRoute implements BrowserRoute {
     this.cdp = null;
     this.page = null;
     this.runningHeadless = null;
+    this.runningProfile = null;
     this.closed = true;
     if (cdp !== null) cdp.close();
     if (chrome !== null) await chrome.close().catch(() => undefined);
