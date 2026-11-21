@@ -2466,14 +2466,17 @@ export class CdpBrowserRoute implements BrowserRoute {
       await this.ensure();
       if (options.fromRef !== undefined) this.addressable(options.fromRef);
       if (options.toRef !== undefined) this.addressable(options.toRef);
-      const from = await this.locate({
-        ...(options.fromRef !== undefined ? { ref: options.fromRef } : {}),
-        ...(options.fromPoint !== undefined ? { text: "" } : {}),
-      });
-      const start =
-        options.fromPoint !== undefined
-          ? pointFrom(options.fromPoint)
-          : { x: from.x, y: from.y };
+      /* A point is already a point. Looking it up as if it were a label asked
+         the page for the control containing the empty string, which never
+         matches, so asking for a drag by coordinates failed every time. */
+      let start: { x: number; y: number };
+      if (options.fromPoint !== undefined) start = pointFrom(options.fromPoint);
+      else {
+        const from = await this.locate({
+          ...(options.fromRef !== undefined ? { ref: options.fromRef } : {}),
+        });
+        start = { x: from.x, y: from.y };
+      }
       let end: { x: number; y: number };
       if (options.toPoint !== undefined) end = pointFrom(options.toPoint);
       else {
