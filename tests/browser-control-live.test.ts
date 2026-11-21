@@ -599,4 +599,46 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
       }
     },
   );
+
+  it(
+    "drags from a point as readily as from a number",
+    { timeout: 90_000 },
+    async () => {
+      const env = {
+        ...process.env,
+        OXRAIL_BROWSER_HEADLESS: "1",
+        OXRAIL_BROWSER_PROFILE: `live-drag-${process.pid}-${Date.now()}`,
+        OXRAIL_BROWSER_IDLE_MS: "60000",
+      } as NodeJS.ProcessEnv;
+      const route = new CdpBrowserRoute({ env });
+      const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+      try {
+        await route.open({ url: page });
+        const snapshot = await route.read({ maxChars: 4_000 });
+        const button = snapshot.controls.find(
+          (control) => control.name === "Press me",
+        );
+        if (button === undefined) throw new Error("no button control");
+
+        // A point is already a point: it must not be looked up as a label.
+        // Reading it as one asked the page for the control containing the
+        // empty string, which never matches, so every coordinate drag failed.
+        const started = await route.drag({
+          fromPoint: "120,160",
+          toRef: button.ref,
+          read: false,
+        });
+        expect(textOf(started)).toMatch(/^dragged 120,160 to \d+,\d+$/u);
+
+        // The whole point of the parameter is that the caller supplies it, so
+        // a value that is not a point is refused by name rather than guessed.
+        await expect(
+          route.drag({ fromPoint: "120", toRef: button.ref, read: false }),
+        ).rejects.toThrow(/a point must be "x,y" in pixels/u);
+      } finally {
+        await route.close().catch(() => undefined);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

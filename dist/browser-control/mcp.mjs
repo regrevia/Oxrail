@@ -3602,11 +3602,14 @@ ${changed.join("\n")}`
           await this.ensure();
           if (options.fromRef !== void 0) this.addressable(options.fromRef);
           if (options.toRef !== void 0) this.addressable(options.toRef);
-          const from = await this.locate({
-            ...options.fromRef !== void 0 ? { ref: options.fromRef } : {},
-            ...options.fromPoint !== void 0 ? { text: "" } : {}
-          });
-          const start = options.fromPoint !== void 0 ? pointFrom(options.fromPoint) : { x: from.x, y: from.y };
+          let start;
+          if (options.fromPoint !== void 0) start = pointFrom(options.fromPoint);
+          else {
+            const from = await this.locate({
+              ...options.fromRef !== void 0 ? { ref: options.fromRef } : {}
+            });
+            start = { x: from.x, y: from.y };
+          }
           let end;
           if (options.toPoint !== void 0) end = pointFrom(options.toPoint);
           else {

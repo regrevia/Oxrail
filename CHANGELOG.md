@@ -21,6 +21,10 @@ setting rather than the window in front of them. Nothing here is a version bump:
   while the process used another `--user-data-dir`. `headless` and `profile` on
   `browser_open` are one-shot overrides; `browser_login` still answers what is stored
   on disk, because that is the question it is asked.
+- **`browser_drag` starts where it was told.** `fromPoint` looked the point up as
+  if it were a label, so the page was asked for the control containing the empty
+  string, which never matches: every drag by coordinates failed with
+  `no visible control contains ""`. A point is now used as a point.
 - **`browser_review_verdict` refuses a verdict that is not one.** `verdict` was
   accepted as any string, so `"maybe"` produced a verdict no reader could act on.
 - **The tool list declares its cache lifetime.** `tools/list` now carries `ttlMs` and
