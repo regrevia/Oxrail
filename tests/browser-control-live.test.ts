@@ -512,6 +512,19 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
         expect(textOf(back)).toContain("shown now");
         expect((await route.state()).headless).toBe(false);
         expect((await route.state()).url).toContain("data:text/html");
+
+        // A switch restarts the browser, so it has to come back up on the
+        // profile it was already using. Coming back on the standing profile
+        // would swap the sign-ins under a page that never moved, and the page
+        // surviving would make that look like a switch that worked.
+        await route.close();
+        await route.open({ url: page, profile: "live-switch-profile" });
+        expect((await route.state()).profile).toBe("live-switch-profile");
+        await route.mode({ display: "headless" });
+        const switchedProfile = await route.state();
+        expect(switchedProfile.running).toBe(true);
+        expect(switchedProfile.headless).toBe(true);
+        expect(switchedProfile.profile).toBe("live-switch-profile");
       } finally {
         await route.close().catch(() => undefined);
         rmSync(dir, { recursive: true, force: true });
