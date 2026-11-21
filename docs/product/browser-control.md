@@ -73,6 +73,67 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 | `browser_mode`  | Switch a running browser between shown and headless, keeping its page                         |
 | `browser_close` | Stop the route's Chrome and return the final state                                            |
 
+### Finding one thing without reading the page
+
+| Tool              | Purpose                                                                                       |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `browser_find`    | Search the controls and the words on the page; each hit comes back with the ref a click takes |
+| `browser_extract` | Pull the rows one CSS selector describes, without reading the rest of the page                |
+| `browser_wait`    | Block until text appears or goes, the address matches, or the page stops changing             |
+| `browser_scroll`  | Scroll by a number of pixels; read after scrolling rather than reading everything first       |
+
+### Not part of the reading contract
+
+`browser_eval` runs an expression in the page and returns its value. It ships with
+the tool face, but it is outside what the specification accepts: it is named in
+neither §52 nor any `REQ-BCTL-*`, and whether it widens the write path in §42.1 is
+an open decision rather than something the spec grants. It exists because a caller
+sometimes needs one fact no reading exposes — a computed style, a scroll height.
+Nothing else in this route evaluates page code.
+
+### Acting on a control
+
+| Tool             | Purpose                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `browser_hover`  | Move the mouse onto a control and hold it, so a menu that only opens on hover opens      |
+| `browser_check`  | Read a checkbox or switch, then set it only if it is not already the state you asked for |
+| `browser_select` | Choose a dropdown option by value or by the words it shows                               |
+| `browser_drag`   | Drag a slider handle, a card, or a file onto a drop zone                                 |
+| `browser_upload` | Hand files to a file input; the chooser never opens                                      |
+| `browser_do`     | Run a sequence of steps in one call, stopping at the first one that cannot proceed       |
+
+### What the page is doing
+
+| Tool              | Purpose                                                                |
+| ----------------- | ---------------------------------------------------------------------- |
+| `browser_console` | The page's own log lines, newest last                                  |
+| `browser_network` | The requests the page made, with their status                          |
+| `browser_failed`  | Only the requests that never finished, with the reason                 |
+| `browser_dialog`  | Answer a confirm, alert or prompt that is stopping the page            |
+| `browser_look`    | See the page as a color grid, for a canvas or a page that draws itself |
+| `browser_prepare` | Focus a canvas, game or video and count the frames it actually draws   |
+
+### Files and session
+
+| Tool                | Purpose                                                                      |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `browser_grab`      | Save an image or canvas as a file, so it can be opened rather than described |
+| `browser_pdf`       | Print the page to a PDF and say where it landed                              |
+| `browser_tabs`      | List the open tabs, switch to one, or close one                              |
+| `browser_downloads` | The files this profile downloaded, with size and where they landed           |
+| `browser_media`     | The streams the page played, and a way to save one                           |
+| `browser_cookie`    | Read, set or clear the page's cookies                                        |
+| `browser_clipboard` | Read what the page put on the clipboard, or put text there                   |
+| `browser_resume`    | Clear the hold so the next action is sent at once, ending a takeover         |
+
+### Chats in the page
+
+| Tool                     | Purpose                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| `browser_ask`            | Say something to a chat open in the page and read its answer back in the same call  |
+| `browser_review`         | Ask that chat to review a repository and take the review back as a list             |
+| `browser_review_verdict` | Record what happened to each review point so the next round leaves settled ones out |
+
 ### A shown window by default, and what a report describes
 
 The window is shown unless the caller asks otherwise: a browser nobody can see makes a wrong page look like a wrong reading. `OXRAIL_BROWSER_HEADLESS=1` hides it for a whole process — the comparison is strict, so a typo in that value shows a window rather than silently hiding one. `browser_open` also takes `headless` and `profile`, and both are **one-shot**: they decide this launch only and do not write the route's standing choice, so a caller that opened a hidden window has not made hidden the default. `browser_mode` switches a running browser without losing the page it was on, and costs a restart: it closes the window and opens the same URL again in the other mode.
