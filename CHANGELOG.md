@@ -2,6 +2,39 @@
 
 All notable project changes are documented here. The normative specification history remains in `spec/OXRAIL_SPEC.md`.
 
+## Unreleased
+
+Since `0.1.0-alpha.8` the Browser Control route grew from a read-only surface into
+the full tool set it ships today, and two of its reports turned out to describe a
+setting rather than the window in front of them. Nothing here is a version bump:
+`0.1.0-alpha.8` stays the published name until a release gate accepts a new one.
+
+- **A shown window by default.** `browser_open` starts a visible Chrome unless the
+  caller asks otherwise; `OXRAIL_BROWSER_HEADLESS=1` hides it, and every other value
+  (`0`, unset, a typo) shows it. The default is deliberate: a browser nobody can see
+  makes a wrong page look like a correct read. `browser_mode` switches a running
+  window between the two on the same URL, keeping the page and its sign-ins; the
+  switch restarts the process, so `pid` always changes.
+- **`browser_state` reports the window that exists**, not the setting that produced
+  it. Before this, `open({headless:true})` left `state()` reporting `headless: false`
+  while a hidden window ran, and `open({profile:"x"})` reported the resident profile
+  while the process used another `--user-data-dir`. `headless` and `profile` on
+  `browser_open` are one-shot overrides; `browser_login` still answers what is stored
+  on disk, because that is the question it is asked.
+- **`browser_review_verdict` refuses a verdict that is not one.** `verdict` was
+  accepted as any string, so `"maybe"` produced a verdict no reader could act on.
+- **The tool list declares its cache lifetime.** `tools/list` now carries `ttlMs` and
+  `cacheScope`, and every result envelope carries `resultType`, per MCP revision
+  `2026-07-28`.
+- **The three reading modes answer inside one ceiling.** `article`, `map` and `query`
+  each state which cap they hit instead of only that they hit one; a folded run of
+  near-identical controls counts as one line, and `query` answers with the controls
+  the passage actually touched.
+- **The DSH integration names an existing checkout.** The committed `args`/`cwd`
+  pointed at `/Volumes/US202/moved/Desktop-work/Oxrail`, a volume macOS reports as
+  corrupt and unable to repair; its `dist/hooks/post-tool.mjs` no longer parses, so a
+  profile linked there started an MCP server from a broken artifact.
+
 ## [0.1.0-alpha.8] - 2026-11-13
 
 - 滚动到目标后的坐标不再取错：`scrollIntoView` 以前跟着页面的 `scroll-behavior:smooth`
