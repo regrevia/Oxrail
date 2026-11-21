@@ -1628,6 +1628,11 @@ export class CdpBrowserRoute implements BrowserRoute {
     const changed = next !== now;
     this.headless = next;
     let where = "";
+    /* A one-shot `open({ profile })` can leave a window on a profile that is
+       not the standing one. Coming back up on the standing profile would swap
+       the sign-ins under a page that has not moved, so carry the running
+       profile across the restart the way the URL is carried. */
+    const profile = this.runningProfile ?? this.profile;
     if (changed && this.chrome !== null) {
       try {
         where = await this.evaluate<string>("location.href");
@@ -1636,7 +1641,7 @@ export class CdpBrowserRoute implements BrowserRoute {
       }
       await this.close();
       if (where !== "" && where !== "about:blank") {
-        await this.open({ url: where });
+        await this.open({ url: where, profile });
         where = ` on ${where}`;
       } else {
         where = "";

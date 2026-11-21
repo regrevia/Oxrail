@@ -2911,6 +2911,7 @@ change it with display: "visible" or "headless"`
         const changed = next !== now;
         this.headless = next;
         let where = "";
+        const profile = this.runningProfile ?? this.profile;
         if (changed && this.chrome !== null) {
           try {
             where = await this.evaluate("location.href");
@@ -2919,7 +2920,7 @@ change it with display: "visible" or "headless"`
           }
           await this.close();
           if (where !== "" && where !== "about:blank") {
-            await this.open({ url: where });
+            await this.open({ url: where, profile });
             where = ` on ${where}`;
           } else {
             where = "";
