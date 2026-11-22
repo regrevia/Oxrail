@@ -216,17 +216,47 @@ if (goneWork.length !== 0)
     `dropped ${goneWork.length} work packages the spec no longer has: ${goneWork.join(", ")}`,
   );
 
-const labStart = lines.indexOf('<a id="sec-51"></a>');
-if (labStart !== -1) {
-  index.sections["SEC-51"] = {
-    anchor: "sec-51",
-    title: "产品 Skill 与内部 Lab 分离实施合同",
-  };
+// A section entry is a heading and the line range beside it, so the heading is
+// read rather than restated: `number` and `title` come from the `# N. ...` line
+// the anchor points at. A section also says how it wants to be found, in the
+// `<!-- oxrail-index: -->` line under that heading, so the keywords come from
+// there instead of from a copy kept in step by hand. Sections written before
+// that marker existed have no keywords and keep none.
+const SECTION_AT = /^<a id="(sec-(\d+))"><\/a>$/;
+const SECTION_HEAD = /^# (\d+)\. (.+)$/;
+const SECTION_MARK = /^<!-- oxrail-index: (.+) -->$/;
+for (let at = 0; at < lines.length; at += 1) {
+  const anchored = lines[at].match(SECTION_AT);
+  if (anchored === null) continue;
+  const id = `SEC-${anchored[2]}`;
+  const entry = (index.sections[id] ??= {});
+  entry.anchor = anchored[1];
+  for (let scan = at + 1; scan < lines.length; scan += 1) {
+    if (lines[scan].trim() === "") continue;
+    const head = lines[scan].match(SECTION_HEAD);
+    if (head !== null) {
+      entry.number = Number(head[1]);
+      entry.title = head[2].trim();
+    }
+    break;
+  }
+  entry.keywords ??= [];
+  for (let scan = at + 1; scan < lines.length; scan += 1) {
+    if (SECTION_AT.test(lines[scan])) break;
+    const mark = lines[scan].match(SECTION_MARK);
+    if (mark === null) continue;
+    entry.keywords = mark[1]
+      .split(",")
+      .map((word) => word.trim())
+      .filter((word) => word !== "");
+    break;
+  }
+}
+if (lines.includes('<a id="sec-51"></a>'))
   index.architecture_decisions["ADR-LAB-001"] = {
     title: "产品与内部 Lab 独立交付",
     path: "docs/adr/ADR-LAB-001.md",
   };
-}
 if (addedWork.length !== 0 || addedTest.length !== 0)
   console.log(
     `collected ${addedWork.length} work packages and ${addedTest.length} tests the index did not have yet`,
