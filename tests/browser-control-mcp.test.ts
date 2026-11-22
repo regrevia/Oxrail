@@ -628,9 +628,9 @@ describe("MCP server", () => {
       },
       {
         tool: "browser_drag",
-        args: { fromPoint: "10,20", toPoint: "30,40" },
+        args: { fromRef: 3, toRef: 4 },
         reaches: "drag",
-        expect: { fromPoint: "10,20", toPoint: "30,40" },
+        expect: { fromRef: 3, toRef: 4 },
       },
       {
         tool: "browser_upload",

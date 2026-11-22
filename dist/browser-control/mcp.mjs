@@ -1623,20 +1623,6 @@ import {
   writeFileSync
 } from "node:fs";
 import { join } from "node:path";
-function pointFrom(value) {
-  const parts = value.split(",");
-  if (parts.length !== 2)
-    throw new Error(
-      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`
-    );
-  const x = Number(parts[0]);
-  const y = Number(parts[1]);
-  if (!Number.isFinite(x) || !Number.isFinite(y))
-    throw new Error(
-      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`
-    );
-  return { x, y };
-}
 function saidOf(result) {
   const first = result.content[0];
   return first === void 0 || first.type !== "text" ? "" : first.text;
@@ -2180,34 +2166,43 @@ var init_route = __esm({
         return reply.result?.value;
       }
       async read(options = {}) {
-        return this.serial(async () => {
-          await this.ensure();
-          const mode = options.mode ?? "text";
-          const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
-          const snapshot = await this.evaluate(
-            snapshotExpression({ mode, maxChars })
-          );
-          this.touch();
-          this.last = {
-            url: snapshot.url,
-            text: snapshot.text,
-            controls: snapshot.controls
-          };
-          this.hand(snapshot.url, snapshot.controls);
-          return {
-            url: snapshot.url,
-            title: snapshot.title,
-            text: snapshot.text,
-            controls: snapshot.controls,
-            truncated: snapshot.truncated === true,
-            limit: capOf(snapshot.limit),
-            /* Carried out of the page expression, or a caller counting only what it
-               received would call a page with an unreadable frame complete. */
-            blindFrames: snapshot.blindFrames ?? 0,
-            words: snapshot.words ?? 0,
-            chars: snapshot.text.length
-          };
-        });
+        return this.serial(async () => this.readNow(options));
+      }
+      /**
+       * The read itself, inside whatever ordering the caller already holds.
+       *
+       * A write tool hands out fresh refs after it acts, and it runs inside
+       * `serial`, so it has to call this rather than `read`: `read` takes the
+       * queue again and would wait for the turn it is already holding, which is a
+       * deadlock that also strands every call queued behind it.
+       */
+      async readNow(options = {}) {
+        await this.ensure();
+        const mode = options.mode ?? "text";
+        const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
+        const snapshot = await this.evaluate(
+          snapshotExpression({ mode, maxChars })
+        );
+        this.touch();
+        this.last = {
+          url: snapshot.url,
+          text: snapshot.text,
+          controls: snapshot.controls
+        };
+        this.hand(snapshot.url, snapshot.controls);
+        return {
+          url: snapshot.url,
+          title: snapshot.title,
+          text: snapshot.text,
+          controls: snapshot.controls,
+          truncated: snapshot.truncated === true,
+          limit: capOf(snapshot.limit),
+          /* Carried out of the page expression, or a caller counting only what it
+             received would call a page with an unreadable frame complete. */
+          blindFrames: snapshot.blindFrames ?? 0,
+          words: snapshot.words ?? 0,
+          chars: snapshot.text.length
+        };
       }
       /**
        * Read the page for a few hundred words instead of a whole DOM.
@@ -3447,7 +3442,7 @@ ${changed.join("\n")}`
                 }
               ]
             };
-          const snapshot = await this.read({ maxChars: 2e3 });
+          const snapshot = await this.readNow({ maxChars: 2e3 });
           return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
         });
       }
@@ -3482,7 +3477,7 @@ ${changed.join("\n")}`
                 }
               ]
             };
-          const snapshot = await this.read({ maxChars: 2e3 });
+          const snapshot = await this.readNow({ maxChars: 2e3 });
           return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
         });
       }
@@ -3528,7 +3523,7 @@ ${changed.join("\n")}`
               content: [{ type: "text", text: said }],
               ...took ? {} : { isError: true }
             };
-          const snapshot = await this.read({ maxChars: 1500 });
+          const snapshot = await this.readNow({ maxChars: 1500 });
           return {
             content: [
               { type: "text", text: said },
@@ -3593,31 +3588,27 @@ ${changed.join("\n")}`
                 }
               ]
             };
-          const snapshot = await this.read({ maxChars: 1500 });
+          const snapshot = await this.readNow({ maxChars: 1500 });
           return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
         });
       }
       async drag(options) {
         return this.serial(async () => {
           await this.ensure();
-          if (options.fromRef !== void 0) this.addressable(options.fromRef);
-          if (options.toRef !== void 0) this.addressable(options.toRef);
-          let start;
-          if (options.fromPoint !== void 0) start = pointFrom(options.fromPoint);
-          else {
-            const from = await this.locate({
-              ...options.fromRef !== void 0 ? { ref: options.fromRef } : {}
-            });
-            start = { x: from.x, y: from.y };
-          }
-          let end;
-          if (options.toPoint !== void 0) end = pointFrom(options.toPoint);
-          else {
-            const to = await this.locate({
-              ...options.toRef !== void 0 ? { ref: options.toRef } : {}
-            });
-            end = { x: to.x, y: to.y };
-          }
+          if (options.fromRef === void 0)
+            throw new Error(
+              "a drag needs somewhere to start: give fromRef, a number the last read returned"
+            );
+          if (options.toRef === void 0)
+            throw new Error(
+              "a drag needs somewhere to end: give toRef, a number the last read returned"
+            );
+          this.addressable(options.fromRef);
+          this.addressable(options.toRef);
+          const from = await this.locate({ ref: options.fromRef });
+          const start = { x: from.x, y: from.y };
+          const to = await this.locate({ ref: options.toRef });
+          const end = { x: to.x, y: to.y };
           const { cdp, page } = await this.ensure();
           const base = { button: "left", clickCount: 1, modifiers: 0 };
           await cdp.send(
@@ -3681,7 +3672,7 @@ ${changed.join("\n")}`
                 }
               ]
             };
-          const snapshot = await this.read({ maxChars: 1500 });
+          const snapshot = await this.readNow({ maxChars: 1500 });
           return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
         });
       }
@@ -3749,7 +3740,7 @@ ${changed.join("\n")}`
                 }
               ]
             };
-          const snapshot = await this.read({ maxChars: 1500 });
+          const snapshot = await this.readNow({ maxChars: 1500 });
           return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
         });
       }
@@ -4930,23 +4921,15 @@ var TOOLS = [
   {
     name: "browser_drag",
     title: "Drag",
-    description: "Drag one thing onto another: a slider handle, a card into a column, a file onto a drop zone. Give each end by ref or by a point that came from a read, and the move is sent as a real press, a series of moves and a release, which is what the page listens for.",
+    description: "Drag one thing onto another: a slider handle, a card into a column, a file onto a drop zone. Give each end by number, from the last read, and the move is sent as a real press, a series of moves and a release, which is what the page listens for.",
     properties: {
       fromRef: {
         kind: "integer",
         description: "Where the drag starts, by number."
       },
-      fromPoint: {
-        kind: "string",
-        description: 'Where the drag starts, as "x,y" in pixels.'
-      },
       toRef: {
         kind: "integer",
         description: "Where the drag ends, by number."
-      },
-      toPoint: {
-        kind: "string",
-        description: 'Where the drag ends, as "x,y" in pixels.'
       },
       read: {
         kind: "boolean",
@@ -4954,17 +4937,14 @@ var TOOLS = [
         extras: { default: true }
       }
     },
+    required: ["fromRef", "toRef"],
     async run(route, args) {
       const fromRef = integerValue(args, "fromRef");
-      const fromPoint = stringValue(args, "fromPoint");
       const toRef = integerValue(args, "toRef");
-      const toPoint = stringValue(args, "toPoint");
       const read = booleanValue(args, "read");
       return route.drag({
         ...fromRef === void 0 ? {} : { fromRef },
-        ...fromPoint === void 0 ? {} : { fromPoint },
         ...toRef === void 0 ? {} : { toRef },
-        ...toPoint === void 0 ? {} : { toPoint },
         ...read === void 0 ? {} : { read }
       });
     }

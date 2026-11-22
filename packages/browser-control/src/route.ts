@@ -109,21 +109,6 @@ const LOAD_TIMEOUT_MS = 20_000;
  * @param value - what the caller wrote.
  * @returns the point in CSS pixels.
  */
-function pointFrom(value: string): { x: number; y: number } {
-  const parts = value.split(",");
-  if (parts.length !== 2)
-    throw new Error(
-      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`,
-    );
-  const x = Number(parts[0]);
-  const y = Number(parts[1]);
-  if (!Number.isFinite(x) || !Number.isFinite(y))
-    throw new Error(
-      `a point must be "x,y" in pixels; got ${JSON.stringify(value)}`,
-    );
-  return { x, y };
-}
-
 const MARKS: readonly Verdict[] = ["fixed", "verified", "invalid", "open"];
 
 /** The text a route method produced, for the one place that has to read it back. */
@@ -757,34 +742,44 @@ export class CdpBrowserRoute implements BrowserRoute {
   }
 
   async read(options: ReadOptions = {}): Promise<Snapshot> {
-    return this.serial(async () => {
-      await this.ensure();
-      const mode = options.mode ?? "text";
-      const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
-      const snapshot = await this.evaluate<Snapshot>(
-        snapshotExpression({ mode, maxChars }),
-      );
-      this.touch();
-      this.last = {
-        url: snapshot.url,
-        text: snapshot.text,
-        controls: snapshot.controls,
-      };
-      this.hand(snapshot.url, snapshot.controls);
-      return {
-        url: snapshot.url,
-        title: snapshot.title,
-        text: snapshot.text,
-        controls: snapshot.controls,
-        truncated: snapshot.truncated === true,
-        limit: capOf(snapshot.limit),
-        /* Carried out of the page expression, or a caller counting only what it
-           received would call a page with an unreadable frame complete. */
-        blindFrames: snapshot.blindFrames ?? 0,
-        words: snapshot.words ?? 0,
-        chars: snapshot.text.length,
-      };
-    });
+    return this.serial(async () => this.readNow(options));
+  }
+
+  /**
+   * The read itself, inside whatever ordering the caller already holds.
+   *
+   * A write tool hands out fresh refs after it acts, and it runs inside
+   * `serial`, so it has to call this rather than `read`: `read` takes the
+   * queue again and would wait for the turn it is already holding, which is a
+   * deadlock that also strands every call queued behind it.
+   */
+  private async readNow(options: ReadOptions = {}): Promise<Snapshot> {
+    await this.ensure();
+    const mode = options.mode ?? "text";
+    const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
+    const snapshot = await this.evaluate<Snapshot>(
+      snapshotExpression({ mode, maxChars }),
+    );
+    this.touch();
+    this.last = {
+      url: snapshot.url,
+      text: snapshot.text,
+      controls: snapshot.controls,
+    };
+    this.hand(snapshot.url, snapshot.controls);
+    return {
+      url: snapshot.url,
+      title: snapshot.title,
+      text: snapshot.text,
+      controls: snapshot.controls,
+      truncated: snapshot.truncated === true,
+      limit: capOf(snapshot.limit),
+      /* Carried out of the page expression, or a caller counting only what it
+         received would call a page with an unreadable frame complete. */
+      blindFrames: snapshot.blindFrames ?? 0,
+      words: snapshot.words ?? 0,
+      chars: snapshot.text.length,
+    };
   }
 
   /**
@@ -2286,7 +2281,7 @@ export class CdpBrowserRoute implements BrowserRoute {
             },
           ],
         };
-      const snapshot = await this.read({ maxChars: 2_000 });
+      const snapshot = await this.readNow({ maxChars: 2_000 });
       return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
     });
   }
@@ -2322,7 +2317,7 @@ export class CdpBrowserRoute implements BrowserRoute {
             },
           ],
         };
-      const snapshot = await this.read({ maxChars: 2_000 });
+      const snapshot = await this.readNow({ maxChars: 2_000 });
       return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
     });
   }
@@ -2379,7 +2374,7 @@ export class CdpBrowserRoute implements BrowserRoute {
           content: [{ type: "text", text: said }],
           ...(took ? {} : { isError: true }),
         };
-      const snapshot = await this.read({ maxChars: 1_500 });
+      const snapshot = await this.readNow({ maxChars: 1_500 });
       return {
         content: [
           { type: "text", text: said },
@@ -2456,7 +2451,7 @@ export class CdpBrowserRoute implements BrowserRoute {
             },
           ],
         };
-      const snapshot = await this.read({ maxChars: 1_500 });
+      const snapshot = await this.readNow({ maxChars: 1_500 });
       return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
     });
   }
@@ -2464,27 +2459,24 @@ export class CdpBrowserRoute implements BrowserRoute {
   async drag(options: DragOptions): Promise<ToolResult> {
     return this.serial(async () => {
       await this.ensure();
-      if (options.fromRef !== undefined) this.addressable(options.fromRef);
-      if (options.toRef !== undefined) this.addressable(options.toRef);
-      /* A point is already a point. Looking it up as if it were a label asked
-         the page for the control containing the empty string, which never
-         matches, so asking for a drag by coordinates failed every time. */
-      let start: { x: number; y: number };
-      if (options.fromPoint !== undefined) start = pointFrom(options.fromPoint);
-      else {
-        const from = await this.locate({
-          ...(options.fromRef !== undefined ? { ref: options.fromRef } : {}),
-        });
-        start = { x: from.x, y: from.y };
-      }
-      let end: { x: number; y: number };
-      if (options.toPoint !== undefined) end = pointFrom(options.toPoint);
-      else {
-        const to = await this.locate({
-          ...(options.toRef !== undefined ? { ref: options.toRef } : {}),
-        });
-        end = { x: to.x, y: to.y };
-      }
+      /* Both ends are controls the last read handed out, so both are resolved
+         the same way: a number becomes the middle of the control it names, and
+         there is nowhere to give a coordinate instead. An end that was not
+         given is named as missing rather than looked up as an empty label. */
+      if (options.fromRef === undefined)
+        throw new Error(
+          "a drag needs somewhere to start: give fromRef, a number the last read returned",
+        );
+      if (options.toRef === undefined)
+        throw new Error(
+          "a drag needs somewhere to end: give toRef, a number the last read returned",
+        );
+      this.addressable(options.fromRef);
+      this.addressable(options.toRef);
+      const from = await this.locate({ ref: options.fromRef });
+      const start = { x: from.x, y: from.y };
+      const to = await this.locate({ ref: options.toRef });
+      const end = { x: to.x, y: to.y };
       const { cdp, page } = await this.ensure();
       const base = { button: "left", clickCount: 1, modifiers: 0 };
       await cdp.send(
@@ -2550,7 +2542,7 @@ export class CdpBrowserRoute implements BrowserRoute {
             },
           ],
         };
-      const snapshot = await this.read({ maxChars: 1_500 });
+      const snapshot = await this.readNow({ maxChars: 1_500 });
       return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
     });
   }
@@ -2621,7 +2613,7 @@ export class CdpBrowserRoute implements BrowserRoute {
             },
           ],
         };
-      const snapshot = await this.read({ maxChars: 1_500 });
+      const snapshot = await this.readNow({ maxChars: 1_500 });
       return { content: [{ type: "text", text: formatSnapshot(snapshot) }] };
     });
   }
