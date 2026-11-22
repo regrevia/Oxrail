@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-20",
+  "generated_at": "2026-11-21",
   "canonical_file": "OXRAIL_SPEC.md",
   "spec_version": "1.0.35",
   "spec_sha256": "dc5a4d34cbaeb1f3b1f629484872f310de757dfd6aaea269bed8ec12babdceee",
@@ -645,13 +645,23 @@
       "anchor": "sec-51",
       "title": "产品 Skill 与内部 Lab 分离实施合同",
       "start_line": 12482,
-      "end_line": 12947
+      "end_line": 12947,
+      "number": 51,
+      "keywords": []
     },
     "SEC-52": {
       "anchor": "sec-52",
       "title": "Opt-in Browser Control 路由（MCP / CDP）",
       "start_line": 12948,
-      "end_line": 12988
+      "end_line": 12988,
+      "number": 52,
+      "keywords": [
+        "browser-control",
+        "mcp",
+        "cdp",
+        "opt-in",
+        "route"
+      ]
     }
   },
   "requirements": {

@@ -32,9 +32,65 @@ if (!canonical.includes(`### v${version} —`))
 const anchors = new Set(
   [...canonical.matchAll(/<a id="([^"]+)"/g)].map((match) => match[1]),
 );
-for (let number = 0; number <= 50; number += 1) {
-  const id = `sec-${String(number).padStart(2, "0")}`;
-  if (!anchors.has(id)) failures.push(`missing section anchor ${id}`);
+// The sections are numbered 0..N with no gaps, and N is whatever the spec has
+// rather than a constant here: a range written into this file is how SEC-51 and
+// SEC-52 shipped as anchors nothing checked.
+const numbered = [...anchors]
+  .map((id) => id.match(/^sec-(\d+)$/))
+  .filter((match) => match !== null)
+  .map((match) => Number(match[1]))
+  .sort((left, right) => left - right);
+for (let number = 0; number <= numbered.length - 1; number += 1) {
+  if (numbered[number] !== number)
+    failures.push(
+      `section anchors are not 0..${numbered.length - 1}: no sec-${String(number).padStart(2, "0")}`,
+    );
+}
+for (const [id, section] of Object.entries(index.sections)) {
+  const number = Number(id.slice(4));
+  if (section.number !== number)
+    failures.push(`${id} says it is section ${section.number}`);
+  if (typeof section.title !== "string" || section.title.trim() === "")
+    failures.push(`${id} has no title`);
+}
+// A section states how it wants to be found in one line under its heading, so
+// the index is checked against that line instead of the line against a copy.
+const marks = new Map();
+// The line belongs to the section whose anchor it sits under, which is the
+// anchor and then one `# N. Title` heading and nothing else in between: with a
+// bare "the last anchor I saw" rule a section that lost its anchor silently
+// donated its own line to the section above it.
+let held;
+let headed = false;
+for (const line of canonical.split("\n")) {
+  const anchored = line.match(/^<a id="(sec-\d+)"><\/a>$/);
+  if (anchored !== null) {
+    held = anchored[1];
+    headed = false;
+  } else if (/^# \d+\. /.test(line) && held !== undefined) {
+    if (headed) held = undefined;
+    headed = true;
+  }
+  const mark = line.match(/^<!-- oxrail-index: (.+) -->$/);
+  if (mark === null || held === undefined || !headed) continue;
+  marks.set(
+    held,
+    mark[1]
+      .split(",")
+      .map((word) => word.trim())
+      .filter((word) => word !== ""),
+  );
+}
+for (const [anchor, words] of marks) {
+  const entry = index.sections[anchor.toUpperCase()];
+  if (entry === undefined) {
+    failures.push(`${anchor} has an index line but no section entry`);
+    continue;
+  }
+  if (JSON.stringify(entry.keywords) !== JSON.stringify(words))
+    failures.push(
+      `${anchor} keywords are not the ones its section declares: ${entry.keywords} vs ${words}`,
+    );
 }
 for (const href of canonical.matchAll(/\]\(#([^)]+)\)/g)) {
   if (!anchors.has(href[1]))
