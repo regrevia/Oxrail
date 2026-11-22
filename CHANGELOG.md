@@ -21,10 +21,23 @@ setting rather than the window in front of them. Nothing here is a version bump:
   while the process used another `--user-data-dir`. `headless` and `profile` on
   `browser_open` are one-shot overrides; `browser_login` still answers what is stored
   on disk, because that is the question it is asked.
-- **`browser_drag` starts where it was told.** `fromPoint` looked the point up as
-  if it were a label, so the page was asked for the control containing the empty
-  string, which never matches: every drag by coordinates failed with
-  `no visible control contains ""`. A point is now used as a point.
+- **`browser_drag` takes two numbers and no coordinates.** `fromPoint` looked the
+  point up as if it were a label, so the page was asked for the control containing
+  the empty string, which never matches: every drag by coordinates failed with
+  `no visible control contains ""`. Rather than repair a coordinate the route is
+  specified not to accept, both point arguments are gone: `fromRef` and `toRef` are
+  the whole address, each held to the last read the way `browser_click` is, and an
+  end left out is reported as missing instead of being looked up as an empty label.
+- **Six write tools no longer freeze the route when asked to read.** `browser_drag`,
+  `browser_hover`, `browser_check`, `browser_select`, `browser_scroll` and
+  `browser_upload` refresh the refs they invalidate and then hand back what the page
+  says. The refresh went through `read`, which takes the route's ordering queue, from
+  inside a tool that already held it: the call waited for the turn it was holding and
+  never returned, so the tool reported a timeout and every later call waited behind
+  it until the process was restarted. Only the default `read: true` path was affected,
+  and the suite passed `read: false` everywhere, which is why it stayed green. The
+  refresh now goes through the read body directly, and each of the six has a test that
+  hangs without it.
 - **`browser_review_verdict` refuses a verdict that is not one.** `verdict` was
   accepted as any string, so `"maybe"` produced a verdict no reader could act on.
 - **The tool list declares its cache lifetime.** `tools/list` now carries `ttlMs` and

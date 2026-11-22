@@ -270,9 +270,7 @@ export interface SelectOptions {
 
 export interface DragOptions {
   readonly fromRef?: number;
-  readonly fromPoint?: string;
   readonly toRef?: number;
-  readonly toPoint?: string;
   readonly read?: boolean;
 }
 

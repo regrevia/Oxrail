@@ -363,7 +363,7 @@ The 60000-character button name is unchanged by both rules — folding needs a r
 
 ## Writes are addressed by a read
 
-There is no way to hand this route a coordinate. `browser_click` takes a `ref` or some visible text, `browser_type` takes a `ref` and the text, and neither accepts a point on screen — so a write that acts on a control has to name it with something a read returned, and that number or name is the whole address. Both kinds are held to the read: a number must be one the last read produced, and a text must appear in a name the last read said out loud, so neither can reach a control the caller has not seen. A click by text that the last read did not name is refused the same way an invented number is:
+There is no way to hand this route a coordinate. `browser_click` takes a `ref` or some visible text, `browser_type` takes a `ref` and the text, and `browser_drag` takes two numbers — one for each end — and none of them accepts a point on screen — so a write that acts on a control has to name it with something a read returned, and that number or name is the whole address. Both kinds are held to the read: a number must be one the last read produced, and a text must appear in a name the last read said out loud, so neither can reach a control the caller has not seen. A click by text that the last read did not name is refused the same way an invented number is:
 
 ```
 control "Delete account" cannot be addressed: the last read of https://example.com/ did not name it — call browser_view again and use a number it returns

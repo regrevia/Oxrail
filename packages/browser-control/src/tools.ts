@@ -630,23 +630,15 @@ const TOOLS: readonly ToolSpec[] = [
     name: "browser_drag",
     title: "Drag",
     description:
-      "Drag one thing onto another: a slider handle, a card into a column, a file onto a drop zone. Give each end by ref or by a point that came from a read, and the move is sent as a real press, a series of moves and a release, which is what the page listens for.",
+      "Drag one thing onto another: a slider handle, a card into a column, a file onto a drop zone. Give each end by number, from the last read, and the move is sent as a real press, a series of moves and a release, which is what the page listens for.",
     properties: {
       fromRef: {
         kind: "integer",
         description: "Where the drag starts, by number.",
       },
-      fromPoint: {
-        kind: "string",
-        description: 'Where the drag starts, as "x,y" in pixels.',
-      },
       toRef: {
         kind: "integer",
         description: "Where the drag ends, by number.",
-      },
-      toPoint: {
-        kind: "string",
-        description: 'Where the drag ends, as "x,y" in pixels.',
       },
       read: {
         kind: "boolean",
@@ -654,17 +646,14 @@ const TOOLS: readonly ToolSpec[] = [
         extras: { default: true },
       },
     },
+    required: ["fromRef", "toRef"],
     async run(route, args) {
       const fromRef = integerValue(args, "fromRef");
-      const fromPoint = stringValue(args, "fromPoint");
       const toRef = integerValue(args, "toRef");
-      const toPoint = stringValue(args, "toPoint");
       const read = booleanValue(args, "read");
       return route.drag({
         ...(fromRef === undefined ? {} : { fromRef }),
-        ...(fromPoint === undefined ? {} : { fromPoint }),
         ...(toRef === undefined ? {} : { toRef }),
-        ...(toPoint === undefined ? {} : { toPoint }),
         ...(read === undefined ? {} : { read }),
       });
     },

@@ -601,7 +601,7 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
   );
 
   it(
-    "drags from a point as readily as from a number",
+    "drags between two numbers a read gave, and refuses any other end",
     { timeout: 90_000 },
     async () => {
       const env = {
@@ -618,23 +618,39 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
         const button = snapshot.controls.find(
           (control) => control.name === "Press me",
         );
-        if (button === undefined) throw new Error("no button control");
+        const link = snapshot.controls.find(
+          (control) => control.name === "second",
+        );
+        if (button === undefined || link === undefined)
+          throw new Error("the fixture no longer has both ends of a drag");
 
-        // A point is already a point: it must not be looked up as a label.
-        // Reading it as one asked the page for the control containing the
-        // empty string, which never matches, so every coordinate drag failed.
-        const started = await route.drag({
-          fromPoint: "120,160",
-          toRef: button.ref,
+        // Two numbers from one read are the whole address of a drag, and the
+        // move really is sent: the press, the twelve moves and the release.
+        const moved = await route.drag({
+          fromRef: button.ref,
+          toRef: link.ref,
           read: false,
         });
-        expect(textOf(started)).toMatch(/^dragged 120,160 to \d+,\d+$/u);
+        expect(textOf(moved)).toMatch(/^dragged \d+,\d+ to \d+,\d+$/u);
 
-        // The whole point of the parameter is that the caller supplies it, so
-        // a value that is not a point is refused by name rather than guessed.
+        // An end nobody read is not an address, and it is refused by name
+        // before any input is dispatched — the same gate a click goes through.
         await expect(
-          route.drag({ fromPoint: "120", toRef: button.ref, read: false }),
-        ).rejects.toThrow(/a point must be "x,y" in pixels/u);
+          route.drag({ fromRef: 9999, toRef: link.ref, read: false }),
+        ).rejects.toThrow(/control 9999 cannot be addressed/u);
+        await expect(
+          route.drag({ fromRef: button.ref, toRef: 9999, read: false }),
+        ).rejects.toThrow(/control 9999 cannot be addressed/u);
+
+        // An end that was left out is named as missing rather than turned into
+        // a lookup for the control containing the empty string, which never
+        // matches and used to report every such drag as "no visible control".
+        await expect(
+          route.drag({ toRef: link.ref, read: false }),
+        ).rejects.toThrow(/needs somewhere to start/u);
+        await expect(
+          route.drag({ fromRef: button.ref, read: false }),
+        ).rejects.toThrow(/needs somewhere to end/u);
       } finally {
         await route.close().catch(() => undefined);
         rmSync(dir, { recursive: true, force: true });
