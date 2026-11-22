@@ -772,6 +772,25 @@ describe("MCP server", () => {
     await harness.end();
   });
 
+  it("refuses a drag that names only one end", async () => {
+    for (const args of [{ fromRef: 3 }, { toRef: 4 }, {}]) {
+      const harness = createHarness();
+      harness.send({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "browser_drag", arguments: args },
+      });
+      const reply = await harness.waitForReply(1);
+      expect(
+        resultRecord(reply).isError,
+        `${JSON.stringify(args)} was allowed`,
+      ).toBe(true);
+      expect(harness.route.reached).not.toContain("drag");
+      await harness.end();
+    }
+  });
+
   it("lists every tool in order with object schemas", async () => {
     const harness = createHarness();
     harness.send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
