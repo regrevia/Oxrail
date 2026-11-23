@@ -1185,7 +1185,8 @@ describe("MCP server", () => {
     });
     const text = firstBlock(await harness.waitForReply(1)).text as string;
     expect(text).toBe(
-      'hello there\n[1] button "Go"\nurl: https://example.test/',
+      'hello there\n[1] button "Go"\nurl: https://example.test/\n' +
+        "controls without a name: 1 (numbered, not printed; a write still accepts them)",
     );
     await harness.end();
   });

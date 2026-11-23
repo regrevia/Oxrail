@@ -15,6 +15,7 @@ import {
   chromeBinary,
   profileDir,
 } from "../packages/browser-control/src/chrome.js";
+import { formatSnapshot } from "../packages/browser-control/src/read.js";
 import { CdpBrowserRoute } from "../packages/browser-control/src/route.js";
 import { RouteClosedError } from "../packages/browser-control/src/types.js";
 
@@ -72,6 +73,23 @@ const frameUploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!do
 <body>
   <p>Outside the frame</p>
   <iframe id="frame" srcdoc="&lt;label&gt;Pick &lt;input id='f' type='file'&gt;&lt;/label&gt;"></iframe>
+</body></html>`)}`;
+
+/* Four text fields a page names in four different ways. A field is usually
+   named by the label beside it, and neither a wrapping label nor a for= one
+   puts any text inside the control: before the walk asked the label, the two
+   fields the page names that way read as nameless, and a nameless control is
+   numbered but never printed — so the read handed back a number nobody could
+   see and nothing pointed at the page's own words for it. The last field is
+   the control this must not change: a page can leave a field unnamed, and a
+   read still has to say a number exists without inventing a name for it. */
+const labelledPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>Oxrail labels</title></head>
+<body>
+  <label>Upload <input id="f" type="file"></label>
+  <label for="t">Typing</label><input id="t" type="text">
+  <label for="b">Label text</label><input id="b" type="text" aria-label="Aria name">
+  <input id="n" type="text">
 </body></html>`)}`;
 
 /* The checked-in fixture, on disk. A data: page is built from a handful of
@@ -924,6 +942,60 @@ it.skipIf(!live || !hasChrome)(
       ).rejects.not.toThrow(/page changed/u);
     } finally {
       rmSync(scratch, { force: true });
+      await route.close().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(!live || !hasChrome)(
+  "names a field by the label the page gave it, and never invents one",
+  { timeout: 90_000 },
+  async () => {
+    const env = {
+      ...process.env,
+      OXRAIL_BROWSER_HEADLESS: "1",
+      OXRAIL_BROWSER_PROFILE: `live-labels-${process.pid}-${Date.now()}`,
+      OXRAIL_BROWSER_IDLE_MS: "60000",
+    } as NodeJS.ProcessEnv;
+    const route = new CdpBrowserRoute({ env });
+    const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+    try {
+      await route.open({ url: labelledPage });
+      const snapshot = await route.read({ maxChars: 4_000 });
+      const names = snapshot.controls.map((control) => control.name);
+
+      // A wrapping label and a for= label are the two ways a page names a
+      // field without putting words inside it, and both are the page's own
+      // words rather than anything the route made up.
+      expect(names).toContain("Upload");
+      expect(names).toContain("Typing");
+
+      // A control's own aria-label outranks the label beside it: the element
+      // saying what it is beats a caption pointing at it.
+      expect(names).toContain("Aria name");
+      expect(names).not.toContain("Label text");
+
+      // The unnamed field keeps a number — it is clickable through the same
+      // read — but the read does not print a line for it, because "[4] textbox
+      // \"\"" is a name the page never gave. Both facts at once: numbered, and
+      // not shown.
+      const unnamed = snapshot.controls.filter(
+        (control) => control.name.trim() === "",
+      );
+      expect(unnamed).toHaveLength(1);
+      const numbered = unnamed[0] as { ref: number };
+      expect(numbered.ref).toBeGreaterThan(0);
+
+      // ...and it is accounted for rather than silently dropped. A line
+      // reading "textbox \"\"" would be a name the page never wrote, so the
+      // control gets no line of its own; a caller holding its number is told
+      // the number works by the count line instead.
+      const printed = formatSnapshot(snapshot);
+      expect(printed).not.toContain(`[${numbered.ref}] `);
+      expect(printed).not.toContain(`textbox ""`);
+      expect(printed).toContain("controls without a name: 1");
+    } finally {
       await route.close().catch(() => undefined);
       rmSync(dir, { recursive: true, force: true });
     }

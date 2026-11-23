@@ -16,6 +16,7 @@ import {
   brief,
   controlLines,
   deltaOf,
+  formatSnapshot,
   evidence,
   passagesToText,
   rank,
@@ -425,6 +426,43 @@ describe("a run of controls is one line, or it is not a run", () => {
     expect(
       controlLines([control(0, "button", "Go"), control(1, "button", "  ")]),
     ).toEqual(['[0] button "Go"']);
+  });
+
+  /* The walk numbers a control it cannot name — an upload field a page forgot
+     to label is still a field a write accepts — so the number exists and the
+     line does not. Printing `textbox ""` would be a name the page never wrote,
+     and printing nothing at all leaves a caller holding a number it cannot
+     account for. The reading says how many it did that to instead. */
+  it("says how many numbered controls it could not print a name for", () => {
+    const page = {
+      url: "https://example.test/",
+      title: "Untitled",
+      text: "Pick a file",
+      truncated: false,
+      controls: [
+        control(1, "button", "Send"),
+        control(2, "textbox", ""),
+        control(3, "textbox", "   "),
+      ],
+    };
+    const printed = formatSnapshot(page);
+    expect(printed).toContain('[1] button "Send"');
+    expect(printed).not.toContain('textbox ""');
+    expect(printed).toContain("controls without a name: 2");
+    /* Both numbers are still refs a write accepts, so the line has to say so
+       rather than read as "these were dropped". */
+    expect(printed).toContain("a write still accepts them");
+  });
+
+  it("says nothing when every control it numbered has a name", () => {
+    const printed = formatSnapshot({
+      url: "https://example.test/",
+      title: "Untitled",
+      text: "",
+      truncated: false,
+      controls: [control(1, "button", "Send")],
+    });
+    expect(printed).not.toContain("controls without a name");
   });
 });
 

@@ -502,6 +502,14 @@ function formatSnapshot(snapshot) {
   if (snapshot.words !== void 0) lines.push(`words: ${snapshot.words}`);
   if (snapshot.matched !== void 0 && snapshot.total !== void 0)
     lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
+  const nameless = snapshot.controls.filter(
+    (control) => control.name.trim() === ""
+  ).length;
+  if (nameless > 0) {
+    lines.push(
+      `controls without a name: ${nameless} (numbered, not printed; a write still accepts them)`
+    );
+  }
   if ((snapshot.omitted ?? 0) > 0) {
     lines.push(
       `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`
@@ -1745,6 +1753,17 @@ function snapshotExpression(options) {
   const nameOf = (el) => {
     const aria = el.getAttribute("aria-label");
     if (aria && aria.trim() !== "") return aria.trim().slice(0, 160);
+    /* A form control is usually named by a <label>, and neither a wrapping
+       label nor a for= one puts any text inside the control: an upload field
+       written as <label>Upload <input type="file"></label> has no value, no
+       placeholder and no content of its own, so every source below comes back
+       empty and the control reads as nameless even though the page does name
+       it. The label is the page's own answer, so it is asked first. */
+    const labels = el.labels;
+    if (labels && labels.length > 0) {
+      const labelled = (labels[0].innerText || labels[0].textContent || "").replace(/\\s+/g, " ").trim();
+      if (labelled !== "") return labelled.slice(0, 160);
+    }
     const text = (el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
     if (text !== "") return text.slice(0, 160);
     const title = el.getAttribute("title");
