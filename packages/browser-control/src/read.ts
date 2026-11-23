@@ -633,6 +633,12 @@ export function passagesToText(passages: PassageSet): string {
  * in the middle — stays printed individually, so a range never claims a
  * regularity the page does not have.
  *
+ * A control with no name at all is numbered but not printed: the walk keeps it
+ * — an upload field a page forgot to label is still a field a caller may act on
+ * — and `[7] textbox ""` would be a name the page never wrote. The caller is
+ * told how many were left that way by `formatSnapshot`, so a number it holds is
+ * never one the reading silently ignored.
+ *
  * @param controls - the controls to print, in ref order.
  * @returns one line per control, or one line per run.
  */
@@ -787,6 +793,18 @@ export function formatSnapshot(snapshot: Snapshot): string {
     lines.push(`passages: ${snapshot.matched} of ${snapshot.total} blocks`);
   /* A reading that left controls out has to say so, or a caller cannot tell a
      page with three buttons from a page whose other 157 were not printed. */
+  /* A named control that was not printed because the budget ran out is counted
+     in `omitted`. A nameless one is not a budget decision — it is a fact about
+     the page — and it is counted here so every number the read handed out is
+     accounted for somewhere in what the caller sees. */
+  const nameless = snapshot.controls.filter(
+    (control) => control.name.trim() === "",
+  ).length;
+  if (nameless > 0) {
+    lines.push(
+      `controls without a name: ${nameless} (numbered, not printed; a write still accepts them)`,
+    );
+  }
   if ((snapshot.omitted ?? 0) > 0) {
     lines.push(
       `controls not shown: ${snapshot.omitted} (left out of this reading; their numbers still work)`,

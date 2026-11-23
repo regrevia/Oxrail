@@ -9,6 +9,20 @@ the full tool set it ships today, and two of its reports turned out to describe 
 setting rather than the window in front of them. Nothing here is a version bump:
 `0.1.0-alpha.8` stays the published name until a release gate accepts a new one.
 
+- **A field the page named by its label is named that, and a number with no name is counted out loud.**
+  A form control carries no text of its own when the page wraps it in a `<label>`
+  or points a `for=` at it, so the fixture's `<label>Upload <input type="file"></label>`
+  had no value, no placeholder and no content to read: the walk numbered it,
+  `browser_upload` filled it, and the reading never printed it. A caller could
+  hold `ref 6` and have no way to learn it existed. Naming now asks the label the
+  page wrote — the control's own `aria-label` still outranks it, because that is
+  the name written on the control rather than beside it — so the field reads
+  `[6] textbox "Upload"` with no change to the budget. What is left is a control
+  the page genuinely does not name: it keeps its number and stays writable, and
+  the reading now ends `controls without a name: N (numbered, not printed; a
+write still accepts them)` instead of leaving the number unexplained. The line
+  is deliberately not `[6] textbox ""`: an empty name is a name the page never
+  wrote.
 - **A refusal reaches the caller in its own words.**
   Every refusal of a stale address is written where it is thrown, and each one
   names the number or the name that failed and what to do next — a number no
