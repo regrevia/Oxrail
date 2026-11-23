@@ -7,7 +7,7 @@
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -45,6 +45,17 @@ const uploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype
   <label>Pick <input id="f" type="file" onchange="document.getElementById('status').textContent = this.files.length === 0 ? 'nothing chosen' : 'chosen ' + this.files.length"></label>
   <p id="status">nothing chosen</p>
 </body></html>`)}`;
+
+/* The checked-in fixture, on disk. A data: page is built from a handful of
+ * nodes, so Chrome's front-end node ids and its backend node ids both start at
+ * 1 and happen to agree — which is exactly how `upload` shipped naming a file
+ * input with the wrong one of the two. This page is large enough for them to
+ * diverge, so it is the only place the mistake is visible.
+ */
+const fixture = `file://${join(
+  process.cwd(),
+  "benchmarks/fixtures/interaction-primitives/index.html",
+)}`;
 
 /* A tool result carries text parts and image parts; only the text answers the
    display question, so read that rather than narrowing at each call site. */
@@ -668,7 +679,77 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
   );
 });
 
-it(
+it.skipIf(!live || !hasChrome)(
+  "names a file input the way Chrome numbers it, by type and by ref",
+  { timeout: 90_000 },
+  async () => {
+    const env = {
+      ...process.env,
+      OXRAIL_BROWSER_HEADLESS: "1",
+      OXRAIL_BROWSER_PROFILE: `live-upload-ref-${process.pid}-${Date.now()}`,
+      OXRAIL_BROWSER_IDLE_MS: "60000",
+    } as NodeJS.ProcessEnv;
+    const route = new CdpBrowserRoute({ env });
+    const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+    const first = join(dir, "..", `upload-a-${process.pid}.txt`);
+    const second = join(dir, "..", `upload-b-${process.pid}.txt`);
+    const nameOf = async (): Promise<string> => {
+      const seen = await route.evaluatePage({
+        code: `document.querySelector('#upload').files[0]?.name ?? ""`,
+      });
+      return textOf(seen);
+    };
+    const refOf = async (): Promise<number> => {
+      const seen = await route.evaluatePage({
+        code: `document.querySelector('#upload').getAttribute('data-oxrail-ref') ?? ""`,
+      });
+      return Number(textOf(seen).trim());
+    };
+    try {
+      mkdirSync(join(first, ".."), { recursive: true });
+      writeFileSync(first, "first\n");
+      writeFileSync(second, "second\n");
+      await route.open({ url: fixture });
+
+      // Found by type, with nobody naming it. The old code handed Chrome the
+      // front-end node id as a backend node id, which it answers with "Node is
+      // not a file input element" — a rejection no count assertion would see,
+      // because nothing ever reached the page.
+      const byType = await route.upload({ files: [first], read: false });
+      expect(textOf(byType)).toMatch(/^put 1 file into the input$/u);
+      expect((await route.read({ maxChars: 4_000 })).text).toContain(
+        "chosen 1",
+      );
+      expect(await nameOf()).toBe(basename(first));
+
+      // Found by ref. The old code read the remote object off `object` instead
+      // of `result`, so this threw before Chrome was called at all. A second,
+      // different file makes a no-op fail the name check.
+      const ref = await refOf();
+      expect(Number.isInteger(ref)).toBe(true);
+      const byRef = await route.upload({
+        ref,
+        files: [second],
+        read: false,
+      });
+      expect(textOf(byRef)).toMatch(/^put 1 file into the input$/u);
+      expect(await nameOf()).toBe(basename(second));
+
+      // A ref that is not a file input is named rather than passed through as
+      // Chrome's "Node is not a file input element".
+      await expect(
+        route.upload({ ref: 1, files: [second], read: false }),
+      ).rejects.toThrow(/browser_upload needs a file input/u);
+    } finally {
+      await route.close().catch(() => undefined);
+      rmSync(first, { force: true });
+      rmSync(second, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(!live || !hasChrome)(
   "puts a file into the page's own input and reads the effect back",
   { timeout: 90_000 },
   async () => {

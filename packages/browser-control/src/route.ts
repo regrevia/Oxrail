@@ -2570,25 +2570,45 @@ export class CdpBrowserRoute implements BrowserRoute {
             `browser_upload takes absolute paths; ${JSON.stringify(file)} is not one`,
           );
       const { cdp, page } = await this.ensure();
-      let nodeId: number | null = null;
+      /* DOM.setFileInputFiles takes a front-end nodeId, a backend id, or a
+         remote object, and the three are numbered separately. A ref is resolved
+         to an object, so a control inside a shadow root stays reachable; the
+         whole-document lookup stays on the nodeId that DOM.querySelector
+         returned. On a page with a handful of nodes those two numbers happen to
+         agree, which is why handing one over as the other looks correct until
+         the page grows. */
+      let where: { nodeId: number } | { objectId: string };
       if (options.ref !== undefined) {
+        /* A ref can name anything, so the element comes back only when it
+           really is a file input. Chrome's own rejection of anything else is
+           "Node is not a file input element", which names neither the control
+           nor the fix; asking the page puts the ref in the message. */
         const handle = await cdp.send<{
-          object: { objectId: string };
+          result: { objectId?: string };
+          exceptionDetails?: { exception?: { description?: string } };
         }>(
           "Runtime.evaluate",
           {
-            expression: `document.querySelector('[data-oxrail-ref="${options.ref}"]')`,
+            expression: `(() => {
+  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  if (el === null) throw new Error("gone");
+  if (el.tagName !== "INPUT" || el.type !== "file") throw new Error("not-a-file-input");
+  return el;
+})()`,
           },
           page.sessionId,
         );
-        const described = await cdp.send<{ node: { backendNodeId: number } }>(
-          "DOM.describeNode",
-          { objectId: handle.object.objectId },
-          page.sessionId,
-        );
-        nodeId = described.node.backendNodeId;
-      }
-      if (nodeId === null) {
+        const note = handle.exceptionDetails?.exception?.description ?? "";
+        if (note.includes("not-a-file-input"))
+          throw new Error(
+            `browser_upload needs a file input; control ${options.ref} is not one`,
+          );
+        if (note !== "" || handle.result.objectId === undefined)
+          throw new StaleRefError(
+            `control ${options.ref} cannot be addressed: it is no longer on the page`,
+          );
+        where = { objectId: handle.result.objectId };
+      } else {
         const doc = await cdp.send<{ root: { nodeId: number } }>(
           "DOM.getDocument",
           { depth: -1 },
@@ -2603,14 +2623,11 @@ export class CdpBrowserRoute implements BrowserRoute {
           throw new Error(
             "this page has no file input; pass a ref if the input is inside a frame",
           );
-        nodeId = queried.nodeId;
+        where = { nodeId: queried.nodeId };
       }
       await cdp.send(
         "DOM.setFileInputFiles",
-        {
-          files: [...options.files],
-          ...(nodeId === null ? {} : { backendNodeId: nodeId }),
-        },
+        { files: [...options.files], ...where },
         page.sessionId,
       );
       this.touch();
