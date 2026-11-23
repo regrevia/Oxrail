@@ -311,6 +311,8 @@ Measured on one composed fixture — a button in the document, a button in an op
 
 Frames nest, so a control two frames down is numbered by the whole chain rather than by the innermost number: on a fixture whose inner frame holds `Save`, the control came back as ref `1000001` in `frame: 2`.
 
+A number means the same thing to every tool. The walk that turns a ref back into an element is one expression shared by `browser_click`, `browser_check`, `browser_select`, `browser_upload`, `browser_extract` and the form tools, so a control the read numbered inside a shadow root is not reported as gone by the tool that writes to it. A number written for content inside a frame is answered as such — a file input inside a frame cannot be filled by number, because the number names a position in another document — rather than as a control that has left the page.
+
 A frame the route cannot read — a cross-origin frame — is reported as `frames not read: N` rather than dropped: a short reading of a page that visibly has more should say so. Reading those needs a per-frame session, which is a larger permission surface than this route takes today. Crossing a frame border is the only place the route needs two origins to prove anything — before a foreign `src` commits, its iframe holds an initial `about:blank` that belongs to the parent's origin and reads as empty rather than as hidden — so that one is measured against two local ports instead of `data:` markup.
 
 ## Turns and reclaim

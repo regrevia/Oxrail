@@ -222,6 +222,30 @@ export const FRAME_BASE = 900_000;
 /** Room for one frame's own refs between FRAME_BASE steps. */
 export const FRAME_SLOT = 100_000;
 
+/** Every tree a read numbered controls in: the document and the open shadow
+ * roots under it, walked the same way `locate()` walks them. A tool that
+ * resolves a ref with a plain `document.querySelector` reports a control the
+ * last read handed a number to as gone, so the walk lives in one place and
+ * every tool that turns a number back into an element uses it. */
+const REF_ROOTS = `(() => {
+  const roots = [document];
+  for (let at = 0; at < roots.length && roots.length < 24; at += 1)
+    for (const node of roots[at].querySelectorAll("*"))
+      if (node.shadowRoot !== null && roots.length < 24) roots.push(node.shadowRoot);
+  return roots;
+})()`;
+
+/** The element a ref names, or `null` when nothing in the page carries it. */
+export function refExpression(ref: number): string {
+  return `(() => {
+  for (const root of ${REF_ROOTS}) {
+    const el = root.querySelector('[data-oxrail-ref="${ref}"]');
+    if (el !== null) return el;
+  }
+  return null;
+})()`;
+}
+
 /** The page walk, as one expression: it must run in the page and return JSON. */
 export function snapshotExpression(options: {
   mode: "text" | "links" | "forms" | "map";
@@ -1488,7 +1512,7 @@ export class CdpBrowserRoute implements BrowserRoute {
 
   private async focus(ref: number): Promise<boolean> {
     return this.evaluate<boolean>(`(() => {
-  const el = document.querySelector('[data-oxrail-ref="${ref}"]');
+  const el = ${refExpression(ref)};
   if (!el) return false;
   el.scrollIntoView({ block: "center", inline: "center" });
   el.focus();
@@ -2048,7 +2072,7 @@ export class CdpBrowserRoute implements BrowserRoute {
         );
       const limit = Math.max(1, Math.min(options.limit ?? 60, 400));
       const raw = await this.evaluate<string>(`(() => {
-  const scope = ${options.ref === undefined ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  const scope = ${options.ref === undefined ? "document" : `(${refExpression(options.ref)} || document)`};
   let nodes;
   try { nodes = Array.from(scope.querySelectorAll(${JSON.stringify(select)})); }
   catch (error) { return JSON.stringify({ error: String(error && error.message ? error.message : error) }); }
@@ -2342,7 +2366,7 @@ export class CdpBrowserRoute implements BrowserRoute {
         checked: boolean;
         kind: string;
       }>(`(() => {
-  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  const el = ${refExpression(options.ref)};
   if (!el) return { found: false, checked: false, kind: "gone" };
   const kind = el.tagName === "INPUT" ? (el.type || "checkbox") : (el.getAttribute("role") || el.tagName.toLowerCase());
   return { found: true, checked: el.checked === true || el.getAttribute("aria-checked") === "true", kind };
@@ -2369,7 +2393,7 @@ export class CdpBrowserRoute implements BrowserRoute {
         await this.mouseClick(point.x, point.y);
       }
       const after = await this.evaluate<{ checked: boolean }>(`(() => {
-  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  const el = ${refExpression(options.ref)};
   return { checked: el ? el.checked === true || el.getAttribute("aria-checked") === "true" : false };
 })()`);
       this.touch();
@@ -2402,8 +2426,7 @@ export class CdpBrowserRoute implements BrowserRoute {
       if (options.ref !== undefined) this.addressable(options.ref);
       const value = options.value;
       const outcome = await this.evaluate<string>(`(() => {
-  let el = null;
-  if (${options.ref === undefined ? "false" : "true"}) el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  let el = ${options.ref === undefined ? "null" : refExpression(options.ref)};
   if (!el && ${JSON.stringify(options.field ?? "")} !== "") {
     const needle = ${JSON.stringify(options.field ?? "")}.toLowerCase();
     for (const node of document.querySelectorAll("select,[role=combobox],[role=listbox]")) {
@@ -2578,6 +2601,14 @@ export class CdpBrowserRoute implements BrowserRoute {
          agree, which is why handing one over as the other looks correct until
          the page grows. */
       let where: { nodeId: number } | { objectId: string };
+      if (options.ref !== undefined && options.ref >= FRAME_BASE)
+        /* The number was written for content in a frame, and the walk below
+           reads the top document. Said plainly rather than reported as a
+           control that has gone, which is what a lookup in the wrong tree
+           would otherwise claim. */
+        throw new StaleRefError(
+          `control ${options.ref} is inside a frame, so its input cannot be filled by number — pass a ref from a read that saw the top document`,
+        );
       if (options.ref !== undefined) {
         /* A ref can name anything, so the element comes back only when it
            really is a file input. Chrome's own rejection of anything else is
@@ -2590,7 +2621,9 @@ export class CdpBrowserRoute implements BrowserRoute {
           "Runtime.evaluate",
           {
             expression: `(() => {
-  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  /* A ref can name a control in a shadow root, which is why the lookup walks
+     the trees the read walked rather than the top document alone. */
+  const el = ${refExpression(options.ref)};
   if (el === null) throw new Error("gone");
   if (el.tagName !== "INPUT" || el.type !== "file") throw new Error("not-a-file-input");
   return el;
@@ -2650,7 +2683,7 @@ export class CdpBrowserRoute implements BrowserRoute {
     return this.serial(async () => {
       await this.ensure();
       const found = await this.evaluate<string>(`(() => {
-  const scope = ${options.ref === undefined ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  const scope = ${options.ref === undefined ? "document" : `(${refExpression(options.ref)} || document)`};
   const images = [];
   for (const node of scope.querySelectorAll("img,canvas,svg,video")) {
     const box = node.getBoundingClientRect();
