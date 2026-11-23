@@ -63,6 +63,17 @@ const shadowUploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!d
   </script>
 </body></html>`)}`;
 
+/* A file input inside a same-origin frame. The read numbers it, because the
+   walk visits frames, but the number means "this document, slot 1" — so a tool
+   that only looks in the top document has to say so rather than report that a
+   control it just numbered has gone. */
+const frameUploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>Oxrail frame upload</title></head>
+<body>
+  <p>Outside the frame</p>
+  <iframe id="frame" srcdoc="&lt;label&gt;Pick &lt;input id='f' type='file'&gt;&lt;/label&gt;"></iframe>
+</body></html>`)}`;
+
 /* The checked-in fixture, on disk. A data: page is built from a handful of
  * nodes, so Chrome's front-end node ids and its backend node ids both start at
  * 1 and happen to agree — which is exactly how `upload` shipped naming a file
@@ -863,6 +874,54 @@ it.skipIf(!live || !hasChrome)(
           }),
         ),
       ).toBe("true");
+    } finally {
+      rmSync(scratch, { force: true });
+      await route.close().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(!live || !hasChrome)(
+  "says a file input inside a frame is in a frame, not that it has gone",
+  { timeout: 90_000 },
+  async () => {
+    const env = {
+      ...process.env,
+      OXRAIL_BROWSER_HEADLESS: "1",
+      OXRAIL_BROWSER_PROFILE: `live-upload-frame-${process.pid}-${Date.now()}`,
+      OXRAIL_BROWSER_IDLE_MS: "60000",
+    } as NodeJS.ProcessEnv;
+    const route = new CdpBrowserRoute({ env });
+    const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+    const scratch = join(dir, "..", `upload-frame-${process.pid}.txt`);
+    try {
+      mkdirSync(join(scratch, ".."), { recursive: true });
+      writeFileSync(scratch, "not a secret\n");
+      await route.open({ url: frameUploadPage });
+
+      // The number has to come out of a real read, and it has to be a frame
+      // number: the whole point is that a read numbered this input and the
+      // tool still cannot fill it from the top document. Asking the page for
+      // the attribute would prove nothing, because the walk that writes it is
+      // the same one under test.
+      const snapshot = await route.read({ maxChars: 4_000 });
+      const inFrame = snapshot.controls.filter(
+        (control) => control.ref >= 900_000,
+      );
+      expect(inFrame).toHaveLength(1);
+      const framed = inFrame[0] as { ref: number };
+
+      // What a caller gets is the reason and the next step, not a claim that
+      // the page moved on: the number was correct a moment ago and will be
+      // again, and "call browser_view" sends them round a loop that ends in
+      // the same refusal.
+      await expect(
+        route.upload({ ref: framed.ref, files: [scratch], read: false }),
+      ).rejects.toThrow(/inside a frame/u);
+      await expect(
+        route.upload({ ref: framed.ref, files: [scratch], read: false }),
+      ).rejects.not.toThrow(/page changed/u);
     } finally {
       rmSync(scratch, { force: true });
       await route.close().catch(() => undefined);
