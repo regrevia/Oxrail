@@ -1375,7 +1375,15 @@ function describeError(error: unknown): string {
     return "no browser is running. Call browser_open first.";
   }
   if (error instanceof StaleRefError) {
-    return "the page changed since the last read. Call browser_view and use the new refs.";
+    /* Every refusal of this kind is written where it is thrown, and each one
+       names the number or the name that failed and what to do instead. One
+       sentence for all of them would throw that away: "a frame ref cannot be
+       filled by number" and "the last read did not contain 12" are different
+       problems with different next steps. The blanket line stays for an error
+       that arrives without a message of its own. */
+    return error.message === ""
+      ? "the page changed since the last read. Call browser_view and use the new refs."
+      : error.message;
   }
   if (error instanceof Error) {
     return error.message === "" ? "browser tool failed." : error.message;

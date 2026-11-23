@@ -5621,7 +5621,7 @@ function describeError(error) {
     return "no browser is running. Call browser_open first.";
   }
   if (error instanceof StaleRefError) {
-    return "the page changed since the last read. Call browser_view and use the new refs.";
+    return error.message === "" ? "the page changed since the last read. Call browser_view and use the new refs." : error.message;
   }
   if (error instanceof Error) {
     return error.message === "" ? "browser tool failed." : error.message;

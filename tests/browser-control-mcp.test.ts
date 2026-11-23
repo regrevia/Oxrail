@@ -1306,8 +1306,14 @@ describe("MCP server", () => {
     expect(firstBlock(gone).text).toBe("page is gone");
     expect(harness.stderrText()).not.toContain("page is gone");
 
+    /* A refusal that comes with its own sentence keeps it: the throw site is
+       the only place that knows whether the number was never read, has left
+       the page, or names content inside a frame, and those need different next
+       steps. Only a refusal with nothing to say gets the blanket line. */
     harness.route.clickImpl = async () => {
-      throw new StaleRefError("stale");
+      throw new StaleRefError(
+        "control 3 cannot be addressed: the last read of https://example.com/ did not contain it — call browser_view again and use a number it returns",
+      );
     };
     harness.send({
       jsonrpc: "2.0",
@@ -1317,7 +1323,23 @@ describe("MCP server", () => {
     });
     const stale = await harness.waitForReply(2);
     expect(resultRecord(stale).isError).toBe(true);
+    expect(firstBlock(stale).text as string).toContain(
+      "control 3 cannot be addressed",
+    );
     expect(firstBlock(stale).text as string).toContain("browser_view");
+
+    harness.route.clickImpl = async () => {
+      throw new StaleRefError("");
+    };
+    harness.send({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "browser_click", arguments: { ref: 4 } },
+    });
+    const wordless = await harness.waitForReply(4);
+    expect(resultRecord(wordless).isError).toBe(true);
+    expect(firstBlock(wordless).text as string).toContain("browser_view");
 
     harness.route.stateImpl = async () => {
       throw new RouteClosedError("closed");

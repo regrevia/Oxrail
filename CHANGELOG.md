@@ -9,6 +9,16 @@ the full tool set it ships today, and two of its reports turned out to describe 
 setting rather than the window in front of them. Nothing here is a version bump:
 `0.1.0-alpha.8` stays the published name until a release gate accepts a new one.
 
+- **A refusal reaches the caller in its own words.**
+  Every refusal of a stale address is written where it is thrown, and each one
+  names the number or the name that failed and what to do next — a number no
+  read produced, a control that has left the page, a number that names content
+  inside a frame. Those sentences were documented and quoted in the product
+  docs, but they never reached the caller: one generic line replaced all of
+  them, so "this number is inside a frame, fill it from a read of the top
+  document" arrived as "the page changed since the last read", which sends the
+  caller to redo work that was never wrong. The message now passes through, and
+  the blanket line is kept for a refusal that arrives with nothing to say.
 - **A number the last read handed out works everywhere the read numbered it.**
   The read numbers controls inside open shadow roots, and seven tools resolved
   that number with a plain `document.querySelector`, so a control the page had
