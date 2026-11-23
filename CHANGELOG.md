@@ -9,6 +9,16 @@ the full tool set it ships today, and two of its reports turned out to describe 
 setting rather than the window in front of them. Nothing here is a version bump:
 `0.1.0-alpha.8` stays the published name until a release gate accepts a new one.
 
+- **`browser_upload` works, by either route to the input.** The tool had two
+  paths and both were broken: naming the input by selector handed Chrome a
+  front-end node id as if it were a backend one, which Chrome answers with
+  `Node is not a file input element`, and naming it by ref read the remote
+  object off the wrong field of the CDP reply and threw before Chrome was
+  called at all. Both are fixed; a ref that is not a file input is now named as
+  such instead of surfacing Chrome's own wording, which says neither which
+  number was wrong nor what to pass. The suite did not see either bug because
+  the live case uploaded to a page built from a handful of nodes, where the two
+  numberings coincide — it now uses the checked-in fixture, where they do not.
 - **A shown window by default.** `browser_open` starts a visible Chrome unless the
   caller asks otherwise; `OXRAIL_BROWSER_HEADLESS=1` hides it, and every other value
   (`0`, unset, a typo) shows it. The default is deliberate: a browser nobody can see

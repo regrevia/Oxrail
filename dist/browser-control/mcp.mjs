@@ -3719,23 +3719,31 @@ ${changed.join("\n")}`
                 `browser_upload takes absolute paths; ${JSON.stringify(file)} is not one`
               );
           const { cdp, page } = await this.ensure();
-          let nodeId = null;
+          let where;
           if (options.ref !== void 0) {
             const handle = await cdp.send(
               "Runtime.evaluate",
               {
-                expression: `document.querySelector('[data-oxrail-ref="${options.ref}"]')`
+                expression: `(() => {
+  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  if (el === null) throw new Error("gone");
+  if (el.tagName !== "INPUT" || el.type !== "file") throw new Error("not-a-file-input");
+  return el;
+})()`
               },
               page.sessionId
             );
-            const described = await cdp.send(
-              "DOM.describeNode",
-              { objectId: handle.object.objectId },
-              page.sessionId
-            );
-            nodeId = described.node.backendNodeId;
-          }
-          if (nodeId === null) {
+            const note2 = handle.exceptionDetails?.exception?.description ?? "";
+            if (note2.includes("not-a-file-input"))
+              throw new Error(
+                `browser_upload needs a file input; control ${options.ref} is not one`
+              );
+            if (note2 !== "" || handle.result.objectId === void 0)
+              throw new StaleRefError(
+                `control ${options.ref} cannot be addressed: it is no longer on the page`
+              );
+            where = { objectId: handle.result.objectId };
+          } else {
             const doc = await cdp.send(
               "DOM.getDocument",
               { depth: -1 },
@@ -3750,14 +3758,11 @@ ${changed.join("\n")}`
               throw new Error(
                 "this page has no file input; pass a ref if the input is inside a frame"
               );
-            nodeId = queried.nodeId;
+            where = { nodeId: queried.nodeId };
           }
           await cdp.send(
             "DOM.setFileInputFiles",
-            {
-              files: [...options.files],
-              ...nodeId === null ? {} : { backendNodeId: nodeId }
-            },
+            { files: [...options.files], ...where },
             page.sessionId
           );
           this.touch();

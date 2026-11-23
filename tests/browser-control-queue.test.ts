@@ -127,16 +127,15 @@ describe("a write that refreshes refs does not take the queue twice", () => {
   it("returns from an upload that reads afterwards", async () => {
     const route = await stubbedRoute();
     const inner = route as unknown as Record<string, unknown>;
-    /* The file input is found and filled through CDP directly, so the stand-in
-       connection answers those three calls. */
+    /* The file input is resolved and filled through CDP directly, so the
+       stand-in connection answers those calls the way Chrome does: an object
+       comes back under `result`, which is what `setFileInputFiles` is then
+       handed. */
     inner.ensure = async () => ({
       cdp: {
         send: async (method: string) => {
           if (method === "Runtime.evaluate") {
-            return { object: { objectId: "object-1" } };
-          }
-          if (method === "DOM.describeNode") {
-            return { node: { backendNodeId: 7 } };
+            return { result: { objectId: "object-1" } };
           }
           return {};
         },
