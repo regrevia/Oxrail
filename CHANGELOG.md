@@ -9,6 +9,17 @@ the full tool set it ships today, and two of its reports turned out to describe 
 setting rather than the window in front of them. Nothing here is a version bump:
 `0.1.0-alpha.8` stays the published name until a release gate accepts a new one.
 
+- **A number the last read handed out works everywhere the read numbered it.**
+  The read numbers controls inside open shadow roots, and seven tools resolved
+  that number with a plain `document.querySelector`, so a control the page had
+  just been given a number for came back as gone or as the wrong element —
+  `browser_check` reported `gone` for a checkbox it could see, `browser_upload`
+  refused a file input it had itself numbered, and the tools scoped by a ref
+  silently fell back to the whole document. The walk that resolves a number now
+  lives in one expression beside `FRAME_BASE` and every one of them uses it, so
+  a number means the same thing to every tool. A number written for content
+  inside a frame says so instead of claiming the control has gone.
+
 - **`browser_upload` works, by either route to the input.** The tool had two
   paths and both were broken: naming the input by selector handed Chrome a
   front-end node id as if it were a backend one, which Chrome answers with

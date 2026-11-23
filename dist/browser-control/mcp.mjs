@@ -1635,6 +1635,7 @@ __export(route_exports, {
   idleMs: () => idleMs,
   inspectBinary: () => inspectBinary,
   profileFromEnv: () => profileFromEnv,
+  refExpression: () => refExpression,
   requestTimeoutMs: () => requestTimeoutMs,
   shotClip: () => shotClip,
   snapshotExpression: () => snapshotExpression,
@@ -1706,6 +1707,15 @@ function viewSize(env = process.env) {
   const match = /^(\d{3,4})x(\d{3,4})$/.exec(env.OXRAIL_BROWSER_VIEW ?? "");
   if (match === null) return { width: VIEW_WIDTH, height: VIEW_HEIGHT };
   return { width: Number(match[1]), height: Number(match[2]) };
+}
+function refExpression(ref) {
+  return `(() => {
+  for (const root of ${REF_ROOTS}) {
+    const el = root.querySelector('[data-oxrail-ref="${ref}"]');
+    if (el !== null) return el;
+  }
+  return null;
+})()`;
 }
 function snapshotExpression(options) {
   const mode = JSON.stringify(options.mode);
@@ -1990,7 +2000,7 @@ function inspectBinary(env = process.env) {
   }
   throw new Error("set OXRAIL_CHROME to a Chrome or Chromium binary path");
 }
-var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, MARKS, FRAME_BASE, FRAME_SLOT, META_EXPRESSION, CdpBrowserRoute;
+var VIEW_WIDTH, VIEW_HEIGHT, DEFAULT_MAX_CHARS, DEFAULT_IDLE_MS, MAX_IDLE_MS, MIN_IDLE_MS, LOAD_TIMEOUT_MS, MARKS, FRAME_BASE, FRAME_SLOT, REF_ROOTS, META_EXPRESSION, CdpBrowserRoute;
 var init_route = __esm({
   "packages/browser-control/src/route.ts"() {
     "use strict";
@@ -2009,6 +2019,13 @@ var init_route = __esm({
     MARKS = ["fixed", "verified", "invalid", "open"];
     FRAME_BASE = 9e5;
     FRAME_SLOT = 1e5;
+    REF_ROOTS = `(() => {
+  const roots = [document];
+  for (let at = 0; at < roots.length && roots.length < 24; at += 1)
+    for (const node of roots[at].querySelectorAll("*"))
+      if (node.shadowRoot !== null && roots.length < 24) roots.push(node.shadowRoot);
+  return roots;
+})()`;
     META_EXPRESSION = `(() => {
   const body = document.body;
   const everything = body ? body.innerText || "" : "";
@@ -2823,7 +2840,7 @@ var init_route = __esm({
       }
       async focus(ref) {
         return this.evaluate(`(() => {
-  const el = document.querySelector('[data-oxrail-ref="${ref}"]');
+  const el = ${refExpression(ref)};
   if (!el) return false;
   el.scrollIntoView({ block: "center", inline: "center" });
   el.focus();
@@ -3274,7 +3291,7 @@ ${stateText(state)}`
             );
           const limit = Math.max(1, Math.min(options.limit ?? 60, 400));
           const raw = await this.evaluate(`(() => {
-  const scope = ${options.ref === void 0 ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  const scope = ${options.ref === void 0 ? "document" : `(${refExpression(options.ref)} || document)`};
   let nodes;
   try { nodes = Array.from(scope.querySelectorAll(${JSON.stringify(select)})); }
   catch (error) { return JSON.stringify({ error: String(error && error.message ? error.message : error) }); }
@@ -3517,7 +3534,7 @@ ${changed.join("\n")}`
           await this.ensure();
           this.addressable(options.ref);
           const state = await this.evaluate(`(() => {
-  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  const el = ${refExpression(options.ref)};
   if (!el) return { found: false, checked: false, kind: "gone" };
   const kind = el.tagName === "INPUT" ? (el.type || "checkbox") : (el.getAttribute("role") || el.tagName.toLowerCase());
   return { found: true, checked: el.checked === true || el.getAttribute("aria-checked") === "true", kind };
@@ -3542,7 +3559,7 @@ ${changed.join("\n")}`
             await this.mouseClick(point.x, point.y);
           }
           const after = await this.evaluate(`(() => {
-  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  const el = ${refExpression(options.ref)};
   return { checked: el ? el.checked === true || el.getAttribute("aria-checked") === "true" : false };
 })()`);
           this.touch();
@@ -3570,8 +3587,7 @@ ${changed.join("\n")}`
           if (options.ref !== void 0) this.addressable(options.ref);
           const value = options.value;
           const outcome = await this.evaluate(`(() => {
-  let el = null;
-  if (${options.ref === void 0 ? "false" : "true"}) el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  let el = ${options.ref === void 0 ? "null" : refExpression(options.ref)};
   if (!el && ${JSON.stringify(options.field ?? "")} !== "") {
     const needle = ${JSON.stringify(options.field ?? "")}.toLowerCase();
     for (const node of document.querySelectorAll("select,[role=combobox],[role=listbox]")) {
@@ -3720,12 +3736,18 @@ ${changed.join("\n")}`
               );
           const { cdp, page } = await this.ensure();
           let where;
+          if (options.ref !== void 0 && options.ref >= FRAME_BASE)
+            throw new StaleRefError(
+              `control ${options.ref} is inside a frame, so its input cannot be filled by number \u2014 pass a ref from a read that saw the top document`
+            );
           if (options.ref !== void 0) {
             const handle = await cdp.send(
               "Runtime.evaluate",
               {
                 expression: `(() => {
-  const el = document.querySelector('[data-oxrail-ref="${options.ref}"]');
+  /* A ref can name a control in a shadow root, which is why the lookup walks
+     the trees the read walked rather than the top document alone. */
+  const el = ${refExpression(options.ref)};
   if (el === null) throw new Error("gone");
   if (el.tagName !== "INPUT" || el.type !== "file") throw new Error("not-a-file-input");
   return el;
@@ -3784,7 +3806,7 @@ ${changed.join("\n")}`
         return this.serial(async () => {
           await this.ensure();
           const found = await this.evaluate(`(() => {
-  const scope = ${options.ref === void 0 ? "document" : `document.querySelector('[data-oxrail-ref="${options.ref}"]') || document`};
+  const scope = ${options.ref === void 0 ? "document" : `(${refExpression(options.ref)} || document)`};
   const images = [];
   for (const node of scope.querySelectorAll("img,canvas,svg,video")) {
     const box = node.getBoundingClientRect();

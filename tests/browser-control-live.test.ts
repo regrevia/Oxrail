@@ -46,6 +46,23 @@ const uploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype
   <p id="status">nothing chosen</p>
 </body></html>`)}`;
 
+/* A file input that lives in an open shadow root. The read numbers controls
+   there, so a tool that resolves a number with a plain document query reports
+   a control it just numbered as gone. */
+const shadowUploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>Oxrail shadow upload</title></head>
+<body>
+  <div id="host"></div>
+  <p id="status">nothing chosen</p>
+  <script>
+    const root = document.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<label>Pick <input id="f" type="file"></label><label>Agree <input id="c" type="checkbox"></label>';
+    root.getElementById('f').addEventListener('change', (event) => {
+      document.getElementById('status').textContent = 'chosen ' + event.target.files.length;
+    });
+  </script>
+</body></html>`)}`;
+
 /* The checked-in fixture, on disk. A data: page is built from a handful of
  * nodes, so Chrome's front-end node ids and its backend node ids both start at
  * 1 and happen to agree — which is exactly how `upload` shipped naming a file
@@ -780,6 +797,72 @@ it.skipIf(!live || !hasChrome)(
       await expect(
         route.upload({ files: [scratch], read: false }),
       ).rejects.toThrow(/this page has no file input/u);
+    } finally {
+      rmSync(scratch, { force: true });
+      await route.close().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(!live || !hasChrome)(
+  "fills a file input the read numbered inside a shadow root",
+  { timeout: 90_000 },
+  async () => {
+    const env = {
+      ...process.env,
+      OXRAIL_BROWSER_HEADLESS: "1",
+      OXRAIL_BROWSER_PROFILE: `live-upload-shadow-${process.pid}-${Date.now()}`,
+      OXRAIL_BROWSER_IDLE_MS: "60000",
+    } as NodeJS.ProcessEnv;
+    const route = new CdpBrowserRoute({ env });
+    const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+    const scratch = join(dir, "..", `upload-shadow-${process.pid}.txt`);
+    try {
+      mkdirSync(join(scratch, ".."), { recursive: true });
+      writeFileSync(scratch, "not a secret\n");
+      await route.open({ url: shadowUploadPage });
+
+      // The number has to exist before the upload means anything: a route that
+      // never numbered the shadow input would pass the rest of this by luck.
+      await route.read({ maxChars: 4_000 });
+      const ref = Number(
+        textOf(
+          await route.evaluatePage({
+            code: `document.getElementById('host').shadowRoot?.querySelector('#f')?.getAttribute('data-oxrail-ref') ?? ""`,
+          }),
+        ).trim(),
+      );
+      expect(ref).toBeGreaterThan(0);
+
+      const put = await route.upload({ ref, files: [scratch], read: false });
+      expect(textOf(put)).toMatch(/^put 1 file into the input$/u);
+
+      const after = await route.read({ maxChars: 4_000 });
+      expect(after.text).toContain("chosen 1");
+
+      // The same number resolves for the tools that read state and write it,
+      // not only for the one that fills the input: a lookup in the top
+      // document alone would report this control as gone.
+      const shadowRef = async (id: string): Promise<number> =>
+        Number(
+          textOf(
+            await route.evaluatePage({
+              code: `document.getElementById('host').shadowRoot?.querySelector('#${id}')?.getAttribute('data-oxrail-ref') ?? ""`,
+            }),
+          ).trim(),
+        );
+      const box = await shadowRef("c");
+      expect(box).toBeGreaterThan(0);
+      const ticked = await route.check({ ref: box, checked: true });
+      expect(textOf(ticked)).toContain("checked");
+      expect(
+        textOf(
+          await route.evaluatePage({
+            code: `String(document.getElementById('host').shadowRoot.getElementById('c').checked)`,
+          }),
+        ),
+      ).toBe("true");
     } finally {
       rmSync(scratch, { force: true });
       await route.close().catch(() => undefined);

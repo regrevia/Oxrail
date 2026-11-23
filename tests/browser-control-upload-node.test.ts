@@ -28,6 +28,10 @@ const PAGE = {
   controls: [
     { ref: 1, role: "button", name: "Press me" },
     { ref: 2, role: "link", name: "second" },
+    /* A number the read wrote for content inside a frame. It is a real number
+       a read handed out, so it gets past provenance and has to be answered on
+       its own terms. */
+    { ref: 900018, role: "button", name: "in a frame" },
   ],
   truncated: false,
   limit: 4_000,
@@ -162,6 +166,33 @@ describe("a file input is named to Chrome in the form Chrome asked for", () => {
     await expect(
       route.upload({ ref: 1, files: ["/tmp/note.txt"], read: false }),
     ).rejects.toThrow(/control 1 is not one/u);
+  });
+
+  it("looks for the ref in shadow roots as well as the document", async () => {
+    /* The read numbers controls inside open shadow roots, so a lookup in the
+       top document alone reports such a control as gone while its number is
+       still good enough to click. Every tool that resolves a ref has to walk
+       the same trees the read did. */
+    const { route, sent } = await ready({ objectId: "object-1", nodeId: 42 });
+    await route.upload({ ref: 1, files: ["/tmp/note.txt"], read: false });
+    const lookup = sent.find((call) => call.method === "Runtime.evaluate");
+    expect(lookup).toBeDefined();
+    const expression = String(lookup?.params.expression);
+    expect(expression).toContain("root.querySelector('[data-oxrail-ref=");
+    expect(expression).not.toContain(
+      "document.querySelector('[data-oxrail-ref=",
+    );
+  });
+
+  it("says a frame ref is in a frame rather than that it has gone", async () => {
+    /* The walk that resolves a ref reads the top document, so a number written
+       for content inside a frame cannot resolve there. Reporting it as gone
+       would be a claim about the page, and the wrong one. */
+    const { route, sent } = await ready({ objectId: "object-1", nodeId: 42 });
+    await expect(
+      route.upload({ ref: 900018, files: ["/tmp/note.txt"], read: false }),
+    ).rejects.toThrow(/inside a frame/u);
+    expect(sent.some((call) => call.method === "Runtime.evaluate")).toBe(false);
   });
 
   it("says so when the page has no file input at all", async () => {
