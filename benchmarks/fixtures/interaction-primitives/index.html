@@ -115,6 +115,11 @@
       </section>
 
       <section>
+        <label>Upload <input id="upload" type="file" /></label>
+        <output id="upload-count">nothing chosen</output>
+      </section>
+
+      <section>
         <label>Typing <input id="typing" autocomplete="off" /></label>
         <output id="typed"></output>
         <button id="shortcut">Focus then Ctrl+S</button
@@ -232,6 +237,11 @@
         "input",
         (event) => (byId("slider-value").value = event.target.value),
       );
+      byId("upload").addEventListener("change", (event) => {
+        const count = event.target.files.length;
+        byId("upload-count").value =
+          count === 0 ? "nothing chosen" : `chosen ${count}`;
+      });
       byId("drag-source").addEventListener("dragstart", (event) =>
         event.dataTransfer.setData("text/plain", "controlled-token"),
       );
