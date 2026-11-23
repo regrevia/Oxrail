@@ -6,7 +6,7 @@
  * `pnpm test` stay hermetic.
  */
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -35,6 +35,15 @@ const page = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
   <button id="b" onclick="document.title='clicked'">Press me</button>
   <input id="i" placeholder="type here" oninput="document.title=this.value">
   <a href="data:text/html,<title>second</title><p>second page</p>">second</a>
+</body></html>`)}`;
+
+/* A page that owns a file input of its own, so the route's "find it by type"
+   path has something real to find and the effect is readable on the page. */
+const uploadPage = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><title>Oxrail upload</title></head>
+<body>
+  <label>Pick <input id="f" type="file" onchange="document.getElementById('status').textContent = this.files.length === 0 ? 'nothing chosen' : 'chosen ' + this.files.length"></label>
+  <p id="status">nothing chosen</p>
 </body></html>`)}`;
 
 /* A tool result carries text parts and image parts; only the text answers the
@@ -658,3 +667,42 @@ describe.skipIf(!live || !hasChrome)("Browser Control live", () => {
     },
   );
 });
+
+it(
+  "puts a file into the page's own input and reads the effect back",
+  { timeout: 90_000 },
+  async () => {
+    const env = {
+      ...process.env,
+      OXRAIL_BROWSER_HEADLESS: "1",
+      OXRAIL_BROWSER_PROFILE: `live-upload-${process.pid}-${Date.now()}`,
+      OXRAIL_BROWSER_IDLE_MS: "60000",
+    } as NodeJS.ProcessEnv;
+    const route = new CdpBrowserRoute({ env });
+    const dir = profileDir(env.OXRAIL_BROWSER_PROFILE ?? "live", env);
+    const scratch = join(dir, "..", `upload-${process.pid}.txt`);
+    try {
+      mkdirSync(join(scratch, ".."), { recursive: true });
+      writeFileSync(scratch, "not a secret\n");
+      await route.open({ url: uploadPage });
+
+      // The input is found by its type when nobody names it, and the file
+      // really lands: the page's own change handler records the count.
+      const put = await route.upload({ files: [scratch], read: false });
+      expect(textOf(put)).toMatch(/^put 1 file into the input$/u);
+
+      const after = await route.read({ maxChars: 4_000 });
+      expect(after.text).toContain("chosen 1");
+
+      // A page with no file input says so instead of guessing at one.
+      await route.nav({ url: page });
+      await expect(
+        route.upload({ files: [scratch], read: false }),
+      ).rejects.toThrow(/this page has no file input/u);
+    } finally {
+      rmSync(scratch, { force: true });
+      await route.close().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
