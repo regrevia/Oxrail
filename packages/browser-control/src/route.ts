@@ -2585,6 +2585,18 @@ export class CdpBrowserRoute implements BrowserRoute {
     return this.serial(async () => {
       await this.ensure();
       if (options.ref !== undefined) this.addressable(options.ref);
+      /* After the provenance check, so a number nobody handed out is still
+         answered as that: every write tool asks the same question first, and
+         this one is not the exception. What follows is the refusal that only
+         this tool can give. */
+      if (options.ref !== undefined && options.ref >= FRAME_BASE)
+        /* The number was written for content in a frame, and the walk below
+           reads the top document. Said plainly rather than reported as a
+           control that has gone, which is what a lookup in the wrong tree
+           would otherwise claim. */
+        throw new StaleRefError(
+          `control ${options.ref} is inside a frame, so its input cannot be filled by number — pass a ref from a read that saw the top document`,
+        );
       if (options.files.length === 0)
         throw new Error("browser_upload needs at least one absolute file path");
       for (const file of options.files)
@@ -2601,14 +2613,6 @@ export class CdpBrowserRoute implements BrowserRoute {
          agree, which is why handing one over as the other looks correct until
          the page grows. */
       let where: { nodeId: number } | { objectId: string };
-      if (options.ref !== undefined && options.ref >= FRAME_BASE)
-        /* The number was written for content in a frame, and the walk below
-           reads the top document. Said plainly rather than reported as a
-           control that has gone, which is what a lookup in the wrong tree
-           would otherwise claim. */
-        throw new StaleRefError(
-          `control ${options.ref} is inside a frame, so its input cannot be filled by number — pass a ref from a read that saw the top document`,
-        );
       if (options.ref !== undefined) {
         /* A ref can name anything, so the element comes back only when it
            really is a file input. Chrome's own rejection of anything else is

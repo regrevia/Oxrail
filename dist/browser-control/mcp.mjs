@@ -3727,6 +3727,10 @@ ${changed.join("\n")}`
         return this.serial(async () => {
           await this.ensure();
           if (options.ref !== void 0) this.addressable(options.ref);
+          if (options.ref !== void 0 && options.ref >= FRAME_BASE)
+            throw new StaleRefError(
+              `control ${options.ref} is inside a frame, so its input cannot be filled by number \u2014 pass a ref from a read that saw the top document`
+            );
           if (options.files.length === 0)
             throw new Error("browser_upload needs at least one absolute file path");
           for (const file of options.files)
@@ -3736,10 +3740,6 @@ ${changed.join("\n")}`
               );
           const { cdp, page } = await this.ensure();
           let where;
-          if (options.ref !== void 0 && options.ref >= FRAME_BASE)
-            throw new StaleRefError(
-              `control ${options.ref} is inside a frame, so its input cannot be filled by number \u2014 pass a ref from a read that saw the top document`
-            );
           if (options.ref !== void 0) {
             const handle = await cdp.send(
               "Runtime.evaluate",
