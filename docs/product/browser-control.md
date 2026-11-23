@@ -372,6 +372,8 @@ There is no way to hand this route a coordinate. `browser_click` takes a `ref` o
 control "Delete account" cannot be addressed: the last read of https://example.com/ did not name it — call browser_view again and use a number it returns
 ```
 
+Each of those sentences reaches the caller unchanged: a refusal is written where the throw happens, because only that place knows whether the number was never read, has left the page, or names content inside a frame, and the three need different next steps. There is no generic restatement in between.
+
 A selector that is empty or only whitespace is refused before that comparison, because every name contains the empty string and a containment check would pass against any read at all:
 
 ```
