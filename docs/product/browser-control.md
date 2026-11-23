@@ -47,14 +47,15 @@ Any host that launches a stdio MCP server works. A host that knows the newer pro
 
 ## Configuration
 
-| Variable                   | Default                     | Meaning                                                                      |
-| -------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| `OXRAIL_CHROME`            | discovered                  | Chrome or Chromium binary to launch                                          |
-| `OXRAIL_BROWSER_STATE_DIR` | `~/.oxrail/browser-control` | Where profiles and screenshots are written                                   |
-| `OXRAIL_BROWSER_HEADLESS`  | `1`                         | `0` shows a window; anything else runs headless                              |
-| `OXRAIL_BROWSER_PROFILE`   | `default`                   | Profile name under the state directory, so sign-ins outlive one process      |
-| `OXRAIL_BROWSER_IDLE_MS`   | `300000`                    | How long an idle browser is kept, bounded to between one and fifteen minutes |
-| `OXRAIL_BROWSER_VIEW`      | `1280x900`                  | Window size while headless, written as `<width>x<height>`                    |
+| Variable                            | Default                     | Meaning                                                                         |
+| ----------------------------------- | --------------------------- | ------------------------------------------------------------------------------- |
+| `OXRAIL_CHROME`                     | discovered                  | Chrome or Chromium binary to launch                                             |
+| `OXRAIL_BROWSER_STATE_DIR`          | `~/.oxrail/browser-control` | Where profiles and screenshots are written                                      |
+| `OXRAIL_BROWSER_HEADLESS`           | unset (a window is shown)   | `1` hides the window; anything else shows one                                   |
+| `OXRAIL_BROWSER_PROFILE`            | `default`                   | Profile name under the state directory, so sign-ins outlive one process         |
+| `OXRAIL_BROWSER_IDLE_MS`            | `300000`                    | How long an idle browser is kept, bounded to between one and fifteen minutes    |
+| `OXRAIL_BROWSER_VIEW`               | `1280x900`                  | Window size while headless, written as `<width>x<height>`                       |
+| `OXRAIL_BROWSER_REQUEST_TIMEOUT_MS` | `30000`                     | How long one DevTools request may wait before its tool fails; `0` waits forever |
 
 ## Tools
 
