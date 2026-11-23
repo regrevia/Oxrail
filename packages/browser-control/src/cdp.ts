@@ -7,10 +7,19 @@ import { connectWs, type WsSocket } from "./ws.js";
 
 const CLOSED_BEFORE = "cdp: connection closed before ";
 
+/** Longest a caller waits for one reply before the route is told it is stuck. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 export type CdpHandler = (params: Record<string, unknown>) => void;
 
 export interface CdpConnectionOptions {
   readonly timeoutMs?: number;
+  /**
+   * Longest one request may stay unanswered. The transport has no other clock:
+   * a renderer that stops replying would otherwise hold the reply forever, and
+   * the route's ordering queue with it. `0` turns the clock off.
+   */
+  readonly requestTimeoutMs?: number;
   /** Where event-handler failures go; never stdout, so a caller stays quiet. */
   readonly onError?: (error: unknown) => void;
 }
@@ -25,6 +34,7 @@ interface PendingRequest {
   readonly method: string;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 interface CdpReplyError {
@@ -54,6 +64,7 @@ export class CdpConnection {
   readonly #onError: (error: unknown) => void;
   readonly #handlers = new Map<string, CdpHandler[]>();
   readonly #pending = new Map<number, PendingRequest>();
+  readonly #requestTimeoutMs: number;
   #nextId = 1;
   #closed = false;
 
@@ -64,6 +75,8 @@ export class CdpConnection {
   constructor(socket: WsSocket, options: CdpConnectionOptions = {}) {
     this.#socket = socket;
     this.#onError = options.onError ?? (() => undefined);
+    this.#requestTimeoutMs =
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     socket.onMessage((text) => {
       this.#receive(text);
     });
@@ -100,13 +113,27 @@ export class CdpConnection {
     if (params !== undefined) message.params = params;
     if (sessionId !== undefined) message.sessionId = sessionId;
     return new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, {
+      const pending: PendingRequest = {
         method,
         resolve: (value) => {
           resolve(value as T);
         },
         reject,
-      });
+      };
+      if (this.#requestTimeoutMs > 0) {
+        pending.timer = setTimeout(() => {
+          const stillWaiting = this.#pending.get(id);
+          if (stillWaiting === undefined) return;
+          this.#pending.delete(id);
+          reject(
+            new Error(
+              `cdp: ${method} did not answer within ${this.#requestTimeoutMs}ms`,
+            ),
+          );
+        }, this.#requestTimeoutMs);
+        pending.timer.unref?.();
+      }
+      this.#pending.set(id, pending);
       try {
         this.#socket.send(JSON.stringify(message));
       } catch (error) {
@@ -157,6 +184,7 @@ export class CdpConnection {
     const pending = this.#pending.get(id);
     if (pending === undefined) return;
     this.#pending.delete(id);
+    this.#stopClock(pending);
     if (message.error !== undefined) {
       pending.reject(toCdpError(message.error));
       return;
@@ -187,8 +215,15 @@ export class CdpConnection {
   #rejectPending(): void {
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
+      this.#stopClock(pending);
       pending.reject(new Error(`${CLOSED_BEFORE}${pending.method} answered`));
     }
+  }
+
+  #stopClock(pending: PendingRequest): void {
+    if (pending.timer === undefined) return;
+    clearTimeout(pending.timer);
+    delete pending.timer;
   }
 
   #report(error: unknown): void {
