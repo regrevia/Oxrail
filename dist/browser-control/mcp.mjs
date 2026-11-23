@@ -949,17 +949,19 @@ function toCdpError(error) {
   if (error.data !== void 0) failure3.data = error.data;
   return failure3;
 }
-var CLOSED_BEFORE, CdpConnection;
+var CLOSED_BEFORE, DEFAULT_REQUEST_TIMEOUT_MS, CdpConnection;
 var init_cdp = __esm({
   "packages/browser-control/src/cdp.ts"() {
     "use strict";
     init_ws();
     CLOSED_BEFORE = "cdp: connection closed before ";
+    DEFAULT_REQUEST_TIMEOUT_MS = 3e4;
     CdpConnection = class _CdpConnection {
       #socket;
       #onError;
       #handlers = /* @__PURE__ */ new Map();
       #pending = /* @__PURE__ */ new Map();
+      #requestTimeoutMs;
       #nextId = 1;
       #closed = false;
       /**
@@ -969,6 +971,7 @@ var init_cdp = __esm({
       constructor(socket, options = {}) {
         this.#socket = socket;
         this.#onError = options.onError ?? (() => void 0);
+        this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
         socket.onMessage((text) => {
           this.#receive(text);
         });
@@ -995,13 +998,27 @@ var init_cdp = __esm({
         if (params !== void 0) message.params = params;
         if (sessionId !== void 0) message.sessionId = sessionId;
         return new Promise((resolve, reject) => {
-          this.#pending.set(id, {
+          const pending = {
             method,
             resolve: (value) => {
               resolve(value);
             },
             reject
-          });
+          };
+          if (this.#requestTimeoutMs > 0) {
+            pending.timer = setTimeout(() => {
+              const stillWaiting = this.#pending.get(id);
+              if (stillWaiting === void 0) return;
+              this.#pending.delete(id);
+              reject(
+                new Error(
+                  `cdp: ${method} did not answer within ${this.#requestTimeoutMs}ms`
+                )
+              );
+            }, this.#requestTimeoutMs);
+            pending.timer.unref?.();
+          }
+          this.#pending.set(id, pending);
           try {
             this.#socket.send(JSON.stringify(message));
           } catch (error) {
@@ -1044,6 +1061,7 @@ var init_cdp = __esm({
         const pending = this.#pending.get(id);
         if (pending === void 0) return;
         this.#pending.delete(id);
+        this.#stopClock(pending);
         if (message.error !== void 0) {
           pending.reject(toCdpError(message.error));
           return;
@@ -1069,8 +1087,14 @@ var init_cdp = __esm({
       #rejectPending() {
         for (const [id, pending] of this.#pending) {
           this.#pending.delete(id);
+          this.#stopClock(pending);
           pending.reject(new Error(`${CLOSED_BEFORE}${pending.method} answered`));
         }
+      }
+      #stopClock(pending) {
+        if (pending.timer === void 0) return;
+        clearTimeout(pending.timer);
+        delete pending.timer;
       }
       #report(error) {
         try {
@@ -1611,6 +1635,7 @@ __export(route_exports, {
   idleMs: () => idleMs,
   inspectBinary: () => inspectBinary,
   profileFromEnv: () => profileFromEnv,
+  requestTimeoutMs: () => requestTimeoutMs,
   shotClip: () => shotClip,
   snapshotExpression: () => snapshotExpression,
   viewSize: () => viewSize
@@ -1645,6 +1670,11 @@ function idleMs(env = process.env) {
   const raw = Number(env.OXRAIL_BROWSER_IDLE_MS);
   if (!Number.isFinite(raw)) return DEFAULT_IDLE_MS;
   return Math.min(MAX_IDLE_MS, Math.max(MIN_IDLE_MS, Math.floor(raw)));
+}
+function requestTimeoutMs(env = process.env) {
+  const raw = Number(env.OXRAIL_BROWSER_REQUEST_TIMEOUT_MS);
+  if (!Number.isFinite(raw)) return DEFAULT_REQUEST_TIMEOUT_MS;
+  return raw <= 0 ? 0 : Math.floor(raw);
 }
 function headlessFromEnv(env = process.env) {
   return env.OXRAIL_BROWSER_HEADLESS === "1";
@@ -2093,7 +2123,8 @@ var init_route = __esm({
           this.runningHeadless = headless;
           this.runningProfile = profile;
           const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
-            timeoutMs: 1e4
+            timeoutMs: 1e4,
+            requestTimeoutMs: requestTimeoutMs()
           });
           this.cdp = cdp;
           const page = await this.attachPage(cdp);

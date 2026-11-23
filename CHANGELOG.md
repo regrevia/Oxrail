@@ -28,6 +28,14 @@ setting rather than the window in front of them. Nothing here is a version bump:
   specified not to accept, both point arguments are gone: `fromRef` and `toRef` are
   the whole address, each held to the last read the way `browser_click` is, and an
   end left out is reported as missing instead of being looked up as an empty label.
+- **A request Chrome never answers now fails instead of waiting forever.** The
+  DevTools transport matched each request to its reply by id and kept no clock,
+  so a renderer that stopped replying left that request pending for the life of
+  the process — and since every tool runs in the route's one ordering queue, one
+  unanswered request silently became the whole route. Each request now carries a
+  30-second ceiling that rejects with the method it was waiting on; the timer is
+  cleared on reply and on close, and `OXRAIL_BROWSER_REQUEST_TIMEOUT_MS=0` turns
+  it off where a caller wants the old behaviour.
 - **Six write tools no longer freeze the route when asked to read.** `browser_drag`,
   `browser_hover`, `browser_check`, `browser_select`, `browser_scroll` and
   `browser_upload` refresh the refs they invalidate and then hand back what the page

@@ -24,7 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { CdpConnection } from "./cdp.js";
+import { CdpConnection, DEFAULT_REQUEST_TIMEOUT_MS } from "./cdp.js";
 import {
   ChromeProcess,
   chromeArgs,
@@ -142,6 +142,16 @@ export function idleMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.OXRAIL_BROWSER_IDLE_MS);
   if (!Number.isFinite(raw)) return DEFAULT_IDLE_MS;
   return Math.min(MAX_IDLE_MS, Math.max(MIN_IDLE_MS, Math.floor(raw)));
+}
+
+/* How long one DevTools request may wait. Chrome answers fast or not at all, and
+   "not at all" used to mean forever: the reply stayed pending, the tool holding
+   it stayed pending, and every call behind it waited on the same queue. `0` is
+   the documented off switch for a caller that would rather wait. */
+export function requestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.OXRAIL_BROWSER_REQUEST_TIMEOUT_MS);
+  if (!Number.isFinite(raw)) return DEFAULT_REQUEST_TIMEOUT_MS;
+  return raw <= 0 ? 0 : Math.floor(raw);
 }
 
 /* Display mode is a switch with a visible default, because a person watching the
@@ -661,6 +671,7 @@ export class CdpBrowserRoute implements BrowserRoute {
       this.runningProfile = profile;
       const cdp = await CdpConnection.connect(chrome.browserWsUrl, {
         timeoutMs: 10_000,
+        requestTimeoutMs: requestTimeoutMs(),
       });
       this.cdp = cdp;
       const page = await this.attachPage(cdp);
