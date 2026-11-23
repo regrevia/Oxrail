@@ -18,5 +18,12 @@
         args:
           - /Users/apple/oxrail-healthy/Oxrail/dist/browser-control/mcp.mjs
         cwd: /Users/apple/oxrail-healthy/Oxrail
+        # The route closes an idle window after five minutes by default. A
+        # person reading one long page can easily leave a gap longer than that,
+        # and the next tool call then answers "no browser is running" instead of
+        # the page. Fifteen minutes is the ceiling the route accepts, so a
+        # working session is not reaped between two calls.
+        env:
+          OXRAIL_BROWSER_IDLE_MS: "900000"
         toolCallTimeoutMs: 120000
         failOnStartupError: true
